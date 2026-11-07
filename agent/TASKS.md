@@ -38,7 +38,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | 🔨 In Progress |
 | T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | ✅ Done |
 | T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | 🔨 In Progress |
-| T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ⏳ Planned |
+| T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | 🔨 In Progress |
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
@@ -454,7 +454,7 @@ input validation, orchestrator delegation with a fake provider.
 
 ---
 
-## T-11 Self-Service Portal ⏳ (wave 2 – after T-04/T-05/T-06 are merged)
+## T-11 Self-Service Portal 🔨 (wave 2 – T-04/T-05/T-06 merged)
 
 **Owned paths:** `*/Portal/**`, `Components/Pages/Portal/**`, `Components/Portal/**`, `PortalModule.cs`,
 `PortalEndpoints.cs`, `PortalWebModule.cs`, `Permissions.Portal.cs`, `docs/modules/portal.md`.
@@ -594,3 +594,4 @@ build green, tests pass.
 | 2026-11-07 | T-04 validated and merged (✅); kernel UI fixes + 2 contract extensions. |
 | 2026-11-07 | Product owner: automatic migrations + built-in backup/restore made binding; T-15 added and dispatched; interrupted T-02, T-03, T-05…T-10 resumed. |
 | 2026-11-07 | T-02, T-03, T-05, T-06, T-09 validated and merged (✅); integration requests collected under T-13. |
+| 2026-11-07 | T-11 dispatched (dependencies merged). |
