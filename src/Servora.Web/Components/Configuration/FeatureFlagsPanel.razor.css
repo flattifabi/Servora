@@ -1,0 +1,65 @@
+.flag-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px 0;
+}
+
+.flag-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 22px;
+    border-top: 1px solid var(--border);
+    transition: background var(--speed);
+}
+
+.flag-row:first-child {
+    border-top: 0;
+}
+
+.flag-row:hover {
+    background: var(--surface-hover);
+}
+
+.flag-icon {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--surface-3);
+    color: var(--text-faint);
+    transition: background var(--speed), color var(--speed);
+}
+
+.flag-row.on .flag-icon {
+    background: var(--primary-soft);
+    color: var(--primary);
+    box-shadow: 0 0 18px -6px rgba(124, 108, 255, .7);
+}
+
+.flag-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 13.5px;
+}
+
+.input-prefix {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    border: 1px solid var(--border-strong);
+    border-right: 0;
+    border-radius: var(--r-sm) 0 0 var(--r-sm);
+    background: var(--surface-3);
+    color: var(--text-muted);
+    font-size: 12.5px;
+}
+
+.input-group .input {
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}

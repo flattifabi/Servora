@@ -1,0 +1,181 @@
+@* Feature flags (features.* settings): instant toggles, reset to default, custom flags. *@
+@inject ISystemSettingsService Settings
+@inject ToastService Toasts
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h3><Icon Name="zap" Size="18" /> Feature flags</h3>
+            <div class="card-subtitle">Switch capabilities on or off at runtime. Changes apply immediately for all users.</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" @onclick="OpenCreate"><Icon Name="plus" Size="14" /> New flag</button>
+    </div>
+    @if (_items is null)
+    {
+        <div class="card-body"><Skeleton Lines="5" Height="44px" /></div>
+    }
+    else if (_items.Count == 0)
+    {
+        <EmptyState Icon="zap" Title="No feature flags" Text="Create a flag to roll out a capability gradually." />
+    }
+    else
+    {
+        <ul class="flag-list">
+            @foreach (var item in _items)
+            {
+                var key = item.Key;
+                var enabled = item.Value == "true";
+                <li class="flag-row @(enabled ? "on" : null)">
+                    <div class="flag-icon"><Icon Name="@(enabled ? "zap" : "pause")" Size="16" /></div>
+                    <div class="flex-1">
+                        <div class="flag-title">
+                            @item.Definition.Label
+                            <span class="tag mono">@key</span>
+                            @if (item.IsCustom)
+                            {
+                                <span class="pill pill-purple no-dot">Custom</span>
+                            }
+                            else if (!item.IsDefault)
+                            {
+                                <span class="pill pill-info no-dot" title="Default: @(item.Definition.DefaultValue == "true" ? "on" : "off")">Changed</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(item.Definition.Description))
+                        {
+                            <div class="small muted">@item.Definition.Description</div>
+                        }
+                        @if (item.UpdatedAt is { } updated)
+                        {
+                            <div class="tiny faint mt-1">Changed <RelativeTime Value="updated" /> by @item.UpdatedBy</div>
+                        }
+                    </div>
+                    <div class="flex items-center gap-2">
+                        @if (item.IsCustom)
+                        {
+                            <button class="icon-btn" title="Delete flag" @onclick="() => AskDelete(key)"><Icon Name="trash" Size="16" /></button>
+                        }
+                        else if (!item.IsDefault)
+                        {
+                            <button class="icon-btn" title="Reset to default" @onclick="() => ResetAsync(key)"><Icon Name="refresh" Size="16" /></button>
+                        }
+                        <Switch Value="enabled" ValueChanged="v => ToggleAsync(key, v)" Disabled="@(_busyKey == key)" />
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<Modal @bind-Open="_createOpen" Title="New feature flag" Subtitle="Flags are on/off settings stored under features.*" Icon="zap" Size="sm">
+    <ChildContent>
+        <div class="stack" style="gap:14px">
+            <FormField Label="Name" Required="true" Help="Lower-case letters, digits and underscores, e.g. new_dashboard.">
+                <div class="input-group">
+                    <span class="input-prefix mono">features.</span>
+                    <input class="input mono" maxlength="61" @bind="_newName" @bind:event="oninput" />
+                </div>
+            </FormField>
+            <FormField Label="Description">
+                <textarea class="textarea" rows="2" maxlength="500" @bind="_newDescription"></textarea>
+            </FormField>
+            <Switch Value="_newEnabled" ValueChanged="v => _newEnabled = v" Label="Enabled" />
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-ghost" @onclick="() => _createOpen = false">Cancel</button>
+        <button class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(_newName))"><Icon Name="plus" Size="16" /> Create flag</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @bind-Open="_deleteOpen" Title="Delete feature flag?" Message="@($"'{_deleteKey}' is removed. Code that checks this flag treats it as disabled.")"
+               ConfirmText="Delete flag" Danger="true" OnConfirm="DeleteAsync" />
+
+@code {
+    private IReadOnlyList<SettingItem>? _items;
+    private string? _busyKey;
+    private bool _createOpen;
+    private string? _newName;
+    private string? _newDescription;
+    private bool _newEnabled;
+    private bool _deleteOpen;
+    private string? _deleteKey;
+
+    /// <summary>Raised after a flag changed.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var result = await Settings.ListAsync(SettingCategories.Features);
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Feature flags could not be loaded", result.Error);
+            _items = [];
+            return;
+        }
+
+        _items = result.Value!;
+    }
+
+    private async Task ToggleAsync(string key, bool enabled)
+    {
+        _busyKey = key;
+        try
+        {
+            var result = await Settings.SetAsync(key, enabled ? "true" : "false");
+            var label = _items?.FirstOrDefault(i => i.Key == key)?.Definition.Label ?? SystemSettingsService.HumanizeFeatureKey(key);
+            Toasts.FromResult(result, $"{label} {(enabled ? "enabled" : "disabled")}");
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _busyKey = null;
+        }
+    }
+
+    private async Task ResetAsync(string key)
+    {
+        if (Toasts.FromResult(await Settings.ResetAsync(key), "Flag reset to its default"))
+        {
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private void OpenCreate()
+    {
+        _newName = null;
+        _newDescription = null;
+        _newEnabled = false;
+        _createOpen = true;
+    }
+
+    private async Task CreateAsync()
+    {
+        var result = await Settings.CreateFeatureFlagAsync(_newName ?? string.Empty, _newDescription, _newEnabled);
+        if (Toasts.FromResult(result, "Feature flag created"))
+        {
+            _createOpen = false;
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private void AskDelete(string key)
+    {
+        _deleteKey = key;
+        _deleteOpen = true;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleteKey is not null && Toasts.FromResult(await Settings.DeleteFeatureFlagAsync(_deleteKey), "Feature flag deleted"))
+        {
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+    }
+}

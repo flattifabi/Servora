@@ -1,0 +1,32 @@
+@* Selectable database provider card used by the setup wizard. *@
+
+<button type="button" class="provider-card @(Selected ? "selected" : null)" aria-pressed="@(Selected ? "true" : "false")" @onclick="OnSelect">
+    <span class="provider-icon"><Icon Name="@Icon" Size="20" /></span>
+    <span class="provider-title">@Title</span>
+    <span class="provider-tagline">@Tagline</span>
+    @if (!string.IsNullOrEmpty(Badge))
+    {
+        <span class="provider-badge">@Badge</span>
+    }
+    <span class="provider-check"><Icon Name="check" Size="12" StrokeWidth="3" /></span>
+</button>
+
+@code {
+    /// <summary>Gets or sets the provider display name.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the short description.</summary>
+    [Parameter] public string? Tagline { get; set; }
+
+    /// <summary>Gets or sets the icon name.</summary>
+    [Parameter] public string Icon { get; set; } = "database";
+
+    /// <summary>Gets or sets an optional badge (for example "Recommended").</summary>
+    [Parameter] public string? Badge { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the card is selected.</summary>
+    [Parameter] public bool Selected { get; set; }
+
+    /// <summary>Raised when the card is clicked.</summary>
+    [Parameter] public EventCallback OnSelect { get; set; }
+}

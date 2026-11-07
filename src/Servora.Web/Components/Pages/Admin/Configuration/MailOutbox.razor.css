@@ -1,0 +1,28 @@
+.outbox-subject {
+    max-width: 380px;
+}
+
+.outbox-recipients {
+    display: inline-block;
+    max-width: 240px;
+}
+
+.outbox-error {
+    overflow-wrap: anywhere;
+}
+
+.outbox-body {
+    margin: 0;
+    max-height: 420px;
+    overflow: auto;
+    padding: 14px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-2);
+}

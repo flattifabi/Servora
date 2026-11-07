@@ -1,0 +1,247 @@
+@* SMTP configuration (password write-only), test e-mail and outbox summary. *@
+@inject IEmailConfigurationService Email
+@inject ToastService Toasts
+
+<div class="grid grid-sidebar">
+    <div class="card">
+        <div class="card-header">
+            <div>
+                <h3><Icon Name="mail" Size="18" /> SMTP server</h3>
+                <div class="card-subtitle">Outgoing e-mail for notifications, approvals and password resets.</div>
+            </div>
+            @if (_settings is not null)
+            {
+                <StatusPill Text="@(_settings.Enabled ? (_settings.IsComplete ? "Enabled" : "Incomplete") : "Disabled")" Tone="@(_settings.Enabled ? (_settings.IsComplete ? "success" : "warning") : "neutral")" />
+            }
+        </div>
+        <div class="card-body">
+            @if (_model is null)
+            {
+                <Skeleton Lines="6" Height="40px" />
+            }
+            else
+            {
+                <div class="form-section">
+                    <Switch Value="_model.Enabled" ValueChanged="v => _model.Enabled = v" Label="Deliver e-mail" />
+                    <div class="small faint mt-2">When disabled, notifications are not queued. Test e-mails can still be sent.</div>
+                </div>
+                <div class="form-section">
+                    <div class="form-section-title"><Icon Name="server" Size="16" /> Connection</div>
+                    <div class="form-grid cols-3">
+                        <FormField Label="SMTP server" Required="@_model.Enabled" Class="span-2">
+                            <input class="input" placeholder="smtp.example.com" maxlength="253" spellcheck="false" @bind="_model.Host" />
+                        </FormField>
+                        <FormField Label="Port" Required="true">
+                            <input class="input" type="number" min="1" max="65535" @bind="_model.Port" />
+                        </FormField>
+                        <FormField Label="Security" Class="span-all" Help="@SecurityHelp">
+                            <div class="segmented">
+                                <button type="button" class="@(_model.Security == SmtpSecurityMode.StartTls ? "active" : null)" @onclick="() => _model.Security = SmtpSecurityMode.StartTls"><Icon Name="lock" Size="13" /> STARTTLS</button>
+                                <button type="button" class="@(_model.Security == SmtpSecurityMode.None ? "active" : null)" @onclick="() => _model.Security = SmtpSecurityMode.None"><Icon Name="unlock" Size="13" /> None</button>
+                            </div>
+                        </FormField>
+                    </div>
+                </div>
+                <div class="form-section">
+                    <div class="form-section-title"><Icon Name="key" Size="16" /> Authentication</div>
+                    <div class="form-grid">
+                        <FormField Label="User name" Help="Leave empty for an anonymous relay.">
+                            <input class="input" autocomplete="off" maxlength="256" spellcheck="false" @bind="_model.UserName" />
+                        </FormField>
+                        <FormField Label="Password" Help="@(_settings!.HasPassword ? "A password is stored. Enter a new one to replace it." : "Stored encrypted. Never shown again after saving.")">
+                            <input class="input" type="password" autocomplete="new-password" maxlength="@SmtpSettingsValidator.MaxPasswordLength"
+                                   placeholder="@(_settings.HasPassword ? "•••••••• (stored)" : "Not set")" disabled="@_model.ClearPassword" @bind="_model.NewPassword" />
+                        </FormField>
+                        @if (_settings.HasPassword)
+                        {
+                            <div class="field span-all">
+                                <label class="checkbox"><input type="checkbox" checked="@_model.ClearPassword" @onchange="e => _model.ClearPassword = e.Value is true" /> Remove the stored password</label>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="form-section">
+                    <div class="form-section-title"><Icon Name="send" Size="16" /> Sender &amp; delivery</div>
+                    <div class="form-grid">
+                        <FormField Label="Sender address" Required="@_model.Enabled">
+                            <input class="input" type="email" placeholder="servora@example.com" maxlength="254" @bind="_model.FromAddress" />
+                        </FormField>
+                        <FormField Label="Sender name">
+                            <input class="input" maxlength="120" @bind="_model.FromName" />
+                        </FormField>
+                        <FormField Label="Timeout (seconds)" Help="5 – 300">
+                            <input class="input" type="number" min="5" max="300" @bind="_model.TimeoutSeconds" />
+                        </FormField>
+                        <FormField Label="Delivery attempts" Help="Retries back off: 1 min, 5 min, 15 min, 1 h, then every 4 h.">
+                            <input class="input" type="number" min="1" max="20" @bind="_model.MaxAttempts" />
+                        </FormField>
+                    </div>
+                </div>
+                @if (_errors.Count > 0)
+                {
+                    <div class="alert alert-danger">
+                        <Icon Name="alert-circle" Size="18" />
+                        <div>
+                            @foreach (var error in _errors)
+                            {
+                                <div>@error</div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+        <div class="card-footer settings-footer">
+            <span class="small faint">The password is stored in the encrypted secret store as <span class="mono">@SystemSettingKeys.SmtpPasswordSecret</span>.</span>
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(_saving || _model is null)">
+                @if (_saving)
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="save" Size="16" />
+                }
+                Save e-mail settings
+            </button>
+        </div>
+    </div>
+
+    <div class="stack sticky-top" style="gap:16px">
+        <div class="card">
+            <div class="card-header"><h3><Icon Name="send" Size="18" /> Send a test e-mail</h3></div>
+            <div class="card-body">
+                <p class="small muted mb-4">Uses the saved settings and bypasses the queue, so you see the server's answer immediately.</p>
+                <FormField Label="Recipient">
+                    <input class="input" type="email" placeholder="you@example.com" @bind="_testRecipient" @bind:event="oninput" />
+                </FormField>
+                <button class="btn btn-secondary btn-block mt-3" @onclick="SendTestAsync" disabled="@(_testing || string.IsNullOrWhiteSpace(_testRecipient))">
+                    @if (_testing)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="send" Size="16" />
+                    }
+                    Send test e-mail
+                </button>
+                @if (_testResult is { } test)
+                {
+                    <div class="alert @(test.Succeeded ? "alert-success" : "alert-danger") mt-3">
+                        <Icon Name="@(test.Succeeded ? "check-circle" : "alert-circle")" Size="18" />
+                        <div class="break-anywhere">@(test.Succeeded ? "The SMTP server accepted the message. Check the inbox." : test.Error)</div>
+                    </div>
+                }
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <h3><Icon Name="inbox" Size="18" /> Outbox</h3>
+                <a class="btn btn-ghost btn-sm" href="/admin/settings/outbox">Open <Icon Name="arrow-right" Size="14" /></a>
+            </div>
+            <div class="card-body">
+                @if (_statistics is null)
+                {
+                    <Skeleton Lines="3" />
+                }
+                else
+                {
+                    <dl class="kv outbox-kv">
+                        <dt>Pending</dt>
+                        <dd>@_statistics.Pending</dd>
+                        <dt>Retrying</dt>
+                        <dd class="@(_statistics.Retrying > 0 ? "text-warning" : null)">@_statistics.Retrying</dd>
+                        <dt>Sent (24 h)</dt>
+                        <dd class="text-success">@_statistics.SentLast24Hours</dd>
+                        <dt>Failed</dt>
+                        <dd class="@(_statistics.Failed > 0 ? "text-danger" : null)">@_statistics.Failed</dd>
+                    </dl>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private SmtpSettings? _settings;
+    private SmtpSettingsUpdate? _model;
+    private OutboxStatistics? _statistics;
+    private IReadOnlyList<string> _errors = [];
+    private bool _saving;
+    private bool _testing;
+    private string? _testRecipient;
+    private Result? _testResult;
+
+    /// <summary>Raised after the settings were saved.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private string SecurityHelp => _model?.Security == SmtpSecurityMode.None
+        ? "Unencrypted. Only use for a relay on a trusted network; credentials are rejected unless the server is local."
+        : "The connection is upgraded with STARTTLS (usually port 587). Implicit TLS on port 465 is not supported.";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var result = await Email.GetSettingsAsync();
+        if (!result.Succeeded)
+        {
+            Toasts.Error("E-mail settings could not be loaded", result.Error);
+            return;
+        }
+
+        _settings = result.Value!;
+        _model = SmtpSettingsUpdate.From(_settings);
+        _errors = [];
+        var statistics = await Email.GetOutboxStatisticsAsync();
+        _statistics = statistics.Succeeded ? statistics.Value : null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        _errors = SmtpSettingsValidator.Validate(_model, _settings?.HasPassword == true);
+        if (_errors.Count > 0)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var result = await Email.SaveSettingsAsync(_model);
+            _model.NewPassword = null;
+            if (Toasts.FromResult(result, "E-mail settings saved"))
+            {
+                await LoadAsync();
+                await OnChanged.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task SendTestAsync()
+    {
+        _testing = true;
+        _testResult = null;
+        try
+        {
+            _testResult = await Email.SendTestAsync(_testRecipient ?? string.Empty);
+            var statistics = await Email.GetOutboxStatisticsAsync();
+            _statistics = statistics.Succeeded ? statistics.Value : _statistics;
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+}

@@ -1,0 +1,8 @@
+.header-value {
+    max-width: 320px;
+    overflow-wrap: anywhere;
+}
+
+.side-kv {
+    grid-template-columns: 110px 1fr;
+}

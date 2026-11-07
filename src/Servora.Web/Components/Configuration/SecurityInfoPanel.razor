@@ -1,0 +1,65 @@
+@* Read-only overview of the security hardening applied by the platform (headers, secret protection, setup token). *@
+@inject IAppPaths Paths
+
+<div class="grid grid-sidebar">
+    <div class="card">
+        <div class="card-header">
+            <div>
+                <h3><Icon Name="shield-check" Size="18" /> HTTP security headers</h3>
+                <div class="card-subtitle">Added to every response by the platform. They are fixed by design and cannot be weakened from the UI.</div>
+            </div>
+            <StatusPill Text="Active" Tone="success" />
+        </div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th style="width:240px">Header</th><th>Value</th><th>Protects against</th></tr></thead>
+                <tbody>
+                    @foreach (var header in s_headers)
+                    {
+                        <tr>
+                            <td class="mono small">@header.Name</td>
+                            <td class="small muted mono header-value">@header.Value</td>
+                            <td class="small">@header.Purpose</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="stack sticky-top" style="gap:16px">
+        <div class="card">
+            <div class="card-header"><h3><Icon Name="key" Size="18" /> Secret protection</h3></div>
+            <div class="card-body">
+                <p class="small muted mb-4">Credentials (SMTP, LDAP, data sources, AI keys) and the database connection are encrypted with ASP.NET Core Data Protection. @(OperatingSystem.IsWindows() ? "The key ring is additionally protected with machine-wide DPAPI." : null)</p>
+                <dl class="kv side-kv">
+                    <dt>Key ring</dt>
+                    <dd class="mono tiny">@Paths.KeyDirectory</dd>
+                    <dt>Data directory</dt>
+                    <dd class="mono tiny">@Paths.DataDirectory</dd>
+                </dl>
+                <div class="alert alert-warning mt-4"><Icon Name="alert-triangle" Size="18" /><div>Back up the key ring together with the database. Without it, stored secrets cannot be decrypted.</div></div>
+                <a class="btn btn-secondary btn-block mt-4" href="/admin/secrets"><Icon Name="key" Size="16" /> Manage secrets</a>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3><Icon Name="lock" Size="18" /> Setup wizard</h3></div>
+            <div class="card-body">
+                <p class="small muted">The setup wizard is closed. Its one-time token was removed when setup completed. Remote access to the wizard always required that token.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly (string Name, string Value, string Purpose)[] s_headers =
+    [
+        ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; object-src 'none'; …", "Cross-site scripting, data injection, click-jacking"),
+        ("X-Frame-Options", "DENY", "Click-jacking in legacy browsers"),
+        ("X-Content-Type-Options", "nosniff", "MIME type sniffing of uploads and downloads"),
+        ("Referrer-Policy", "strict-origin-when-cross-origin", "Leaking internal URLs to other sites"),
+        ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()", "Abuse of browser features"),
+        ("Cross-Origin-Opener-Policy", "same-origin", "Cross-window attacks (tab-nabbing, XS-Leaks)"),
+        ("Set-Cookie (auth)", "HttpOnly; SameSite=Lax", "Session theft through scripts and CSRF"),
+    ];
+}

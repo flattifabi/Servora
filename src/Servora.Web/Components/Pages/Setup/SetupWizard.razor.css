@@ -1,0 +1,450 @@
+.setup-card {
+    width: 100%;
+    max-width: 600px;
+    animation: fade-up .35s var(--ease);
+}
+
+.setup-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 26px;
+}
+
+.setup-mark {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    box-shadow: 0 8px 26px -8px rgba(124, 108, 255, .7);
+    flex-shrink: 0;
+}
+
+.setup-product {
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -.01em;
+}
+
+/* Stepper ------------------------------------------------------------------------------- */
+.setup-steps {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 0 0 28px;
+    padding: 0;
+}
+
+.setup-steps li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    color: var(--text-faint);
+    font-size: 12.5px;
+    font-weight: 600;
+    min-width: 0;
+}
+
+.setup-steps li:not(:last-child)::after {
+    content: "";
+    flex: 1;
+    height: 2px;
+    min-width: 10px;
+    margin: 0 8px;
+    border-radius: 2px;
+    background: var(--border-strong);
+    transition: background .3s var(--ease);
+}
+
+.setup-steps li:last-child {
+    flex: 0 0 auto;
+}
+
+.setup-steps li.done:not(:last-child)::after {
+    background: var(--gradient);
+}
+
+.setup-steps .dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    font-size: 12px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    transition: all .25s var(--ease);
+}
+
+.setup-steps li.active {
+    color: var(--text);
+}
+
+.setup-steps li.active .dot {
+    background: var(--gradient);
+    border-color: transparent;
+    color: #fff;
+    box-shadow: var(--glow);
+}
+
+.setup-steps li.done .dot {
+    background: var(--success-soft);
+    color: var(--success);
+    border-color: rgba(34, 197, 94, .4);
+}
+
+.setup-steps .label {
+    white-space: nowrap;
+}
+
+/* Panel --------------------------------------------------------------------------------- */
+.setup-panel {
+    animation: fade-up .3s var(--ease);
+}
+
+.setup-panel h2 {
+    font-size: 26px;
+    font-weight: 720;
+    letter-spacing: -.02em;
+}
+
+.setup-panel .lead {
+    color: var(--text-muted);
+    margin: 8px 0 24px;
+}
+
+.setup-hero-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 20px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 20px;
+    background: var(--gradient-soft);
+    color: var(--primary);
+    border: 1px solid var(--border);
+    box-shadow: var(--glow);
+}
+
+.setup-hero-icon.success {
+    background: var(--success-soft);
+    color: var(--success);
+    border-color: rgba(34, 197, 94, .35);
+    box-shadow: 0 0 0 1px rgba(34, 197, 94, .25), 0 10px 36px -8px rgba(34, 197, 94, .55);
+}
+
+.setup-hero-icon.celebrate {
+    margin: 4px auto 22px;
+    animation: pop-in .45s var(--ease);
+}
+
+.setup-path {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    border: 1px dashed var(--border-strong);
+    color: var(--text-2);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+}
+
+.setup-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+
+.setup-kv {
+    grid-template-columns: 130px 1fr;
+    font-size: 13px;
+}
+
+.setup-error {
+    overflow-wrap: anywhere;
+}
+
+/* Welcome ------------------------------------------------------------------------------- */
+.welcome-list {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 22px;
+}
+
+.welcome-item {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 14px;
+    border-radius: var(--r);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+
+.welcome-item .icon-wrap {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    background: var(--gradient-soft);
+    color: var(--primary);
+}
+
+.welcome-item b {
+    display: block;
+    font-size: 13.5px;
+}
+
+.welcome-item span {
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+/* Database ------------------------------------------------------------------------------ */
+.provider-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.test-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.test-ok,
+.test-fail {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    animation: fade-in .2s;
+}
+
+.test-ok {
+    color: var(--success);
+}
+
+.test-fail {
+    color: var(--danger);
+}
+
+/* Organisation -------------------------------------------------------------------------- */
+.swatches {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.swatch {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15);
+    transition: transform var(--speed) var(--ease), box-shadow var(--speed);
+}
+
+.swatch:hover {
+    transform: scale(1.1);
+}
+
+.swatch.active {
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text);
+}
+
+.swatch.custom {
+    display: grid;
+    place-items: center;
+    background: var(--surface-3);
+    border: 1px dashed var(--border-strong);
+    color: var(--text-muted);
+    overflow: hidden;
+}
+
+.swatch.custom input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.swatch-hex {
+    width: 104px;
+    height: 32px;
+}
+
+.brand-preview {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: var(--r);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+
+.brand-preview-name {
+    font-weight: 700;
+}
+
+.preview-button {
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: var(--r-sm);
+    color: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
+/* Review -------------------------------------------------------------------------------- */
+.review-card {
+    padding: 18px 20px;
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.review-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
+.inline-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    vertical-align: -2px;
+}
+
+/* Install ------------------------------------------------------------------------------- */
+.install-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.install-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    border: 1px solid transparent;
+    transition: background .2s, border-color .2s;
+}
+
+.install-item.running {
+    background: var(--primary-soft);
+    border-color: rgba(124, 108, 255, .3);
+}
+
+.install-item.failed {
+    background: var(--danger-soft);
+    border-color: rgba(244, 63, 94, .3);
+}
+
+.install-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    background: var(--surface-3);
+    color: var(--text-faint);
+}
+
+.install-item.done .install-icon {
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.install-item.failed .install-icon {
+    background: var(--danger);
+    color: #fff;
+}
+
+.install-item.running .install-icon {
+    background: transparent;
+}
+
+.install-title {
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.install-item.pending .install-title {
+    color: var(--text-faint);
+}
+
+.install-message {
+    font-size: 12px;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.cred-box {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.cred-box > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 16px;
+    border-radius: var(--r);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+}
+
+.cred-box b {
+    font-size: 16px;
+}
+
+@media (max-width: 720px) {
+    .provider-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .setup-steps .label {
+        display: none;
+    }
+
+    .setup-steps li.active .label {
+        display: inline;
+    }
+}

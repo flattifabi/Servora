@@ -15,7 +15,8 @@ public class StoredSecret : AuditableEntity
     /// <summary>Gets or sets the description.</summary>
     public string? Description { get; set; }
 
-    /// <summary>Gets or sets the protected (encrypted) value.</summary>
+    /// <summary>Gets or sets the protected (encrypted) value. Never exposed through generic record access.</summary>
+    [NotExposed]
     public string ProtectedValue { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the UTC time of the last rotation.</summary>

@@ -1,0 +1,42 @@
+.db-hero {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border-radius: var(--r);
+    background: var(--gradient-soft);
+    border: 1px solid var(--border);
+}
+
+.db-icon {
+    width: 46px;
+    height: 46px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 13px;
+    background: var(--surface);
+    color: var(--primary);
+    border: 1px solid var(--border-strong);
+}
+
+.db-name {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.db-connection {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-2);
+}
+
+.break-anywhere {
+    overflow-wrap: anywhere;
+}

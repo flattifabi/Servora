@@ -1,0 +1,163 @@
+@* Database information (provider, redacted connection string, size, simple schema status) and connection test.
+   Migrations and backups are managed on /admin/backups (T-15). *@
+@inject IDatabaseAdminService Database
+@inject ToastService Toasts
+
+@if (_forbidden)
+{
+    <div class="card">
+        <EmptyState Icon="lock" Title="Database administration not permitted" Text="Viewing database details requires the permission admin.database.manage." />
+    </div>
+}
+else
+{
+    <div class="grid grid-sidebar">
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h3><Icon Name="database" Size="18" /> Active database</h3>
+                    <div class="card-subtitle">Credentials are never displayed. The connection string is stored encrypted.</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" @onclick="LoadAsync" disabled="@_loading"><Icon Name="refresh" Size="14" /> Refresh</button>
+            </div>
+            <div class="card-body">
+                @if (_info is null)
+                {
+                    <Skeleton Lines="7" />
+                }
+                else
+                {
+                    @if (_info.Error is not null)
+                    {
+                        <div class="alert alert-danger mb-4"><Icon Name="alert-circle" Size="18" /><div class="break-anywhere">@_info.Error</div></div>
+                    }
+                    <div class="db-hero">
+                        <div class="db-icon"><Icon Name="@(_info.ProviderKey == DatabaseProviderKeys.Sqlite ? "hard-drive" : "server")" Size="22" /></div>
+                        <div class="flex-1">
+                            <div class="db-name">@_info.ProviderName</div>
+                            <div class="small muted">@(_info.ServerVersion is null ? "Version unknown" : $"Server version {_info.ServerVersion}")</div>
+                        </div>
+                        <StatusPill Text="@_info.SchemaStatus" Tone="@SchemaTone" />
+                    </div>
+                    <dl class="kv mt-6">
+                        <dt>Database</dt>
+                        <dd>@(_info.DatabaseName is { Length: > 0 } ? _info.DatabaseName : "—")</dd>
+                        <dt>Data source</dt>
+                        <dd class="mono small">@(_info.DataSource ?? "—")</dd>
+                        <dt>Size</dt>
+                        <dd>@(_info.SizeBytes is { } size ? FormatSize(size) : "Not available for this provider")</dd>
+                        <dt>Schema</dt>
+                        <dd>@_info.SchemaStatus · <a href="@BackupsPath">Migrations &amp; backups</a></dd>
+                        <dt>Configured in</dt>
+                        <dd>@_info.ConfigurationSource</dd>
+                    </dl>
+                    <div class="form-section-title mt-6"><Icon Name="code" Size="16" /> Connection string (redacted)</div>
+                    <pre class="db-connection mono">@_info.RedactedConnectionString</pre>
+                }
+            </div>
+        </div>
+
+        <div class="stack sticky-top" style="gap:16px">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="activity" Size="18" /> Connection test</h3></div>
+                <div class="card-body">
+                    <p class="small muted mb-4">Opens a new connection with the stored settings and measures the round trip.</p>
+                    <button class="btn btn-secondary btn-block" @onclick="TestAsync" disabled="@_testing">
+                        @if (_testing)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="plug" Size="16" />
+                        }
+                        Test connection
+                    </button>
+                    @if (_test is { } test)
+                    {
+                        <div class="alert @(test.Succeeded ? "alert-success" : "alert-danger") mt-3">
+                            <Icon Name="@(test.Succeeded ? "check-circle" : "alert-circle")" Size="18" />
+                            <div class="break-anywhere">@(test.Succeeded ? $"Connected in {test.Value.TotalMilliseconds:0} ms." : test.Error)</div>
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="history" Size="18" /> Backups &amp; migrations</h3></div>
+                <div class="card-body">
+                    <p class="small muted mb-4">Scheduled backups, restore / roll back and the migration history of the schema are managed in the backup center.</p>
+                    <a class="btn btn-secondary btn-block" href="@BackupsPath"><Icon Name="arrow-right" Size="16" /> Open backup center</a>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const string BackupsPath = "/admin/backups";
+
+    private DatabaseInfo? _info;
+    private Result<TimeSpan>? _test;
+    private bool _loading;
+    private bool _testing;
+    private bool _forbidden;
+
+    private string SchemaTone => _info switch
+    {
+        { Error: not null } => "danger",
+        { UsesMigrations: false } => "info",
+        { PendingMigrations: > 0 } => "warning",
+        _ => "success",
+    };
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.0} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.0} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):0.00} GB",
+    };
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var result = await Database.GetInfoAsync();
+            if (result.ErrorKind == ResultErrorKind.Forbidden)
+            {
+                _forbidden = true;
+                return;
+            }
+
+            if (!result.Succeeded)
+            {
+                Toasts.Error("Database information unavailable", result.Error);
+                return;
+            }
+
+            _info = result.Value;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task TestAsync()
+    {
+        _testing = true;
+        _test = null;
+        try
+        {
+            _test = await Database.TestConnectionAsync();
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+}
