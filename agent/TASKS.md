@@ -35,7 +35,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | ✅ Done |
 | T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | ✅ Done |
 | T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | ✅ Done |
-| T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | 🔨 In Progress |
+| T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | ✅ Done |
 | T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | ✅ Done |
 | T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | ✅ Done |
 | T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | 🔨 In Progress |
@@ -331,7 +331,7 @@ rendered; comprehensive unit tests for the condition evaluator (in-memory and EF
 
 ---
 
-## T-08 Automation & Integration 🔨
+## T-08 Automation & Integration ✅
 
 **Owned paths:** `*/Automation/**` (contract files read-only, implement them), `*/Integration/**` (contracts
 read-only), `Components/Pages/Automation/**`, `Components/Pages/Integration/**`, `Components/Automation/**`,
@@ -370,6 +370,10 @@ read-only), `Components/Pages/Automation/**`, `Components/Pages/Integration/**`,
 flow fires; approval wait resumes; data source executes against a public HTTPS API and blocks `http://127.0.0.1`
 and `169.254.169.254`; import maps rows into a table; unit tests for cron parser, SSRF guard, template resolver and
 engine step sequencing.
+
+**Result (validated by orchestrator, merged `d77e5c0`):** Flow engine with record/schedule/webhook triggers, approval waits and sub-flows, cron scheduler, visual Flow Designer, SSRF-safe REST data sources (DNS + connect-time checks, metadata blocked, redirect re-validation), endpoint tester, import sets with transform maps (CSV + data source JSON), webhook with secret/HMAC.
+**Evidence:** 230 files in owned paths; build 0/0; tests 399 passed (182 new). Merged main: build 0 errors / 0 warnings, 1146 tests passed, smoke on fresh SQLite healthy.
+**Open follow-ups:** Set-variable input snapshot not masked; no pill picker in ConditionBuilder.
 
 ---
 
@@ -541,6 +545,7 @@ automatically with pre-migration backup (T-15). Document "adding a migration" in
 - API paths must answer JSON 401/403 instead of HTML redirects (e.g. `/api/v1/me` with a cookie session that still
   has to change its password); unauthenticated JSON POST to `/api/v1/table` returned 400 content-type (T-07 report).
 - Migrations must also include the T-07 entities (CustomTable … TaskSla) and the 9 T-10 tables.
+- Migrations must also include the 10 T-08 tables (`automation_*`, `int_*`).
 - Kernel: instance-specific auth/antiforgery cookie names, or a friendly redirect on antiforgery failure, so several
   localhost instances do not clash (T-05).
 
@@ -611,3 +616,4 @@ build green, tests pass.
 | 2026-11-07 | T-02, T-03, T-05, T-06, T-09 validated and merged (✅); integration requests collected under T-13. |
 | 2026-11-07 | T-11 dispatched (dependencies merged). |
 | 2026-11-07 | T-07, T-10 validated and merged (✅). |
+| 2026-11-07 | T-08 validated and merged (✅). |
