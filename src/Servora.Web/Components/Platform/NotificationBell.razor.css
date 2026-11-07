@@ -1,0 +1,35 @@
+/* Unread badge on the bell and the dropdown list of the latest notifications. */
+.notification-bell .icon-btn {
+    position: relative;
+}
+
+.bell-badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--surface);
+}
+
+.bell-menu {
+    width: 360px;
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.bell-item {
+    align-items: flex-start;
+}
+
+.bell-item.unread {
+    background: color-mix(in srgb, var(--primary) 7%, transparent);
+}

@@ -1,0 +1,95 @@
+@* Editor for one field of any table (typed property, custom field or custom table column); values are invariant strings. *@
+@inject IRecordLookupService Lookup
+
+@if (Disabled || Field.IsReadOnly)
+{
+    <div class="readonly-value">@(string.IsNullOrEmpty(DisplayText) ? (string.IsNullOrEmpty(Value) ? "—" : Value) : DisplayText)</div>
+}
+else
+{
+    switch (Field.Type)
+    {
+        case FieldType.Text:
+            <textarea class="textarea @(Invalid ? "invalid" : null)" rows="4" maxlength="@Field.MaxLength" value="@Value" @onchange="OnChange"></textarea>
+            break;
+        case FieldType.Json:
+            <textarea class="textarea mono @(Invalid ? "invalid" : null)" rows="6" value="@Value" @onchange="OnChange"></textarea>
+            break;
+        case FieldType.Integer:
+            <input class="input @(Invalid ? "invalid" : null)" type="number" step="1" value="@Value" @onchange="OnChange" />
+            break;
+        case FieldType.Decimal:
+            <input class="input @(Invalid ? "invalid" : null)" type="number" step="any" value="@Value" @onchange="OnChange" />
+            break;
+        case FieldType.Boolean:
+            <Switch Value="@IsTrue" ValueChanged="SetBoolAsync" Label="@(IsTrue ? "Yes" : "No")" />
+            break;
+        case FieldType.DateTime:
+            <input class="input @(Invalid ? "invalid" : null)" type="datetime-local" value="@Value" @onchange="OnChange" title="UTC" />
+            break;
+        case FieldType.Date:
+            <input class="input @(Invalid ? "invalid" : null)" type="date" value="@Value" @onchange="OnChange" />
+            break;
+        case FieldType.Choice:
+            <select class="select @(Invalid ? "invalid" : null)" value="@(Value ?? string.Empty)" @onchange="OnChange">
+                <option value="">— None —</option>
+                @foreach (var choice in Field.Choices)
+                {
+                    <option value="@choice.Value">@choice.Label</option>
+                }
+            </select>
+            break;
+        case FieldType.Reference when Field.ReferenceTable is not null:
+            <ReferencePicker Value="@ReferenceId" ValueChanged="v => SetAsync(v?.ToString())" Search="SearchAsync" Resolve="ResolveAsync"
+                             Icon="@(Field.ReferenceTable == "sys_user" ? "user" : Field.ReferenceTable == "sys_user_group" ? "users" : "link")"
+                             ShowAvatar="@(Field.ReferenceTable == "sys_user")" Required="Field.IsRequired" Placeholder="@($"Search {Field.Label.ToLowerInvariant()}…")" />
+            break;
+        case FieldType.Email:
+            <input class="input @(Invalid ? "invalid" : null)" type="email" maxlength="@Field.MaxLength" value="@Value" @onchange="OnChange" />
+            break;
+        case FieldType.Url:
+            <input class="input @(Invalid ? "invalid" : null)" type="url" placeholder="https://" maxlength="@Field.MaxLength" value="@Value" @onchange="OnChange" />
+            break;
+        default:
+            <input class="input @(Invalid ? "invalid" : null)" type="text" maxlength="@Field.MaxLength" value="@Value" @onchange="OnChange" />
+            break;
+    }
+}
+
+@code {
+    /// <summary>Gets or sets the field definition.</summary>
+    [Parameter, EditorRequired] public FieldDefinition Field { get; set; } = default!;
+
+    /// <summary>Gets or sets the value (invariant string).</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Raised when the value changes.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets the display text shown in read-only mode (for example a reference display value).</summary>
+    [Parameter] public string? DisplayText { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the input is read only.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the input shows the invalid state.</summary>
+    [Parameter] public bool Invalid { get; set; }
+
+    private bool IsTrue => string.Equals(Value, "true", StringComparison.OrdinalIgnoreCase);
+
+    private Guid? ReferenceId => Guid.TryParse(Value, out var id) ? id : null;
+
+    private Task SetBoolAsync(bool value) => SetAsync(value ? "true" : "false");
+
+    private Task OnChange(ChangeEventArgs e) => SetAsync(e.Value?.ToString());
+
+    private Task SetAsync(string? value)
+    {
+        Value = string.IsNullOrEmpty(value) ? null : value;
+        return ValueChanged.InvokeAsync(Value);
+    }
+
+    private Task<IReadOnlyList<LookupItem>> SearchAsync(string? term) => Lookup.SearchAsync(Field.ReferenceTable!, term, 10);
+
+    private Task<LookupItem?> ResolveAsync(Guid id) => Lookup.ResolveAsync(Field.ReferenceTable!, id);
+}

@@ -1,0 +1,524 @@
+@page "/admin/notifications"
+@* Studio: notifications (trigger, condition, recipients, e-mail / in-app delivery) and reusable e-mail templates with live preview. *@
+@attribute [RequirePermission(Permissions.Platform.ManageNotifications)]
+@inject INotificationAdminService Admin
+@inject ITableRegistry Registry
+@inject IDirectoryLookupService Directory
+@inject ToastService Toasts
+
+<PageTitle>Notifications · Servora</PageTitle>
+
+<PageHeader Title="Notifications" Subtitle="Tell the right people at the right time: e-mail and in-app messages triggered by record changes." Icon="mail">
+    <Actions>
+        @if (_tab == "templates")
+        {
+            <button class="btn btn-primary" @onclick="() => OpenTemplate(null)"><Icon Name="plus" Size="16" /> New template</button>
+        }
+        else
+        {
+            <button class="btn btn-primary" @onclick="() => OpenAsync(null)"><Icon Name="plus" Size="16" /> New notification</button>
+        }
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Notifications" Value="@_all.Count.ToString()" Icon="bell" Caption="@($"on {_all.Select(n => n.TableName).Distinct(StringComparer.OrdinalIgnoreCase).Count()} tables")" />
+    <StatCard Label="Active" Value="@_all.Count(n => n.IsActive).ToString()" Icon="send" Tone="success" Caption="currently delivered" />
+    <StatCard Label="E-mail templates" Value="@_templates.Count.ToString()" Icon="file-text" Tone="accent" Caption="reusable layouts" />
+    <StatCard Label="In-app" Value="@_all.Count(n => n.IsActive && n.SendInApp).ToString()" Icon="inbox" Tone="info" Caption="post to the bell inbox" />
+</div>
+
+<Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+
+<div class="mt-4">
+    @if (_tab == "templates")
+    {
+        <DataTable TItem="NotificationTemplateModel" Items="_templates" TotalCount="_templates.Count" PageSize="500" ShowPager="false" ShowSearch="false" Loading="_loading"
+                   OnRowClick="t => OpenTemplate(t)" EmptyIcon="file-text" EmptyTitle="No templates yet"
+                   EmptyText="Templates let several notifications share one subject and body with ${Field} placeholders.">
+            <Columns>
+                <DataColumn TItem="NotificationTemplateModel" Title="Template">
+                    <Template>
+                        <div class="cell-link">@context.Name</div>
+                        @if (!string.IsNullOrWhiteSpace(context.Description))
+                        {
+                            <div class="tiny faint">@context.Description</div>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="NotificationTemplateModel" Title="Subject"><Template><span class="mono small">@context.Subject</span></Template></DataColumn>
+                <DataColumn TItem="NotificationTemplateModel" Title="Used by" Align="right" Value="t => _all.Count(n => n.TemplateId == t.Id)" />
+                <DataColumn TItem="NotificationTemplateModel" Title="Updated"><Template><RelativeTime Value="context.UpdatedAt" /></Template></DataColumn>
+            </Columns>
+        </DataTable>
+    }
+    else
+    {
+        <DataTable TItem="NotificationModel" Items="FilteredNotifications" TotalCount="FilteredNotifications.Count" PageSize="500" ShowPager="false" Loading="_loading"
+                   OnSearch="t => _search = t" SearchPlaceholder="Search notifications…" OnRowClick="n => OpenAsync(n)" EmptyIcon="bell"
+                   EmptyTitle="@(_all.Count == 0 ? "No notifications yet" : "No matching notifications")"
+                   EmptyText="@(_all.Count == 0 ? "Notify assignees, groups or callers when records are created or change." : "Try another search term.")">
+            <Columns>
+                <DataColumn TItem="NotificationModel" Title="Notification">
+                    <Template>
+                        <div class="cell-link">@context.Name</div>
+                        @if (!string.IsNullOrWhiteSpace(context.Description))
+                        {
+                            <div class="tiny faint truncate" style="max-width:380px">@context.Description</div>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="NotificationModel" Title="Table"><Template><span class="tag">@TableLabel(context.TableName)</span></Template></DataColumn>
+                <DataColumn TItem="NotificationModel" Title="Trigger"><Template><span class="small muted">@Events(context)</span></Template></DataColumn>
+                <DataColumn TItem="NotificationModel" Title="Channels">
+                    <Template>
+                        <div class="flex gap-1">
+                            @if (context.SendEmail)
+                            {
+                                <span class="badge" title="E-mail"><Icon Name="mail" Size="12" /> E-mail</span>
+                            }
+                            @if (context.SendInApp)
+                            {
+                                <span class="badge" title="In-app"><Icon Name="bell" Size="12" /> In-app</span>
+                            }
+                        </div>
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="NotificationModel" Title="Recipients"><Template><span class="small">@RecipientSummary(context)</span></Template></DataColumn>
+                <DataColumn TItem="NotificationModel" Title="State"><Template><StatusPill Text="@(context.IsActive ? "Active" : "Inactive")" Tone="@(context.IsActive ? "success" : "neutral")" /></Template></DataColumn>
+            </Columns>
+        </DataTable>
+    }
+</div>
+
+<Drawer @bind-Open="_editorOpen" Title="@(_model.Id == Guid.Empty ? "New notification" : _model.Name)" Subtitle="@(_table?.Label ?? "Notification")" Size="lg">
+    <ChildContent>
+        <div class="form-grid">
+            <FormField Label="Name" Required="true"><input class="input" @bind="_model.Name" placeholder="e.g. Incident assigned to me" /></FormField>
+            <FormField Label="Table" Required="true" Help="@(_model.Id == Guid.Empty ? null : "The table cannot be changed.")">
+                <select class="select" value="@_model.TableName" disabled="@(_model.Id != Guid.Empty)" @onchange="e => SelectTableAsync(e.Value?.ToString())">
+                    <option value="">— Select table —</option>
+                    @foreach (var table in _tables)
+                    {
+                        <option value="@table.Name">@table.Label (@table.Name)</option>
+                    }
+                </select>
+            </FormField>
+            <FormField Label="Description" Class="span-all"><textarea class="textarea" rows="2" @bind="_model.Description"></textarea></FormField>
+            <FormField Label="Send when a record is" Class="span-all">
+                <div class="flex gap-4 flex-wrap items-center">
+                    <label class="checkbox"><input type="checkbox" @bind="_model.OnInsert" /> Inserted</label>
+                    <label class="checkbox"><input type="checkbox" @bind="_model.OnUpdate" /> Updated</label>
+                    <label class="checkbox"><input type="checkbox" @bind="_model.OnDelete" /> Deleted</label>
+                    <span class="flex-1"></span>
+                    <Switch @bind-Value="_model.IsActive" Label="@(_model.IsActive ? "Active" : "Inactive")" />
+                </div>
+            </FormField>
+        </div>
+
+        @if (_table is not null)
+        {
+            <div class="form-section mt-4">
+                <div class="form-section-title"><Icon Name="filter" Size="16" /> Condition</div>
+                <div class="small muted mb-2">Empty: always. Use "changes to" to notify on transitions, e.g. "Assigned to changes".</div>
+                <ConditionBuilder Condition="_model.Condition" Fields="_table.Fields" AllowChangeOperators="true" />
+            </div>
+        }
+
+        <div class="form-section mt-4">
+            <div class="form-section-title"><Icon Name="users" Size="16" /> Recipients</div>
+            <div class="form-grid">
+                @if (RecipientFieldCandidates.Count > 0)
+                {
+                    <FormField Label="Users and groups in fields" Class="span-all" Help="Group fields notify all active members.">
+                        <div class="flex gap-2 flex-wrap">
+                            @foreach (var field in RecipientFieldCandidates)
+                            {
+                                var f = field;
+                                var selected = _model.RecipientFields.Contains(f.Name, StringComparer.OrdinalIgnoreCase);
+                                <button class="btn btn-sm @(selected ? "btn-primary" : "btn-secondary")" @onclick="() => ToggleRecipientField(f.Name)">
+                                    <Icon Name="@(f.ReferenceTable == "sys_user_group" ? "users" : "user")" Size="14" /> @f.Label
+                                </button>
+                            }
+                        </div>
+                    </FormField>
+                }
+                <FormField Label="Groups">
+                    <GroupPicker Value="null" ValueChanged="AddGroupAsync" Placeholder="Add group…" />
+                    <div class="flex gap-1 flex-wrap mt-2">
+                        @foreach (var id in _model.RecipientGroupIds)
+                        {
+                            var groupId = id;
+                            <span class="tag">@(_names.GetValueOrDefault(groupId) ?? "Group") <button class="icon-btn" style="width:18px;height:18px" title="Remove" @onclick="() => _model.RecipientGroupIds.Remove(groupId)"><Icon Name="x" Size="11" /></button></span>
+                        }
+                    </div>
+                </FormField>
+                <FormField Label="Users">
+                    <UserPicker Value="null" ValueChanged="AddUserAsync" Placeholder="Add user…" />
+                    <div class="flex gap-1 flex-wrap mt-2">
+                        @foreach (var id in _model.RecipientUserIds)
+                        {
+                            var userId = id;
+                            <span class="tag">@(_names.GetValueOrDefault(userId) ?? "User") <button class="icon-btn" style="width:18px;height:18px" title="Remove" @onclick="() => _model.RecipientUserIds.Remove(userId)"><Icon Name="x" Size="11" /></button></span>
+                        }
+                    </div>
+                </FormField>
+                <FormField Label="Additional e-mail addresses" Class="span-all" Help="Comma separated; e-mail only.">
+                    <input class="input" @bind="_model.RecipientEmails" placeholder="service-desk@example.com, oncall@example.com" />
+                </FormField>
+            </div>
+        </div>
+
+        <div class="form-section mt-4">
+            <div class="form-section-title"><Icon Name="file-text" Size="16" /> Message</div>
+            <div class="form-grid">
+                <FormField Label="Template" Class="span-all">
+                    <select class="select" value="@_model.TemplateId" @onchange="e => _model.TemplateId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null">
+                        <option value="">Inline subject and body</option>
+                        @foreach (var template in _templates)
+                        {
+                            <option value="@template.Id">@template.Name</option>
+                        }
+                    </select>
+                </FormField>
+                @if (_model.TemplateId is null)
+                {
+                    <FormField Label="Subject" Required="true" Class="span-all"><input class="input" @bind="_model.Subject" placeholder="${Number} has been assigned to you" /></FormField>
+                    <FormField Label="Body" Class="span-all" Help="Plain text; line breaks are kept and all values are HTML-encoded.">
+                        <textarea class="textarea mono" rows="7" @bind="_model.Body"></textarea>
+                    </FormField>
+                }
+                @if (_table is not null)
+                {
+                    <div class="span-all">
+                        <div class="tiny faint mb-0">Placeholders</div>
+                        <div class="flex gap-1 flex-wrap mt-1">
+                            <span class="tag mono">${link}</span>
+                            <span class="tag mono">${table}</span>
+                            <span class="tag mono">${actor}</span>
+                            <span class="tag mono">${event}</span>
+                            @foreach (var field in _table.Fields.Take(40))
+                            {
+                                <span class="tag mono" title="@field.Label">${@field.Name}</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="form-section mt-4">
+            <div class="form-section-title"><Icon Name="send" Size="16" /> Delivery</div>
+            <div class="stack" style="gap:10px">
+                <Switch @bind-Value="_model.SendEmail" Label="Send e-mail" />
+                <Switch @bind-Value="_model.SendInApp" Label="Post to the in-app inbox (bell)" />
+                <Switch @bind-Value="_model.ExcludeActor" Label="Do not notify the person who made the change" />
+            </div>
+        </div>
+
+        @if (_preview is not null)
+        {
+            <div class="form-section mt-4">
+                <div class="form-section-title"><Icon Name="eye" Size="16" /> Preview</div>
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="tiny faint">Subject</div>
+                            <div style="font-weight:600">@_preview.Subject</div>
+                        </div>
+                        <a class="btn btn-ghost btn-sm" href="@_preview.Link" target="_blank" rel="noopener noreferrer"><Icon Name="external-link" Size="14" /> Record</a>
+                    </div>
+                    <iframe sandbox="" srcdoc="@_preview.HtmlBody" title="E-mail preview" style="width:100%;height:360px;border:0;border-radius:0 0 var(--r) var(--r);background:#fff"></iframe>
+                </div>
+            </div>
+        }
+    </ChildContent>
+    <Footer>
+        @if (_model.Id != Guid.Empty)
+        {
+            <button class="btn btn-outline-danger" style="margin-right:auto" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete</button>
+        }
+        <button class="btn btn-secondary" disabled="@(_busy || _table is null)" @onclick="PreviewAsync"><Icon Name="eye" Size="16" /> Preview</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            Save notification
+        </button>
+    </Footer>
+</Drawer>
+
+<Modal @bind-Open="_templateOpen" Title="@(_template.Id == Guid.Empty ? "New e-mail template" : _template.Name)" Subtitle="Placeholders like ${Number} or ${AssignedTo} are replaced with encoded record values." Icon="file-text" Size="lg">
+    <ChildContent>
+        <div class="form-grid">
+            <FormField Label="Name" Required="true"><input class="input" @bind="_template.Name" /></FormField>
+            <FormField Label="Description"><input class="input" @bind="_template.Description" /></FormField>
+            <FormField Label="Subject" Required="true" Class="span-all"><input class="input" @bind="_template.Subject" placeholder="[${Number}] ${ShortDescription}" /></FormField>
+            <FormField Label="Body" Required="true" Class="span-all"><textarea class="textarea mono" rows="10" @bind="_template.Body"></textarea></FormField>
+        </div>
+    </ChildContent>
+    <Footer>
+        @if (_template.Id != Guid.Empty)
+        {
+            <button class="btn btn-outline-danger" style="margin-right:auto" @onclick="() => _confirmDeleteTemplate = true"><Icon Name="trash" Size="16" /> Delete</button>
+        }
+        <button class="btn btn-secondary" @onclick="() => _templateOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveTemplateAsync">Save template</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete notification?" Message="@($"'{_model.Name}' will be deleted permanently.")" ConfirmText="Delete" OnConfirm="DeleteAsync" />
+<ConfirmDialog @bind-Open="_confirmDeleteTemplate" Danger="true" Title="Delete template?" Message="@($"'{_template.Name}' will be deleted permanently.")" ConfirmText="Delete" OnConfirm="DeleteTemplateAsync" />
+
+@code {
+    private IReadOnlyList<NotificationModel> _all = [];
+    private IReadOnlyList<NotificationTemplateModel> _templates = [];
+    private IReadOnlyList<TableDefinition> _tables = [];
+    private readonly Dictionary<Guid, string> _names = [];
+    private NotificationModel _model = new();
+    private NotificationTemplateModel _template = new();
+    private RenderedNotification? _preview;
+    private TableDefinition? _table;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _editorOpen;
+    private bool _templateOpen;
+    private bool _confirmDelete;
+    private bool _confirmDeleteTemplate;
+    private string _search = string.Empty;
+    private string? _tab = "notifications";
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("notifications", "Notifications", "bell", _all.Count),
+        new("templates", "E-mail templates", "file-text", _templates.Count),
+    ];
+
+    private List<NotificationModel> FilteredNotifications => string.IsNullOrWhiteSpace(_search)
+        ? _all.OrderBy(n => n.Name).ToList()
+        : _all.Where(n => n.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || n.TableName.Contains(_search, StringComparison.OrdinalIgnoreCase)).OrderBy(n => n.Name).ToList();
+
+    private List<FieldDefinition> RecipientFieldCandidates =>
+        _table?.Fields.Where(f => f.Type == FieldType.Reference && f.ReferenceTable is "sys_user" or "sys_user_group").ToList() ?? [];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _tables = await Registry.GetTablesAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var notifications = await Admin.ListAsync();
+        if (notifications.Succeeded)
+        {
+            _all = notifications.Value!;
+        }
+        else
+        {
+            Toasts.Error("Notifications could not be loaded", notifications.Error);
+        }
+
+        var templates = await Admin.ListTemplatesAsync();
+        _templates = templates.Succeeded ? templates.Value! : [];
+        _loading = false;
+    }
+
+    private string TableLabel(string name) => _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))?.Label ?? name;
+
+    private async Task OpenAsync(NotificationModel? notification)
+    {
+        _preview = null;
+        if (notification is null)
+        {
+            _model = new NotificationModel();
+        }
+        else
+        {
+            var loaded = await Admin.GetAsync(notification.Id);
+            if (!loaded.Succeeded)
+            {
+                Toasts.Error("The notification could not be loaded", loaded.Error);
+                return;
+            }
+
+            _model = loaded.Value!;
+        }
+
+        _table = string.IsNullOrEmpty(_model.TableName) ? null : await Registry.GetTableAsync(_model.TableName);
+        foreach (var (id, item) in await Directory.GetUsersAsync(_model.RecipientUserIds))
+        {
+            _names[id] = item.Display;
+        }
+
+        foreach (var (id, item) in await Directory.GetGroupsAsync(_model.RecipientGroupIds))
+        {
+            _names[id] = item.Display;
+        }
+
+        _editorOpen = true;
+    }
+
+    private async Task SelectTableAsync(string? name)
+    {
+        _model.TableName = name ?? string.Empty;
+        _model.Condition = new ConditionGroup();
+        _model.RecipientFields.Clear();
+        _preview = null;
+        _table = string.IsNullOrEmpty(name) ? null : await Registry.GetTableAsync(name);
+    }
+
+    private void ToggleRecipientField(string name)
+    {
+        var existing = _model.RecipientFields.FirstOrDefault(f => string.Equals(f, name, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            _model.RecipientFields.Add(name);
+        }
+        else
+        {
+            _model.RecipientFields.Remove(existing);
+        }
+    }
+
+    private async Task AddGroupAsync(Guid? id)
+    {
+        if (id is { } groupId && !_model.RecipientGroupIds.Contains(groupId))
+        {
+            _model.RecipientGroupIds.Add(groupId);
+            foreach (var (key, item) in await Directory.GetGroupsAsync([groupId]))
+            {
+                _names[key] = item.Display;
+            }
+        }
+    }
+
+    private async Task AddUserAsync(Guid? id)
+    {
+        if (id is { } userId && !_model.RecipientUserIds.Contains(userId))
+        {
+            _model.RecipientUserIds.Add(userId);
+            foreach (var (key, item) in await Directory.GetUsersAsync([userId]))
+            {
+                _names[key] = item.Display;
+            }
+        }
+    }
+
+    private async Task PreviewAsync()
+    {
+        _busy = true;
+        var result = await Admin.PreviewAsync(_model, null);
+        _busy = false;
+        if (result.Succeeded)
+        {
+            _preview = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Preview not available", result.Error);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        var result = await Admin.SaveAsync(_model);
+        _busy = false;
+        if (Toasts.FromResult(result, "Notification saved"))
+        {
+            _editorOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await Admin.DeleteAsync(_model.Id);
+        if (Toasts.FromResult(result, "Notification deleted"))
+        {
+            _editorOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private void OpenTemplate(NotificationTemplateModel? template)
+    {
+        _template = template is null
+            ? new NotificationTemplateModel()
+            : new NotificationTemplateModel { Id = template.Id, Name = template.Name, Description = template.Description, Subject = template.Subject, Body = template.Body, UpdatedAt = template.UpdatedAt };
+        _templateOpen = true;
+    }
+
+    private async Task SaveTemplateAsync()
+    {
+        _busy = true;
+        var result = await Admin.SaveTemplateAsync(_template);
+        _busy = false;
+        if (Toasts.FromResult(result, "Template saved"))
+        {
+            _templateOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteTemplateAsync()
+    {
+        var result = await Admin.DeleteTemplateAsync(_template.Id);
+        if (Toasts.FromResult(result, "Template deleted"))
+        {
+            _templateOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private static string Events(NotificationModel notification)
+    {
+        var events = new List<string>(3);
+        if (notification.OnInsert)
+        {
+            events.Add("inserted");
+        }
+
+        if (notification.OnUpdate)
+        {
+            events.Add("updated");
+        }
+
+        if (notification.OnDelete)
+        {
+            events.Add("deleted");
+        }
+
+        return events.Count == 0 ? "never" : string.Join(" · ", events) + (notification.Condition.IsEmpty ? string.Empty : " + condition");
+    }
+
+    private static string RecipientSummary(NotificationModel notification)
+    {
+        var parts = new List<string>(4);
+        if (notification.RecipientFields.Count > 0)
+        {
+            parts.Add(string.Join(", ", notification.RecipientFields));
+        }
+
+        if (notification.RecipientGroupIds.Count > 0)
+        {
+            parts.Add($"{notification.RecipientGroupIds.Count} group(s)");
+        }
+
+        if (notification.RecipientUserIds.Count > 0)
+        {
+            parts.Add($"{notification.RecipientUserIds.Count} user(s)");
+        }
+
+        if (!string.IsNullOrWhiteSpace(notification.RecipientEmails))
+        {
+            parts.Add($"{notification.RecipientEmails.Split(',', StringSplitOptions.RemoveEmptyEntries).Length} address(es)");
+        }
+
+        return parts.Count == 0 ? "—" : string.Join(" · ", parts);
+    }
+}

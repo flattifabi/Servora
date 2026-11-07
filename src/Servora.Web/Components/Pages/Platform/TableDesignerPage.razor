@@ -1,0 +1,525 @@
+@page "/admin/tables/{Name}"
+@* Studio: field designer, form layout, list columns and settings of one table. *@
+@attribute [RequirePermission(Permissions.Platform.ManageTables)]
+@inject ITableDesignerService Designer
+@inject ITableRegistry Registry
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(_table?.Label ?? Name) · Tables · Servora</PageTitle>
+
+@if (_table is null)
+{
+    @if (_loading)
+    {
+        <Skeleton Lines="6" Height="22px" />
+    }
+    else
+    {
+        <EmptyState Icon="table" Title="Table not found" Text="@($"There is no table named '{Name}'.")">
+            <a class="btn btn-secondary" href="/admin/tables">Back to tables</a>
+        </EmptyState>
+    }
+}
+else
+{
+    <PageHeader Title="@_table.Label" Icon="@_table.Icon">
+        <Breadcrumbs><a href="/admin/tables">Tables &amp; Fields</a> <Icon Name="chevron-right" Size="12" /> @_table.Label</Breadcrumbs>
+        <SubtitleContent>
+            <div class="flex items-center gap-2 mt-1">
+                <span class="tag mono">@_table.Name</span>
+                <span class="pill @(_table.IsCustom ? "pill-accent" : "pill-neutral") no-dot">@(_table.IsCustom ? "Custom table" : "Built-in table")</span>
+                <span class="small faint">@_table.Fields.Count fields · display field <span class="mono">@_table.DisplayField</span></span>
+            </div>
+        </SubtitleContent>
+        <Actions>
+            <a class="btn btn-secondary" href="@($"/table/{_table.Name}")"><Icon Name="list" Size="16" /> Open records</a>
+            @if (SupportsCustomFields)
+            {
+                <button class="btn btn-primary" @onclick="() => OpenField(null)"><Icon Name="plus" Size="16" /> Add field</button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+
+    <div class="mt-4">
+        @switch (_tab)
+        {
+            case "layout":
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3>Form layout</h3>
+                            <div class="small muted">Sections and field order of the generic form. Long text fields span the full width.</div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-ghost btn-sm" @onclick="AddSection"><Icon Name="plus" Size="14" /> Section</button>
+                            <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="SaveLayoutAsync"><Icon Name="save" Size="14" /> Save layout</button>
+                        </div>
+                    </div>
+                    <div class="card-body stack">
+                        @foreach (var section in _layout.Sections.ToList())
+                        {
+                            <div class="cond-group">
+                                <div class="flex items-center gap-2 mb-0">
+                                    <Icon Name="layers" Size="16" Class="faint" />
+                                    <input class="input" style="max-width:320px" @bind="section.Title" />
+                                    <span class="spacer flex-1"></span>
+                                    <button class="icon-btn" title="Move up" disabled="@(_layout.Sections.IndexOf(section) == 0)" @onclick="() => Move(_layout.Sections, section, -1)"><Icon Name="arrow-up" Size="15" /></button>
+                                    <button class="icon-btn" title="Move down" disabled="@(_layout.Sections.IndexOf(section) == _layout.Sections.Count - 1)" @onclick="() => Move(_layout.Sections, section, 1)"><Icon Name="arrow-down" Size="15" /></button>
+                                    <button class="icon-btn" title="Remove section" @onclick="() => _layout.Sections.Remove(section)"><Icon Name="trash" Size="15" /></button>
+                                </div>
+                                <div class="stack mt-2" style="gap:6px">
+                                    @foreach (var fieldName in section.Fields.ToList())
+                                    {
+                                        var field = _table.FindField(fieldName);
+                                        <div class="flex items-center gap-2 small" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface)">
+                                            <Icon Name="grip-vertical" Size="14" Class="faint" />
+                                            <Icon Name="@FieldValueFormatter.TypeIcon(field?.Type ?? FieldType.String)" Size="14" Class="faint" />
+                                            <span style="font-weight:550">@(field?.Label ?? fieldName)</span>
+                                            <span class="mono tiny faint">@fieldName</span>
+                                            <span class="flex-1"></span>
+                                            <button class="icon-btn" style="width:26px;height:26px" disabled="@(section.Fields.IndexOf(fieldName) == 0)" @onclick="() => Move(section.Fields, fieldName, -1)"><Icon Name="arrow-up" Size="13" /></button>
+                                            <button class="icon-btn" style="width:26px;height:26px" disabled="@(section.Fields.IndexOf(fieldName) == section.Fields.Count - 1)" @onclick="() => Move(section.Fields, fieldName, 1)"><Icon Name="arrow-down" Size="13" /></button>
+                                            <button class="icon-btn" style="width:26px;height:26px" title="Remove from form" @onclick="() => section.Fields.Remove(fieldName)"><Icon Name="x" Size="13" /></button>
+                                        </div>
+                                    }
+                                    @if (UnplacedFields.Count > 0)
+                                    {
+                                        <select class="select" style="max-width:320px" value="" @onchange="e => AddToSection(section, e.Value?.ToString())">
+                                            <option value="">+ Add field to this section…</option>
+                                            @foreach (var field in UnplacedFields)
+                                            {
+                                                <option value="@field.Name">@field.Label</option>
+                                            }
+                                        </select>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        @if (_layout.Sections.Count == 0)
+                        {
+                            <EmptyState Icon="layers" Title="No sections" Text="Add a section to place fields on the form." />
+                        }
+                    </div>
+                </div>
+                break;
+            case "list":
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3>List columns</h3>
+                            <div class="small muted">Default columns of the generic list view, in display order.</div>
+                        </div>
+                        <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="SaveLayoutAsync"><Icon Name="save" Size="14" /> Save columns</button>
+                    </div>
+                    <div class="card-body stack" style="gap:6px">
+                        @foreach (var column in _layout.ListColumns.ToList())
+                        {
+                            var field = _table.FindField(column);
+                            <div class="flex items-center gap-2 small" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)">
+                                <span class="badge">@(_layout.ListColumns.IndexOf(column) + 1)</span>
+                                <span style="font-weight:550">@(field?.Label ?? column)</span>
+                                <span class="mono tiny faint">@column</span>
+                                <span class="flex-1"></span>
+                                <button class="icon-btn" style="width:26px;height:26px" disabled="@(_layout.ListColumns.IndexOf(column) == 0)" @onclick="() => Move(_layout.ListColumns, column, -1)"><Icon Name="arrow-up" Size="13" /></button>
+                                <button class="icon-btn" style="width:26px;height:26px" disabled="@(_layout.ListColumns.IndexOf(column) == _layout.ListColumns.Count - 1)" @onclick="() => Move(_layout.ListColumns, column, 1)"><Icon Name="arrow-down" Size="13" /></button>
+                                <button class="icon-btn" style="width:26px;height:26px" disabled="@(_layout.ListColumns.Count <= 1)" @onclick="() => _layout.ListColumns.Remove(column)"><Icon Name="x" Size="13" /></button>
+                            </div>
+                        }
+                        <select class="select mt-2" style="max-width:320px" value="" @onchange="e => AddColumn(e.Value?.ToString())">
+                            <option value="">+ Add column…</option>
+                            @foreach (var field in _table.Fields.Where(f => !_layout.ListColumns.Contains(f.Name, StringComparer.OrdinalIgnoreCase)))
+                            {
+                                <option value="@field.Name">@field.Label</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                break;
+            case "settings" when _settings is not null:
+                <div class="grid grid-sidebar">
+                    <div class="card">
+                        <div class="card-header"><h3>Table settings</h3></div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <FormField Label="Label" Required="true"><input class="input" @bind="_settings.Label" /></FormField>
+                                <FormField Label="Plural label"><input class="input" @bind="_settings.PluralLabel" /></FormField>
+                                <FormField Label="Display field" Help="Shown in references, lists and notifications.">
+                                    <select class="select" @bind="_settings.DisplayField">
+                                        <option value="">Automatic</option>
+                                        @foreach (var field in _table.Fields.Where(f => f.Type is FieldType.String or FieldType.Email || f.Name == "Number"))
+                                        {
+                                            <option value="@field.Name">@field.Label</option>
+                                        }
+                                    </select>
+                                </FormField>
+                                <FormField Label="Number prefix" Help="Changing the prefix affects new records only."><input class="input mono" @bind="_settings.NumberPrefix" maxlength="8" /></FormField>
+                                <FormField Label="Icon"><input class="input mono" @bind="_settings.Icon" /></FormField>
+                                <FormField Label="Accepts new records"><Switch @bind-Value="_settings.IsActive" Label="@(_settings.IsActive ? "Active" : "Inactive")" /></FormField>
+                                <FormField Label="Description" Class="span-all"><textarea class="textarea" rows="3" @bind="_settings.Description"></textarea></FormField>
+                            </div>
+                        </div>
+                        <div class="card-footer flex justify-end">
+                            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveSettingsAsync"><Icon Name="save" Size="16" /> Save settings</button>
+                        </div>
+                    </div>
+                    <div class="card highlight sticky-top">
+                        <div class="card-header"><h3 class="flex items-center gap-2"><Icon Name="alert-triangle" Size="16" /> Danger zone</h3></div>
+                        <div class="card-body">
+                            <p class="small muted">Deleting the table permanently removes all its records, fields and the layout. Business rules, SLAs and notifications of the table must be removed first.</p>
+                            <button class="btn btn-outline-danger mt-3" @onclick="() => _confirmDeleteTable = true"><Icon Name="trash" Size="16" /> Delete table</button>
+                        </div>
+                    </div>
+                </div>
+                break;
+            default:
+                <DataTable TItem="FieldDefinition" Items="_table.Fields" TotalCount="_table.Fields.Count" PageSize="500" ShowPager="false" ShowSearch="false"
+                           OnRowClick="OnFieldRowClick" EmptyTitle="No fields">
+                    <ToolbarEnd>
+                        <span class="small faint">@_table.Fields.Count(f => f.IsCustom) custom · @_table.Fields.Count(f => !f.IsCustom) system / built-in</span>
+                    </ToolbarEnd>
+                    <Columns>
+                        <DataColumn TItem="FieldDefinition" Title="Field">
+                            <Template>
+                                <div class="flex items-center gap-2">
+                                    <Icon Name="@FieldValueFormatter.TypeIcon(context.Type)" Size="15" Class="faint" />
+                                    <div>
+                                        <div style="font-weight:550">@context.Label</div>
+                                        <div class="tiny faint mono">@context.Name</div>
+                                    </div>
+                                </div>
+                            </Template>
+                        </DataColumn>
+                        <DataColumn TItem="FieldDefinition" Title="Type">
+                            <Template>
+                                <span class="tag">@FieldValueFormatter.TypeName(context.Type)</span>
+                                @if (context.ReferenceTable is not null)
+                                {
+                                    <span class="tiny faint mono"> → @context.ReferenceTable</span>
+                                }
+                                @if (context.Choices.Count > 0)
+                                {
+                                    <span class="tiny faint"> (@context.Choices.Count choices)</span>
+                                }
+                            </Template>
+                        </DataColumn>
+                        <DataColumn TItem="FieldDefinition" Title="Flags">
+                            <Template>
+                                <div class="flex gap-1 flex-wrap">
+                                    @if (context.IsCustom)
+                                    {
+                                        <span class="pill pill-accent no-dot">Custom</span>
+                                    }
+                                    @if (context.IsRequired)
+                                    {
+                                        <span class="pill pill-warning no-dot">Mandatory</span>
+                                    }
+                                    @if (context.IsReadOnly)
+                                    {
+                                        <span class="pill pill-neutral no-dot">Read only</span>
+                                    }
+                                </div>
+                            </Template>
+                        </DataColumn>
+                        <DataColumn TItem="FieldDefinition" Title="Default" Value="f => f.DefaultValue" />
+                        <DataColumn TItem="FieldDefinition" Title="" Width="96px">
+                            <Template>
+                                @if (context.IsCustom)
+                                {
+                                    <div class="flex gap-1" @onclick:stopPropagation="true">
+                                        <button class="icon-btn" title="Edit" @onclick="() => OpenField(context)"><Icon Name="edit" Size="15" /></button>
+                                        <button class="icon-btn" title="Delete" @onclick="() => _deleteField = context"><Icon Name="trash" Size="15" /></button>
+                                    </div>
+                                }
+                            </Template>
+                        </DataColumn>
+                    </Columns>
+                </DataTable>
+                @if (!SupportsCustomFields)
+                {
+                    <div class="alert alert-info mt-4"><Icon Name="info" Size="16" /> This built-in table does not accept custom fields.</div>
+                }
+                break;
+        }
+    </div>
+
+    <Drawer @bind-Open="_fieldOpen" Title="@(_editingField is null ? "Add field" : "Edit field")" Subtitle="@_table.Label" Size="lg">
+        <ChildContent>
+            <div class="form-grid">
+                <FormField Label="Label" Required="true">
+                    <input class="input" value="@_field.Label" @oninput="OnFieldLabelInput" />
+                </FormField>
+                <FormField Label="Technical name" Required="true" Help="Starts with u_; cannot be changed later.">
+                    <input class="input mono" value="@_field.Name" disabled="@(_editingField is not null)" @oninput="@(e => { _field.Name = e.Value?.ToString() ?? string.Empty; _fieldNameTouched = true; })" />
+                </FormField>
+                <FormField Label="Type" Required="true" Help="@(_editingField is null ? null : "The type cannot be changed.")">
+                    <select class="select" value="@_field.Type" disabled="@(_editingField is not null)" @onchange="e => _field.Type = Enum.Parse<FieldType>(e.Value!.ToString()!)">
+                        @foreach (var type in Enum.GetValues<FieldType>())
+                        {
+                            <option value="@type">@FieldValueFormatter.TypeName(type)</option>
+                        }
+                    </select>
+                </FormField>
+                <FormField Label="Order" Help="Position in the field list.">
+                    <input class="input" type="number" @bind="_field.Order" />
+                </FormField>
+                @if (_field.Type == FieldType.Reference)
+                {
+                    <FormField Label="Referenced table" Required="true" Class="span-all">
+                        <select class="select" @bind="_field.ReferenceTable">
+                            <option value="">— Select table —</option>
+                            @foreach (var table in _tables)
+                            {
+                                <option value="@table.Name">@table.Label (@table.Name)</option>
+                            }
+                        </select>
+                    </FormField>
+                }
+                @if (_field.Type is FieldType.String or FieldType.Text)
+                {
+                    <FormField Label="Maximum length" Help="@(_field.Type == FieldType.String ? "1–1000, default 255" : "1–16000, default 4000")">
+                        <input class="input" type="number" @bind="_field.MaxLength" />
+                    </FormField>
+                }
+                <FormField Label="Default value" Help="Invariant value, e.g. 42, true, 2026-01-31 or a choice value.">
+                    <input class="input" @bind="_field.DefaultValue" />
+                </FormField>
+                <FormField Label="Mandatory">
+                    <Switch @bind-Value="_field.IsRequired" Label="@(_field.IsRequired ? "Value required" : "Optional")" />
+                </FormField>
+                <FormField Label="Help text" Class="span-all">
+                    <input class="input" @bind="_field.HelpText" placeholder="Shown below the input" />
+                </FormField>
+                @if (_field.Type == FieldType.Choice)
+                {
+                    <div class="span-all">
+                        <div class="form-section-title"><Icon Name="list" Size="16" /> Choices</div>
+                        <div class="stack" style="gap:6px">
+                            @foreach (var choice in _choices)
+                            {
+                                <div class="flex gap-2 items-center">
+                                    <input class="input mono" style="max-width:200px" placeholder="value" @bind="choice.Value" />
+                                    <input class="input" placeholder="Label" @bind="choice.Label" />
+                                    <button class="icon-btn" title="Remove" @onclick="() => _choices.Remove(choice)"><Icon Name="x" Size="15" /></button>
+                                </div>
+                            }
+                            <div><button class="btn btn-ghost btn-sm" @onclick="() => _choices.Add(new ChoiceRow())"><Icon Name="plus" Size="14" /> Add choice</button></div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _fieldOpen = false">Cancel</button>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveFieldAsync">
+                @if (_busy)
+                {
+                    <span class="spinner"></span>
+                }
+                @(_editingField is null ? "Add field" : "Save field")
+            </button>
+        </Footer>
+    </Drawer>
+
+    <ConfirmDialog Open="@(_deleteField is not null)" OpenChanged="o => { if (!o) { _deleteField = null; } }" Danger="true" Title="Delete field?"
+                   Message="@($"The field '{_deleteField?.Label}' is removed from the table. Stored values are no longer shown, filtered or exported.")"
+                   ConfirmText="Delete field" OnConfirm="DeleteFieldAsync" />
+    <ConfirmDialog @bind-Open="_confirmDeleteTable" Danger="true" Title="Delete table?"
+                   Message="@($"'{_table.Label}' and all of its records will be deleted permanently. This cannot be undone.")"
+                   ConfirmText="Delete table" OnConfirm="DeleteTableAsync" />
+}
+
+@code {
+    private TableDefinition? _table;
+    private IReadOnlyList<TableDefinition> _tables = [];
+    private TableLayoutModel _layout = new();
+    private CustomTableInput? _settings;
+    private CustomFieldInput _field = new();
+    private List<ChoiceRow> _choices = [];
+    private FieldDefinition? _editingField;
+    private FieldDefinition? _deleteField;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _fieldOpen;
+    private bool _fieldNameTouched;
+    private bool _confirmDeleteTable;
+    private string? _tab = "fields";
+
+    /// <summary>Gets or sets the technical table name from the route.</summary>
+    [Parameter] public string Name { get; set; } = string.Empty;
+
+    private bool SupportsCustomFields => _table is not null && (_table.IsCustom || (_table.EntityType is { } type && typeof(Servora.Domain.Common.IHasCustomFields).IsAssignableFrom(type)));
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("fields", "Fields", "edit", _table?.Fields.Count),
+        new("layout", "Form layout", "layers"),
+        new("list", "List columns", "list"),
+        .. _table?.IsCustom == true ? new[] { new TabItem("settings", "Settings", "settings") } : [],
+    ];
+
+    private List<FieldDefinition> UnplacedFields
+    {
+        get
+        {
+            var placed = _layout.Sections.SelectMany(s => s.Fields).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return _table?.Fields.Where(f => !placed.Contains(f.Name) && f.Name != "Id").ToList() ?? [];
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _table = await Registry.GetTableAsync(Name);
+        _tables = await Registry.GetTablesAsync();
+        if (_table is not null)
+        {
+            var layout = await Designer.GetLayoutAsync(_table.Name);
+            _layout = layout.Succeeded ? layout.Value! : new TableLayoutModel();
+            if (_table.IsCustom)
+            {
+                var settings = await Designer.GetCustomTableAsync(_table.Name);
+                _settings = settings.Succeeded ? settings.Value : null;
+            }
+        }
+
+        _loading = false;
+    }
+
+    private static void Move<T>(List<T> list, T item, int delta)
+    {
+        var index = list.IndexOf(item);
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= list.Count)
+        {
+            return;
+        }
+
+        list.RemoveAt(index);
+        list.Insert(target, item);
+    }
+
+    private void AddSection() => _layout.Sections.Add(new FormSectionModel { Title = "New section" });
+
+    private void AddToSection(FormSectionModel section, string? field)
+    {
+        if (!string.IsNullOrEmpty(field) && !section.Fields.Contains(field))
+        {
+            section.Fields.Add(field);
+        }
+    }
+
+    private void AddColumn(string? field)
+    {
+        if (!string.IsNullOrEmpty(field) && !_layout.ListColumns.Contains(field))
+        {
+            _layout.ListColumns.Add(field);
+        }
+    }
+
+    private async Task SaveLayoutAsync()
+    {
+        _busy = true;
+        var result = await Designer.SaveLayoutAsync(_table!.Name, _layout);
+        _busy = false;
+        Toasts.FromResult(result, "Layout saved");
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        _busy = true;
+        var result = await Designer.UpdateTableAsync(_table!.Name, _settings!);
+        _busy = false;
+        if (Toasts.FromResult(result, "Table settings saved"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteTableAsync()
+    {
+        var result = await Designer.DeleteTableAsync(_table!.Name);
+        if (Toasts.FromResult(result, "Table deleted"))
+        {
+            Nav.NavigateTo("/admin/tables");
+        }
+    }
+
+    private Task OnFieldRowClick(FieldDefinition field) => field.IsCustom ? OpenField(field) : Task.CompletedTask;
+
+    private async Task OpenField(FieldDefinition? field)
+    {
+        _editingField = field;
+        _fieldNameTouched = field is not null;
+        if (field is null)
+        {
+            _field = new CustomFieldInput { Type = FieldType.String };
+            _choices = [new ChoiceRow()];
+        }
+        else
+        {
+            var loaded = await Designer.GetFieldAsync(_table!.Name, field.Name);
+            if (!loaded.Succeeded)
+            {
+                Toasts.Error("Field could not be loaded", loaded.Error);
+                return;
+            }
+
+            _field = loaded.Value!;
+            _choices = _field.Choices.Select(c => new ChoiceRow { Value = c.Value, Label = c.Label }).ToList();
+        }
+
+        _fieldOpen = true;
+    }
+
+    private void OnFieldLabelInput(ChangeEventArgs e)
+    {
+        _field.Label = e.Value?.ToString() ?? string.Empty;
+        if (_editingField is null && !_fieldNameTouched)
+        {
+            var slug = new string(_field.Label.ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) ? c : '_').ToArray()).Trim('_');
+            while (slug.Contains("__", StringComparison.Ordinal))
+            {
+                slug = slug.Replace("__", "_", StringComparison.Ordinal);
+            }
+
+            _field.Name = slug.Length == 0 ? string.Empty : "u_" + (slug.Length > 40 ? slug[..40] : slug);
+        }
+    }
+
+    private async Task SaveFieldAsync()
+    {
+        _field.Choices = _choices.Where(c => !string.IsNullOrWhiteSpace(c.Value)).Select(c => new FieldChoice(c.Value.Trim(), string.IsNullOrWhiteSpace(c.Label) ? c.Value.Trim() : c.Label.Trim())).ToList();
+        _busy = true;
+        Result result = _editingField is null
+            ? await Designer.AddFieldAsync(_table!.Name, _field)
+            : await Designer.UpdateFieldAsync(_table!.Name, _editingField.Name, _field);
+        _busy = false;
+        if (Toasts.FromResult(result, _editingField is null ? "Field added" : "Field saved"))
+        {
+            _fieldOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteFieldAsync()
+    {
+        var field = _deleteField;
+        _deleteField = null;
+        if (field is null)
+        {
+            return;
+        }
+
+        var result = await Designer.DeleteFieldAsync(_table!.Name, field.Name);
+        if (Toasts.FromResult(result, "Field deleted"))
+        {
+            await LoadAsync();
+        }
+    }
+}

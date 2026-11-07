@@ -1,0 +1,71 @@
+@* Side card listing the SLA timers of a record with progress bars (embed in any task form). *@
+@inject ISlaService Slas
+
+<div class="card">
+    <div class="card-header"><h3 class="flex items-center gap-2"><Icon Name="timer" Size="16" /> SLAs</h3></div>
+    <div class="card-body">
+        @if (_timers is null)
+        {
+            <Skeleton Lines="2" />
+        }
+        else if (_timers.Count == 0)
+        {
+            <div class="small faint">No SLA applies to this record.</div>
+        }
+        else
+        {
+            <div class="stack">
+                @foreach (var timer in _timers)
+                {
+                    var tone = timer.Breached ? "danger" : timer.PercentElapsed >= 75 ? "warning" : "success";
+                    <div>
+                        <div class="flex items-center justify-between gap-2 mb-0">
+                            <span style="font-weight:600" class="truncate">@timer.Name</span>
+                            <StatusPill Text="@StageLabel(timer.Stage)" Tone="@StageTone(timer.Stage)" />
+                        </div>
+                        <div class="progress @tone mt-1"><span style="width:@(Math.Min(100, timer.PercentElapsed).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span></div>
+                        <div class="flex justify-between tiny faint mt-1">
+                            <span>@timer.PercentElapsed.ToString("0", System.Globalization.CultureInfo.InvariantCulture)% elapsed</span>
+                            @if (timer.DueAt is { } due && timer.Stage is "InProgress" or "Breached")
+                            {
+                                <span>due <RelativeTime Value="due" /></span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<TaskSlaInfo>? _timers;
+
+    /// <summary>Gets or sets the technical table name.</summary>
+    [Parameter, EditorRequired] public string Table { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the record identifier.</summary>
+    [Parameter, EditorRequired] public Guid RecordId { get; set; }
+
+    /// <summary>Reloads the timers (for example after the record was saved).</summary>
+    /// <returns>A task that completes when the timers are loaded.</returns>
+    public async Task ReloadAsync()
+    {
+        _timers = await Slas.GetForRecordAsync(Table, RecordId);
+        StateHasChanged();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync() => _timers = await Slas.GetForRecordAsync(Table, RecordId);
+
+    private static string StageLabel(string stage) => stage == "InProgress" ? "In progress" : stage;
+
+    private static string StageTone(string stage) => stage switch
+    {
+        "Breached" => "danger",
+        "Achieved" => "success",
+        "Paused" => "warning",
+        "Cancelled" => "neutral",
+        _ => "info",
+    };
+}

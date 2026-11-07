@@ -1,0 +1,51 @@
+@* Read-only rendering of a field value of a record row in lists and side cards (encoded, safe links only). *@
+@{
+    var value = Row.GetValueOrDefault(Field.Name);
+    var text = FieldValueFormatter.Display(Field, Row);
+}
+@if (value is null || (value is string s && string.IsNullOrWhiteSpace(s)))
+{
+    <span class="faint">—</span>
+}
+else
+{
+    switch (Field.Type)
+    {
+        case FieldType.Boolean:
+            @if (value is true)
+            {
+                <span class="text-success"><Icon Name="check-circle" Size="15" /></span>
+            }
+            else
+            {
+                <span class="faint"><Icon Name="minus" Size="15" /></span>
+            }
+            break;
+        case FieldType.Choice:
+            <StatusPill Text="@text" />
+            break;
+        case FieldType.Reference when Field.ReferenceTable == "sys_user":
+            <span class="person"><Avatar Name="@text" Size="sm" ShowTitle="false" /><span class="person-name">@text</span></span>
+            break;
+        case FieldType.DateTime when value is DateTimeOffset moment:
+            <RelativeTime Value="moment" />
+            break;
+        case FieldType.Url when FieldValueFormatter.SafeUrl(value) is { } url:
+            <a href="@url" target="_blank" rel="noopener noreferrer" @onclick:stopPropagation="true">@text</a>
+            break;
+        case FieldType.Email:
+            <a href="@($"mailto:{text}")" @onclick:stopPropagation="true">@text</a>
+            break;
+        default:
+            <span class="@(Field.Type is FieldType.Guid or FieldType.Json ? "mono small" : null)">@(text.Length > 120 ? text[..120] + "…" : text)</span>
+            break;
+    }
+}
+
+@code {
+    /// <summary>Gets or sets the field.</summary>
+    [Parameter, EditorRequired] public FieldDefinition Field { get; set; } = default!;
+
+    /// <summary>Gets or sets the record row (values plus <c>Field.display</c> entries).</summary>
+    [Parameter, EditorRequired] public IReadOnlyDictionary<string, object?> Row { get; set; } = default!;
+}

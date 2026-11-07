@@ -1,0 +1,58 @@
+@page "/go/{Number}"
+@* Resolves a record number (INC0001001, KB0001234, custom prefixes, …) to the record's page; read permission is checked by the resolver. *@
+@attribute [Authorize]
+@inject IRecordNumberResolver Resolver
+@inject NavigationManager Nav
+
+<PageTitle>@Number.ToUpperInvariant() · Servora</PageTitle>
+
+@if (_error is null)
+{
+    <div class="card" style="max-width:520px;margin:64px auto">
+        <div class="card-body flex items-center gap-3">
+            <span class="spinner"></span>
+            <div>
+                <div style="font-weight:600">Opening <span class="mono">@Number.ToUpperInvariant()</span>…</div>
+                <div class="small muted">Looking up the record.</div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <EmptyState Icon="@_icon" Title="@_title" Text="@_error">
+        <div class="flex gap-2">
+            <button class="btn btn-secondary" @onclick="@(() => Nav.NavigateTo("/"))"><Icon Name="home" Size="16" /> Home</button>
+            <button class="btn btn-ghost" @onclick="@(() => Nav.NavigateTo("/admin/tables"))"><Icon Name="table" Size="16" /> Browse tables</button>
+        </div>
+    </EmptyState>
+}
+
+@code {
+    private string? _error;
+    private string _title = "Record not found";
+    private string _icon = "search";
+
+    /// <summary>Gets or sets the record number from the route.</summary>
+    [Parameter] public string Number { get; set; } = string.Empty;
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _error = null;
+        var result = await Resolver.ResolveAsync(Number);
+        if (result.Succeeded)
+        {
+            Nav.NavigateTo(result.Value!.Url, replace: true);
+            return;
+        }
+
+        (_title, _icon) = result.ErrorKind switch
+        {
+            ResultErrorKind.Forbidden => ("No access", "lock"),
+            ResultErrorKind.Validation => ("Not a record number", "alert-circle"),
+            _ => ("Record not found", "search"),
+        };
+        _error = result.Error ?? "The record could not be found.";
+    }
+}
