@@ -29,14 +29,14 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | ID | Task | Owner (agent) | Depends on | Status |
 |----|------|---------------|-----------|--------|
 | T-01 | Kernel: solution, architecture, persistence, auth pipeline, design system, contracts | Orchestrator | – | ✅ Done |
-| T-02 | Identity & Access: users, groups, roles, LDAP/AD, Windows SSO, profile | Identity Agent | T-01 | 🔨 In Progress |
-| T-03 | Setup wizard, system settings, branding, SMTP e-mail, secrets admin, database admin | Configuration Agent | T-01 | 🔨 In Progress |
+| T-02 | Identity & Access: users, groups, roles, LDAP/AD, Windows SSO, profile | Identity Agent | T-01 | ✅ Done |
+| T-03 | Setup wizard, system settings, branding, SMTP e-mail, secrets admin, database admin | Configuration Agent | T-01 | ✅ Done |
 | T-04 | Incident & Problem Management + "My Work" workspace | ITSM Agent | T-01 | ✅ Done |
-| T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | 🔨 In Progress |
-| T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | 🔨 In Progress |
+| T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | ✅ Done |
+| T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | ✅ Done |
 | T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | 🔨 In Progress |
 | T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | 🔨 In Progress |
-| T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | 🔨 In Progress |
+| T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | ✅ Done |
 | T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | 🔨 In Progress |
 | T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ⏳ Planned |
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
@@ -83,7 +83,7 @@ admin/admin → forced password change (policy rejects weak / user-name password
 
 ---
 
-## T-02 Identity & Access 🔨
+## T-02 Identity & Access ✅
 
 **Owned paths:** `*/Identity/**` (Domain additions, Application, Infrastructure, Configurations), `Components/Pages/Admin/Identity/**`,
 `Components/Pages/Account/**` (may restyle/extend Login, ChangePassword), `Components/Pages/Profile/**`,
@@ -119,9 +119,13 @@ admin/admin → forced password change (policy rejects weak / user-name password
 and the app works fully without AD; Windows SSO endpoint works when enabled; escalation guard + audit present;
 unit tests for LDAP filter escaping, group→role mapping and escalation guard.
 
+**Result (validated by orchestrator, merged `af401eb`):** Users/groups/roles admin with permission matrix and escalation guard, LDAP/AD (LDAPS/StartTLS, group→role mapping, JIT provisioning, scheduled sync), Windows SSO via Negotiate, `/admin/auth` policy, `/profile`, idempotent demo seed.
+**Evidence:** 130 files in owned paths; build 0/0; tests 144 passed (121 identity). Merged main: build 0 errors / 0 warnings, 707 tests passed, startup smoke on fresh SQLite healthy.
+**Open follow-ups:** Not tested against a real AD domain; apply saved `User.Theme` in layout (T-13).
+
 ---
 
-## T-03 Setup, Configuration & Secrets 🔨
+## T-03 Setup, Configuration & Secrets ✅
 
 **Owned paths:** `*/Configuration/**`, `Components/Pages/Setup/**`, `Components/Pages/Admin/Configuration/**`,
 `src/Servora.Web/Setup/**` (except `SetupGuardMiddleware`, `SetupState` which you may extend), `ConfigurationModule.cs`,
@@ -152,6 +156,10 @@ unit tests for LDAP filter escaping, group→role mapping and escalation guard.
 **Acceptance criteria:** fresh data dir → wizard → working instance on SQLite (and connection test for SQL Server /
 PostgreSQL); settings persist and audit; test e-mail works against an SMTP server; secrets never displayed after save;
 unit tests for settings typing/defaults and SMTP option validation.
+
+**Result (validated by orchestrator, merged `e8fda35`):** Setup wizard (loopback or setup token, no query-string token), typed system settings with history and restart badge, branding + logo (magic-byte checked), SMTP sender + outbox with retry, secrets admin (write-only), database card trimmed to the T-15 boundary, feature flags.
+**Evidence:** All files in owned paths; build 0/0; tests 121 passed; wizard verified end to end on SQLite. Merged main: build 0 errors / 0 warnings, 707 tests passed, startup smoke on fresh SQLite healthy.
+**Open follow-ups:** Implicit TLS (465) unsupported by System.Net.Mail; branding wiring into layout (T-13).
 
 ---
 
@@ -200,7 +208,7 @@ file cleanup on record delete.
 
 ---
 
-## T-05 Change, Catalog, Requests & Approvals 🔨
+## T-05 Change, Catalog, Requests & Approvals ✅
 
 **Owned paths:** `*/Changes/**`, `*/Catalog/**`, `*/Approvals/**` (Application `Approvals` contract files are
 read-only, implement them), `Components/Pages/Changes/**`, `Components/Pages/Catalog/**`,
@@ -233,9 +241,13 @@ read-only, implement them), `Components/Pages/Changes/**`, `Components/Pages/Cat
 order → approval → tasks → closure works; approvals page works; unit tests for approval policy logic, change
 state machine and variable validation.
 
+**Result (validated by orchestrator, merged `6391ea7`):** Approvals engine + inbox, change lifecycle with CAB, risk questionnaire, conflicts, calendar, `ChangeSavingHook` for all writers, catalog builder (7 variable types), order → approval → tasks → closure, `/requests/new` order-on-behalf page.
+**Evidence:** All files in owned paths; build 0/0; tests 76 passed. Merged main: build 0 errors / 0 warnings, 707 tests passed, startup smoke on fresh SQLite healthy.
+**Open follow-ups:** Hook trusts the `Approval` field from Table API writers (T-14 review item); no dedicated REST endpoints yet.
+
 ---
 
-## T-06 Knowledge, CMDB & Assets 🔨
+## T-06 Knowledge, CMDB & Assets ✅
 
 **Owned paths:** `*/Knowledge/**`, `*/Cmdb/**` (kernel `ConfigurationItem.cs`, `OperationalStatus.cs` may be
 extended additively), `*/Assets/**`, `Components/Pages/Knowledge/**`, `Components/Pages/Cmdb/**`,
@@ -265,6 +277,10 @@ extended additively), `*/Assets/**`, `Components/Pages/Knowledge/**`, `Component
 
 **Acceptance criteria:** KB workflow and search work, Markdown rendering is XSS-safe (tests), CMDB graph renders and
 navigates, asset lifecycle works; unit tests for Markdown renderer safety, graph traversal and KB workflow.
+
+**Result (validated by orchestrator, merged `dcd686a`):** Knowledge workflow with versions, ranked search, in-house XSS-safe Markdown, CMDB classes/attributes/relationships with bounded dependency graph (SVG) and map, asset lifecycle with KPIs, seed data, read-only REST endpoints.
+**Evidence:** 155 files in owned paths; build 0/0; tests 176 passed (153 module). Merged main: build 0 errors / 0 warnings, 707 tests passed, startup smoke on fresh SQLite healthy.
+**Open follow-ups:** Remove `ModuleStyles` workaround (T-13); CI related records need T-07 record service.
 
 ---
 
@@ -353,7 +369,7 @@ engine step sequencing.
 
 ---
 
-## T-09 Observability & Analytics 🔨
+## T-09 Observability & Analytics ✅
 
 **Owned paths:** `*/Observability/**` (kernel `AuditService`, `AuditEvent` may be extended additively),
 `*/Analytics/**`, `Components/Pages/Observability/**`, `Components/Pages/Analytics/**`, `Components/Analytics/**`,
@@ -384,6 +400,10 @@ engine step sequencing.
 **Acceptance criteria:** debug switch changes log level live; logs visible in UI and on disk with redaction tests;
 audit verification detects tampering (test); health page shows real data; dashboards render with seed data; report
 builder saves and renders a grouped chart.
+
+**Result (validated by orchestrator, merged `0fe2a8e`):** Logging with live debug switch (persisted, auto-revert), log viewer + daily JSONL files with redaction, audit viewer with hash-chain verification surviving retention, health page with real metrics, executive dashboard, report builder with sharing and pins.
+**Evidence:** 154 files in owned paths; build 0/0; tests 92 passed. Merged main: build 0 errors / 0 warnings, 707 tests passed, startup smoke on fresh SQLite healthy.
+**Open follow-ups:** Metrics in memory only (24 h); report filters need T-07 condition evaluator.
 
 ---
 
@@ -496,6 +516,19 @@ provider that fails when the model has pending changes (`HasPendingModelChanges`
 to an empty SQLite database; verify update path: install old build → create data → update → migrations applied
 automatically with pre-migration backup (T-15). Document "adding a migration" in `docs/development/`.
 
+**Collected requests from hand-offs (process during integration):**
+- Migrations must include: `sys_report`, `sys_dashboard_pin`, `sys_audit_event.Sequence` + indexes on `Sequence`,
+  `ActorName` (T-09); `sys_directory_group_map`, `sys_directory_sync_run` (T-02); `kb_*`, `cmdb_class`,
+  `cmdb_rel_ci`, `alm_asset` (T-06); `OutboundEmail` (T-03); all T-05 tables.
+- Navigation: Knowledge (`/knowledge`, `/knowledge/articles`, `/knowledge/admin`), CMDB (`/cmdb`, `/cmdb/map`,
+  `/cmdb/classes`), Assets (`/assets`) (T-06); optional "New request" `/requests/new` (T-05), "Mail outbox" (T-03).
+- Layout: wire `IBrandingService` into NavMenu/AuthLayout/titles, optional login banner, hide splash in AuthLayout
+  (T-03); apply saved `User.Theme` after sign-in (T-02); My Work approvals count via
+  `IApprovalService.CountPendingForUserAsync` (T-05).
+- Remove `Components/KnowledgeCmdb/ModuleStyles.razor` and its usages (T-06).
+- Kernel: instance-specific auth/antiforgery cookie names, or a friendly redirect on antiforgery failure, so several
+  localhost instances do not clash (T-05).
+
 ## T-14 Security & Architecture Review ⏳
 
 Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings; record residual risks.
@@ -560,3 +593,4 @@ build green, tests pass.
 | 2026-11-07 | T-12 validated and merged (✅). |
 | 2026-11-07 | T-04 validated and merged (✅); kernel UI fixes + 2 contract extensions. |
 | 2026-11-07 | Product owner: automatic migrations + built-in backup/restore made binding; T-15 added and dispatched; interrupted T-02, T-03, T-05…T-10 resumed. |
+| 2026-11-07 | T-02, T-03, T-05, T-06, T-09 validated and merged (✅); integration requests collected under T-13. |
