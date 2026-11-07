@@ -1,0 +1,300 @@
+@page "/admin/roles/new"
+@page "/admin/roles/{Id:guid}"
+@attribute [RequirePermission(Permissions.Identity.ReadUsers)]
+@* Role editor: identity of the role, permission matrix with escalation guard, holders and groups. *@
+@inject IRoleAdminService Roles
+@inject IPermissionService PermissionService
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(IsNew ? "New role" : _detail?.Label ?? "Role") · Servora</PageTitle>
+
+@if (_loading)
+{
+    <div class="card"><div class="card-body"><Skeleton Lines="10" Height="18px" /></div></div>
+}
+else if (!IsNew && _detail is null)
+{
+    <div class="card">
+        <EmptyState Icon="shield" Title="Role not found" Text="The role does not exist or was deleted.">
+            <a class="btn btn-secondary" href="/admin/roles">Back to roles</a>
+        </EmptyState>
+    </div>
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New role" : _detail!.Label)" Icon="@(IsNew ? "shield" : _detail!.IsAdministratorRole ? "sparkles" : "shield")">
+        <Breadcrumbs>
+            <a href="/admin/roles">Roles &amp; Permissions</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New" : _detail!.Name)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (IsNew)
+            {
+                <div class="subtitle">Define a bundle of permissions. You can only grant permissions you hold yourself.</div>
+            }
+            else
+            {
+                <div class="flex items-center gap-2 flex-wrap mt-1">
+                    <span class="mono small muted">@_detail!.Name</span>
+                    @if (_detail.IsSystem)
+                    {
+                        <span class="pill pill-purple no-dot"><Icon Name="lock" Size="11" /> System role</span>
+                    }
+                    <span class="small muted">@_detail.UserCount direct holder@(_detail.UserCount == 1 ? string.Empty : "s") · @_detail.Groups.Count group@(_detail.Groups.Count == 1 ? string.Empty : "s")</span>
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (!IsNew)
+            {
+                <a class="btn btn-secondary" href="/admin/users?role=@Id"><Icon Name="users" Size="16" /> View holders</a>
+                @if (_canManage && !_detail!.IsSystem)
+                {
+                    <button class="btn btn-outline-danger" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete</button>
+                }
+            }
+            @if (_canManage)
+            {
+                <button class="btn btn-primary" disabled="@(_busy || !_dirty && !IsNew)" @onclick="SaveAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    <Icon Name="save" Size="16" /> @(IsNew ? "Create role" : "Save changes")
+                </button>
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (_detail?.IsAdministratorRole == true)
+    {
+        <div class="alert alert-info mb-4"><Icon Name="shield-check" Size="18" /><div>The built-in administrator role always keeps full access (<span class="mono">*</span>). It cannot be deleted or renamed.</div></div>
+    }
+    @if (_dirty && !IsNew)
+    {
+        <div class="alert alert-warning mb-4"><Icon Name="alert-triangle" Size="18" /><div>You have unsaved changes. Changes apply to every holder of this role as soon as you save.</div></div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="stack">
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Label" Required="true">
+                            <input class="input" value="@_model.Label" @onchange="e => { _model.Label = e.Value?.ToString() ?? string.Empty; _dirty = true; }" disabled="@(!_canManage)" placeholder="e.g. Problem Manager" />
+                        </FormField>
+                        <FormField Label="Technical name" Required="true" Help="@(IsSystem ? "System role names cannot be changed." : "Lower case letters, digits and underscores.")">
+                            <input class="input mono" value="@_model.Name" @onchange="e => { _model.Name = e.Value?.ToString() ?? string.Empty; _dirty = true; }" disabled="@(!_canManage || IsSystem)" placeholder="problem_manager" />
+                        </FormField>
+                        <FormField Label="Description" Class="span-2">
+                            <textarea class="textarea" rows="2" value="@_model.Description" @onchange="e => { _model.Description = e.Value?.ToString(); _dirty = true; }" disabled="@(!_canManage)"></textarea>
+                        </FormField>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h3><Icon Name="key" Size="16" /> Permissions</h3>
+                        <div class="card-subtitle">Grouped by module. Locked entries are permissions you do not hold and therefore cannot grant.</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <PermissionMatrix Selected="_selected" SelectedChanged="() => _dirty = true" ReadOnly="!_canManage"
+                                      LockedKeys="_lockedKeys" ActorPermissions="_actorPermissions" />
+                </div>
+            </div>
+        </div>
+
+        <aside class="stack sticky-top">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="activity" Size="16" /> Summary</h3></div>
+                <div class="card-body">
+                    <div class="grid grid-2" style="gap:12px">
+                        <div><div class="eyebrow">Granted</div><div style="font-size:24px;font-weight:700">@(_selected.Contains(Permissions.All) ? "All" : _selected.Count.ToString())</div></div>
+                        <div><div class="eyebrow">Modules</div><div style="font-size:24px;font-weight:700">@ModuleCount</div></div>
+                    </div>
+                    @if (!IsNew)
+                    {
+                        <dl class="kv mt-4">
+                            <dt>Updated</dt><dd><RelativeTime Value="_detail!.UpdatedAt" /> <span class="faint small">by @_detail.UpdatedBy</span></dd>
+                            <dt>Created</dt><dd><RelativeTime Value="_detail.CreatedAt" /></dd>
+                        </dl>
+                    }
+                </div>
+            </div>
+            @if (!IsNew)
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="user" Size="16" /> Direct holders</h3><span class="badge">@_detail!.UserCount</span></div>
+                    <div class="card-body">
+                        @if (_detail.Users.Count == 0)
+                        {
+                            <p class="small muted" style="margin:0">Nobody holds this role directly.</p>
+                        }
+                        else
+                        {
+                            <div class="stack" style="gap:10px">
+                                @foreach (var holder in _detail.Users.Take(12))
+                                {
+                                    <a class="person" href="/admin/users/@holder.UserId">
+                                        <Avatar Name="@holder.DisplayName" Size="sm" ShowTitle="false" />
+                                        <span class="person-name">@holder.DisplayName</span>
+                                        @if (holder.IsFromDirectory)
+                                        {
+                                            <span class="tag"><Icon Name="id-card" Size="11" /></span>
+                                        }
+                                        @if (!holder.IsActive)
+                                        {
+                                            <span class="tag">inactive</span>
+                                        }
+                                    </a>
+                                }
+                                @if (_detail.UserCount > 12)
+                                {
+                                    <a class="small cell-link" href="/admin/users?role=@Id">View all @_detail.UserCount holders</a>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="users" Size="16" /> Granted by groups</h3><span class="badge">@_detail.Groups.Count</span></div>
+                    <div class="card-body">
+                        @if (_detail.Groups.Count == 0)
+                        {
+                            <p class="small muted" style="margin:0">No group grants this role.</p>
+                        }
+                        else
+                        {
+                            <div class="stack" style="gap:8px">
+                                @foreach (var group in _detail.Groups)
+                                {
+                                    <a class="flex items-center justify-between" href="/admin/groups/@group.GroupId">
+                                        <span class="cell-link">@group.Name</span>
+                                        <span class="small faint">@group.MemberCount members</span>
+                                    </a>
+                                }
+                            </div>
+                        }
+                        @if (_detail.DirectoryMappings.Count > 0)
+                        {
+                            <div class="eyebrow mt-4 mb-2">Directory groups</div>
+                            <div class="flex flex-wrap gap-1">
+                                @foreach (var mapping in _detail.DirectoryMappings)
+                                {
+                                    <span class="tag mono truncate" title="@mapping">@mapping</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </aside>
+    </div>
+}
+
+<ConfirmDialog @bind-Open="_confirmDelete" Title="Delete role?" Danger="true" ConfirmText="Delete role"
+               Message="@($"'{_detail?.Label}' will be removed from {_detail?.UserCount} users and {_detail?.Groups.Count} groups. This cannot be undone.")"
+               OnConfirm="DeleteAsync" />
+
+@code {
+    private RoleEditModel _model = new();
+    private RoleDetail? _detail;
+    private HashSet<string> _selected = new(StringComparer.Ordinal);
+    private IReadOnlySet<string>? _actorPermissions;
+    private IReadOnlySet<string>? _lockedKeys;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _dirty;
+    private bool _canManage;
+    private bool _confirmDelete;
+
+    /// <summary>Gets or sets the role identifier (absent for a new role).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool IsNew => Id is null;
+
+    private bool IsSystem => _detail?.IsSystem == true;
+
+    private int ModuleCount => _selected.Contains(Permissions.All)
+        ? PermissionCatalog.All.Select(p => p.Group).Distinct().Count()
+        : PermissionCatalog.All.Where(p => PermissionMatcher.IsGranted(_selected, p.Key)).Select(p => p.Group).Distinct().Count();
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Identity.ManageRoles);
+        _actorPermissions = CurrentUser.UserId is { } userId ? await PermissionService.GetUserPermissionsAsync(userId) : null;
+        if (IsNew)
+        {
+            _detail = null;
+            _model = new RoleEditModel();
+            _selected = new HashSet<string>(StringComparer.Ordinal);
+            _lockedKeys = null;
+        }
+        else
+        {
+            await ReloadAsync();
+        }
+
+        _dirty = false;
+        _loading = false;
+    }
+
+    private async Task ReloadAsync()
+    {
+        var result = await Roles.GetAsync(Id!.Value);
+        _detail = result.Value;
+        if (_detail is null)
+        {
+            if (result.ErrorKind != ResultErrorKind.NotFound)
+            {
+                Toasts.Error("Could not load the role", result.Error);
+            }
+
+            return;
+        }
+
+        _model = new RoleEditModel { Name = _detail.Name, Label = _detail.Label, Description = _detail.Description };
+        _selected = new HashSet<string>(_detail.Permissions, StringComparer.Ordinal);
+        _lockedKeys = _detail.IsAdministratorRole ? new HashSet<string>([Permissions.All], StringComparer.Ordinal) : null;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            _model.Permissions = _selected.ToList();
+            if (IsNew)
+            {
+                var created = await Roles.CreateAsync(_model);
+                if (Toasts.FromResult(created, "Role created"))
+                {
+                    Nav.NavigateTo($"/admin/roles/{created.Value}");
+                }
+            }
+            else if (Toasts.FromResult(await Roles.UpdateAsync(Id!.Value, _model, _detail!.Version), "Role saved"))
+            {
+                await ReloadAsync();
+                _dirty = false;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Toasts.FromResult(await Roles.DeleteAsync(Id!.Value), "Role deleted"))
+        {
+            Nav.NavigateTo("/admin/roles");
+        }
+    }
+}

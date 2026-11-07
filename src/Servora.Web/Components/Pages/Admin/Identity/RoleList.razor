@@ -1,0 +1,105 @@
+@page "/admin/roles"
+@attribute [RequirePermission(Permissions.Identity.ReadUsers)]
+@* Role catalog: system and custom roles with permission counts and holders. *@
+@inject IRoleAdminService Roles
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Roles &amp; Permissions · Servora</PageTitle>
+
+<PageHeader Title="Roles & Permissions" Subtitle="Bundles of permissions granted to users directly, through groups or through directory group mappings." Icon="shield">
+    <Actions>
+        <PermissionView Permission="@Permissions.Identity.ManageRoles">
+            <a class="btn btn-primary" href="/admin/roles/new"><Icon Name="plus" Size="16" /> New role</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Roles" Value="@(_items?.Count.ToString() ?? "–")" Icon="shield" Tone="primary" Caption="@($"{_items?.Count(r => r.IsSystem) ?? 0} built in")" />
+    <StatCard Label="Custom roles" Value="@(_items?.Count(r => !r.IsSystem).ToString() ?? "–")" Icon="wand" Tone="accent" Caption="defined by administrators" />
+    <StatCard Label="Permissions" Value="@PermissionCatalog.All.Count.ToString()" Icon="key" Tone="info" Caption="@($"in {PermissionCatalog.All.Select(p => p.Group).Distinct().Count()} modules")" />
+    <StatCard Label="Full-access roles" Value="@(_items?.Count(r => r.HasWildcard).ToString() ?? "–")" Icon="sparkles" Tone="warning" Caption="grant every permission" />
+</div>
+
+<DataTable TItem="RoleListItem" Items="Visible" TotalCount="Visible.Count" PageNumber="1" PageSize="Math.Max(1, Visible.Count)" ShowPager="false"
+           Loading="_loading" SearchPlaceholder="Search roles…" OnSearch="Search" OnRowClick="@(r => Nav.NavigateTo($"/admin/roles/{r.Id}"))"
+           EmptyIcon="shield" EmptyTitle="No roles found" EmptyText="No role matches the search.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_filter == "all" ? "active" : null)" @onclick="@(() => _filter = "all")">All</button>
+            <button class="@(_filter == "system" ? "active" : null)" @onclick="@(() => _filter = "system")">Built in</button>
+            <button class="@(_filter == "custom" ? "active" : null)" @onclick="@(() => _filter = "custom")">Custom</button>
+        </div>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="RoleListItem" Title="Role">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <div class="page-icon" style="width:34px;height:34px;border-radius:10px"><Icon Name="@(context.HasWildcard ? "sparkles" : "shield")" Size="16" /></div>
+                    <div style="min-width:0">
+                        <div class="cell-primary">@context.Label</div>
+                        <div class="cell-sub truncate" style="max-width:420px">@context.Description</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="RoleListItem" Title="Technical name"><Template><span class="mono small muted">@context.Name</span></Template></DataColumn>
+        <DataColumn TItem="RoleListItem" Title="Permissions" Align="right">
+            <Template>
+                @if (context.HasWildcard)
+                {
+                    <span class="pill pill-warning no-dot">All</span>
+                }
+                else
+                {
+                    <b>@context.PermissionCount</b>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="RoleListItem" Title="Users" Align="right" Value="r => r.UserCount" />
+        <DataColumn TItem="RoleListItem" Title="Groups" Align="right" Value="r => r.GroupCount" />
+        <DataColumn TItem="RoleListItem" Title="Type">
+            <Template>
+                @if (context.IsSystem)
+                {
+                    <span class="pill pill-purple no-dot"><Icon Name="lock" Size="11" /> System</span>
+                }
+                else
+                {
+                    <span class="pill pill-neutral no-dot">Custom</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="RoleListItem" Title="Updated"><Template><RelativeTime Value="context.UpdatedAt" /></Template></DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private IReadOnlyList<RoleListItem>? _items;
+    private bool _loading = true;
+    private string _filter = "all";
+
+    private IReadOnlyList<RoleListItem> Visible => (_items ?? [])
+        .Where(r => _filter switch { "system" => r.IsSystem, "custom" => !r.IsSystem, _ => true })
+        .ToList();
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => Search(string.Empty);
+
+    private async Task Search(string term)
+    {
+        _loading = true;
+        var result = await Roles.ListAsync(term);
+        if (result.Succeeded)
+        {
+            _items = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Could not load roles", result.Error);
+        }
+
+        _loading = false;
+    }
+}

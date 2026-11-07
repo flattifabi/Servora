@@ -1,0 +1,167 @@
+@page "/admin/auth"
+@attribute [RequirePermission(Permissions.Identity.ManageAuthPolicies)]
+@* Authentication policy: password rules, lockout, session lifetime and the local sign-in switch (break-glass admin stays allowed). *@
+@inject IAuthPolicyAdminService Policies
+@inject ToastService Toasts
+
+<PageTitle>Authentication Policy · Servora</PageTitle>
+
+<PageHeader Title="Authentication Policy" Subtitle="Password rules, account lockout and session lifetime for every interactive sign-in." Icon="lock">
+    <Actions>
+        <button class="btn btn-secondary" disabled="@(_policy is null)" @onclick="ResetDefaults"><Icon Name="refresh" Size="16" /> Defaults</button>
+        <button class="btn btn-primary" disabled="@(_saving || _policy is null)" @onclick="SaveAsync">
+            @if (_saving)
+            {
+                <span class="spinner"></span>
+            }
+            <Icon Name="save" Size="16" /> Save policy
+        </button>
+    </Actions>
+</PageHeader>
+
+@if (_policy is null)
+{
+    <div class="card"><div class="card-body"><Skeleton Lines="8" Height="18px" /></div></div>
+}
+else
+{
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Password strength" Value="@Strength.Label" Icon="shield-check" Tone="@Strength.Tone" Caption="@($"min. {_policy.MinimumPasswordLength} characters")" />
+        <StatCard Label="Lockout" Value="@($"{_policy.MaxFailedAttempts} tries")" Icon="lock" Tone="warning" Caption="@($"locked for {_policy.LockoutMinutes} min")" />
+        <StatCard Label="Session" Value="@FormatMinutes(_policy.SessionLifetimeMinutes)" Icon="timer" Tone="info" Caption="sliding, renewed while active" />
+        <StatCard Label="Local sign-in" Value="@(_policy.AllowLocalLogin ? "Allowed" : "Admin only")" Icon="user" Tone="@(_policy.AllowLocalLogin ? "success" : "accent")" Caption="@(_policy.AllowLocalLogin ? "local accounts can sign in" : "break-glass admin only")" />
+    </div>
+
+    <div class="grid grid-sidebar">
+        <div class="stack">
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="key" Size="16" /> Password rules</h3><div class="card-subtitle">Applied to local accounts when passwords are set or changed. Length beats complexity (NIST SP 800-63B).</div></div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Minimum length" Help="8 – 128 characters. 12 or more is recommended.">
+                            <input class="input" type="number" min="8" max="128" @bind="_policy.MinimumPasswordLength" />
+                        </FormField>
+                        <div></div>
+                        <FormField Label="Character classes" Class="span-2">
+                            <div class="stack" style="gap:10px">
+                                <Switch @bind-Value="_policy.RequireMixedCase" Label="Require upper and lower case letters" />
+                                <Switch @bind-Value="_policy.RequireDigit" Label="Require at least one digit" />
+                                <Switch @bind-Value="_policy.RequireSymbol" Label="Require at least one symbol" />
+                            </div>
+                        </FormField>
+                    </div>
+                    <div class="alert alert-info mt-4"><Icon Name="info" Size="18" /><div>Preview: <b>@_policy.ToPasswordPolicy().Describe()</b> Passwords containing the user name and the default password are always rejected.</div></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="lock" Size="16" /> Account lockout</h3><div class="card-subtitle">Slows down password guessing for local and directory accounts.</div></div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Failed attempts before lockout" Help="1 – 100">
+                            <input class="input" type="number" min="1" max="100" @bind="_policy.MaxFailedAttempts" />
+                        </FormField>
+                        <FormField Label="Lockout duration (minutes)" Help="1 – 1440. Administrators can unlock accounts on the user page.">
+                            <input class="input" type="number" min="1" max="1440" @bind="_policy.LockoutMinutes" />
+                        </FormField>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="timer" Size="16" /> Sessions</h3><div class="card-subtitle">Applies to new sign-ins. Existing sessions keep their current lifetime.</div></div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Session lifetime (minutes)" Help="5 minutes – 7 days, sliding while the user is active.">
+                            <input class="input" type="number" min="5" max="10080" @bind="_policy.SessionLifetimeMinutes" />
+                        </FormField>
+                        <FormField Label="&quot;Keep me signed in&quot; (days)" Help="1 – 90 days.">
+                            <input class="input" type="number" min="1" max="90" @bind="_policy.RememberMeDays" />
+                        </FormField>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div><h3><Icon Name="user" Size="16" /> Local sign-in</h3><div class="card-subtitle">Turn off password sign-in for local accounts when everybody uses the directory or Windows SSO.</div></div>
+                    <Switch @bind-Value="_policy.AllowLocalLogin" Label="@(_policy.AllowLocalLogin ? "Allowed" : "Disabled")" />
+                </div>
+                <div class="card-body">
+                    @if (!_policy.AllowLocalLogin)
+                    {
+                        <div class="alert alert-warning"><Icon Name="alert-triangle" Size="18" /><div>Only directory and Windows accounts can sign in. The bootstrap <span class="mono">admin</span> account keeps local sign-in as break-glass access – protect it with a strong password.</div></div>
+                    }
+                    else
+                    {
+                        <p class="small muted" style="margin:0">Local accounts sign in with their Servora password. The bootstrap <span class="mono">admin</span> account can always sign in locally.</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <aside class="stack sticky-top">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="lightbulb" Size="16" /> Recommendations</h3></div>
+                <div class="card-body small muted stack" style="gap:10px">
+                    <div class="flex gap-2"><Icon Name="@(_policy.MinimumPasswordLength >= 12 ? "check-circle" : "alert-circle")" Size="16" Class="@(_policy.MinimumPasswordLength >= 12 ? "text-success" : "text-warning")" /> <span>At least 12 characters.</span></div>
+                    <div class="flex gap-2"><Icon Name="@(_policy.MaxFailedAttempts <= 10 ? "check-circle" : "alert-circle")" Size="16" Class="@(_policy.MaxFailedAttempts <= 10 ? "text-success" : "text-warning")" /> <span>Lock accounts after 10 or fewer failed attempts.</span></div>
+                    <div class="flex gap-2"><Icon Name="@(_policy.SessionLifetimeMinutes <= 720 ? "check-circle" : "alert-circle")" Size="16" Class="@(_policy.SessionLifetimeMinutes <= 720 ? "text-success" : "text-warning")" /> <span>Sessions of 12 hours or less.</span></div>
+                    <div class="flex gap-2"><Icon Name="check-circle" Size="16" Class="text-success" /> <span>Passwords are hashed with PBKDF2 (ASP.NET Core Identity).</span></div>
+                </div>
+            </div>
+        </aside>
+    </div>
+}
+
+@code {
+    private AuthPolicySettings? _policy;
+    private bool _saving;
+
+    private (string Label, string Tone) Strength
+    {
+        get
+        {
+            var score = (_policy!.MinimumPasswordLength >= 14 ? 2 : _policy.MinimumPasswordLength >= 12 ? 1 : 0)
+                + (_policy.RequireMixedCase ? 1 : 0) + (_policy.RequireDigit ? 1 : 0) + (_policy.RequireSymbol ? 1 : 0);
+            return score switch
+            {
+                >= 4 => ("Strong", "success"),
+                >= 2 => ("Good", "primary"),
+                _ => ("Basic", "warning"),
+            };
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Policies.GetAsync();
+        if (result.Succeeded)
+        {
+            _policy = result.Value! with { };
+        }
+        else
+        {
+            Toasts.Error("Could not load the policy", result.Error);
+        }
+    }
+
+    private static string FormatMinutes(int minutes) =>
+        minutes % 1440 == 0 ? $"{minutes / 1440} d" : minutes % 60 == 0 ? $"{minutes / 60} h" : $"{minutes} min";
+
+    private void ResetDefaults() => _policy = new AuthPolicySettings();
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            Toasts.FromResult(await Policies.SaveAsync(_policy!), "Authentication policy saved");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

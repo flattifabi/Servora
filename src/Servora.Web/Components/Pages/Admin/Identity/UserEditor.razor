@@ -1,0 +1,777 @@
+@page "/admin/users/new"
+@page "/admin/users/{Id:guid}"
+@attribute [RequirePermission(Permissions.Identity.ReadUsers)]
+@* User record page: profile form, security actions (reset password, unlock, sign-out, activation), roles, groups and effective permissions. *@
+@inject IUserAdminService Users
+@inject IRoleAdminService Roles
+@inject IGroupAdminService Groups
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>@(IsNew ? "New user" : _detail?.DisplayName ?? "User") · Servora</PageTitle>
+
+@if (_loading)
+{
+    <div class="card"><div class="card-body"><Skeleton Lines="8" Height="18px" /></div></div>
+}
+else if (!IsNew && _detail is null)
+{
+    <div class="card">
+        <EmptyState Icon="user" Title="User not found" Text="The account does not exist or was deleted.">
+            <a class="btn btn-secondary" href="/admin/users">Back to users</a>
+        </EmptyState>
+    </div>
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New user" : _detail!.DisplayName)" Icon="@(IsNew ? "user-plus" : null)">
+        <Breadcrumbs>
+            <a href="/admin/users">Users</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New" : _detail!.UserName)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (IsNew)
+            {
+                <div class="subtitle">Create a local account or a technical service identity. Directory and Windows accounts are provisioned automatically.</div>
+            }
+            else
+            {
+                <div class="flex items-center gap-2 flex-wrap mt-1">
+                    <Avatar Name="@_detail!.DisplayName" Size="sm" />
+                    <span class="mono small muted">@_detail.UserName</span>
+                    <SourceBadge Source="_detail.Source" />
+                    @if (!_detail.IsActive)
+                    {
+                        <StatusPill Text="Inactive" />
+                    }
+                    else if (_detail.IsLockedOut)
+                    {
+                        <StatusPill Text="Locked" Tone="danger" />
+                    }
+                    else
+                    {
+                        <StatusPill Text="Active" />
+                    }
+                    @if (_detail.MustChangePassword)
+                    {
+                        <StatusPill Text="Password change pending" Tone="warning" />
+                    }
+                    @if (_detail.IsBootstrapAdmin)
+                    {
+                        <span class="tag"><Icon Name="shield-check" Size="12" /> Bootstrap administrator</span>
+                    }
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (!IsNew && CanManageThis)
+            {
+                @if (_detail!.Source == UserSource.Local)
+                {
+                    <button class="btn btn-secondary" @onclick="OpenReset"><Icon Name="key" Size="16" /> Reset password</button>
+                }
+                @if (_detail.IsLockedOut)
+                {
+                    <button class="btn btn-secondary" disabled="@_busy" @onclick="UnlockAsync"><Icon Name="unlock" Size="16" /> Unlock</button>
+                }
+                <button class="btn btn-secondary" @onclick="() => _confirmSignOut = true"><Icon Name="log-out" Size="16" /> Sign out everywhere</button>
+                @if (!_detail.IsSelf)
+                {
+                    @if (_detail.IsActive)
+                    {
+                        <button class="btn btn-outline-danger" @onclick="() => _confirmDeactivate = true"><Icon Name="x-circle" Size="16" /> Deactivate</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-success" disabled="@_busy" @onclick="() => SetActiveAsync(true)"><Icon Name="check-circle" Size="16" /> Activate</button>
+                    }
+                }
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (!IsNew && !_detail!.CanManage && _canManageUsers)
+    {
+        <div class="alert alert-warning mb-4"><Icon Name="shield" Size="18" /><div>This account holds permissions you do not have. You can view it, but changes are restricted to administrators with at least the same permissions.</div></div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="stack">
+            <div class="card">
+                <div class="card-body">
+                    @if (!IsNew && _detail!.Source == UserSource.Directory)
+                    {
+                        <div class="alert alert-info mb-4"><Icon Name="id-card" Size="18" /><div>Profile attributes of this account are synchronised from the directory and are overwritten at the next sign-in or synchronisation.</div></div>
+                    }
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="user" Size="16" /> Identity</div>
+                        <div class="form-grid">
+                            <FormField Label="User name" Required="IsNew" Help="@(IsNew ? "Letters, digits, '.', '_', '-' or '@'. Cannot be changed later." : null)">
+                                @if (IsNew)
+                                {
+                                    <input class="input" @bind="_model.UserName" placeholder="jane.doe" autocomplete="off" />
+                                }
+                                else
+                                {
+                                    <div class="readonly-value mono">@_detail!.UserName</div>
+                                }
+                            </FormField>
+                            <FormField Label="Display name" Help="Derived from first and last name when empty.">
+                                <input class="input" @bind="_model.DisplayName" disabled="@ReadOnly" />
+                            </FormField>
+                            <FormField Label="First name">
+                                <input class="input" @bind="_model.FirstName" disabled="@ReadOnly" />
+                            </FormField>
+                            <FormField Label="Last name">
+                                <input class="input" @bind="_model.LastName" disabled="@ReadOnly" />
+                            </FormField>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="mail" Size="16" /> Contact &amp; organisation</div>
+                        <div class="form-grid">
+                            <FormField Label="E-mail">
+                                <input class="input" type="email" @bind="_model.Email" disabled="@ReadOnly" placeholder="jane.doe@example.com" />
+                            </FormField>
+                            <FormField Label="Phone">
+                                <input class="input" @bind="_model.Phone" disabled="@ReadOnly" />
+                            </FormField>
+                            <FormField Label="Title">
+                                <input class="input" @bind="_model.Title" disabled="@ReadOnly" />
+                            </FormField>
+                            <FormField Label="Department">
+                                <input class="input" @bind="_model.Department" disabled="@ReadOnly" />
+                            </FormField>
+                            <FormField Label="Location">
+                                <input class="input" @bind="_model.Location" disabled="@ReadOnly" />
+                            </FormField>
+                            <FormField Label="Manager">
+                                <UserPicker Value="_model.ManagerId" ValueChanged="v => _model.ManagerId = v" Disabled="ReadOnly" Placeholder="Search manager…" />
+                            </FormField>
+                            <FormField Label="Time zone" Class="span-2">
+                                <select class="select" @bind="_model.TimeZone" disabled="@ReadOnly">
+                                    <option value="">Server default</option>
+                                    @foreach (var zone in s_timeZones)
+                                    {
+                                        <option value="@zone.Id">@zone.DisplayName</option>
+                                    }
+                                </select>
+                            </FormField>
+                        </div>
+                    </div>
+
+                    @if (IsNew)
+                    {
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="lock" Size="16" /> Account &amp; credentials</div>
+                            <div class="form-grid">
+                                <FormField Label="Account type">
+                                    <div class="segmented">
+                                        <button type="button" class="@(_model.Source == UserSource.Local ? "active" : null)" @onclick="() => _model.Source = UserSource.Local">Local user</button>
+                                        <button type="button" class="@(_model.Source == UserSource.Service ? "active" : null)" @onclick="() => _model.Source = UserSource.Service">Service identity</button>
+                                    </div>
+                                </FormField>
+                                @if (_model.Source == UserSource.Local)
+                                {
+                                    <FormField Label="Initial password" Required="true" Help="@_policyHint">
+                                        <div class="input-group">
+                                            <input class="input mono" type="@(_showPassword ? "text" : "password")" @bind="_model.InitialPassword" autocomplete="new-password" />
+                                            <button type="button" class="btn btn-secondary btn-icon" title="@(_showPassword ? "Hide" : "Show")" @onclick="() => _showPassword = !_showPassword"><Icon Name="@(_showPassword ? "eye-off" : "eye")" Size="16" /></button>
+                                            <button type="button" class="btn btn-secondary" @onclick="GenerateInitial"><Icon Name="refresh" Size="15" /> Generate</button>
+                                        </div>
+                                    </FormField>
+                                    <FormField Label="First sign-in" Class="span-2">
+                                        <Switch @bind-Value="_model.MustChangePassword" Label="Require a password change at first sign-in (recommended)" />
+                                    </FormField>
+                                }
+                                else
+                                {
+                                    <div class="span-2 alert alert-info"><Icon Name="bot" Size="18" /><div>Service identities cannot sign in interactively. Use them as owners of API keys, integrations or AI agents.</div></div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (!ReadOnly)
+                    {
+                        <div class="form-actions">
+                            <a class="btn btn-secondary" href="/admin/users">Cancel</a>
+                            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+                                @if (_busy)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                <Icon Name="save" Size="16" /> @(IsNew ? "Create user" : "Save changes")
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (!IsNew)
+            {
+                <Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+
+                @switch (_tab)
+                {
+                    case "roles":
+                        <div class="card">
+                            <div class="card-header">
+                                <div>
+                                    <h3><Icon Name="shield" Size="16" /> Direct roles</h3>
+                                    <div class="card-subtitle">Roles assigned to this user. Directory-managed roles follow the directory group mappings.</div>
+                                </div>
+                                @if (CanManageThis)
+                                {
+                                    <div class="flex gap-2">
+                                        <select class="select" style="width:auto;min-width:220px" @bind="_roleToAdd">
+                                            <option value="">Select a role…</option>
+                                            @foreach (var role in _roles.Where(r => _detail!.Roles.All(x => x.RoleId != r.Id || x.IsFromDirectory)))
+                                            {
+                                                <option value="@role.Id">@role.Label</option>
+                                            }
+                                        </select>
+                                        <button class="btn btn-primary" disabled="@(string.IsNullOrEmpty(_roleToAdd) || _busy)" @onclick="AddRoleAsync"><Icon Name="plus" Size="15" /> Assign</button>
+                                    </div>
+                                }
+                            </div>
+                            @if (_detail!.Roles.Count == 0)
+                            {
+                                <EmptyState Icon="shield" Title="No direct roles" Text="This user only receives roles through groups." />
+                            }
+                            else
+                            {
+                                <div class="table-wrap">
+                                    <table class="table">
+                                        <thead><tr><th>Role</th><th>Technical name</th><th>Assignment</th><th class="text-right"></th></tr></thead>
+                                        <tbody>
+                                            @foreach (var role in _detail.Roles)
+                                            {
+                                                <tr>
+                                                    <td class="cell-primary"><a class="cell-link" href="/admin/roles/@role.RoleId">@role.Label</a></td>
+                                                    <td class="mono small muted">@role.Name</td>
+                                                    <td>
+                                                        @if (role.IsFromDirectory)
+                                                        {
+                                                            <span class="pill pill-info no-dot"><Icon Name="id-card" Size="12" /> Directory mapping</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="pill pill-neutral no-dot">Manual</span>
+                                                        }
+                                                    </td>
+                                                    <td class="text-right">
+                                                        @if (CanManageThis)
+                                                        {
+                                                            <button class="btn btn-ghost btn-sm" @onclick="() => AskRemoveRole(role)"><Icon Name="trash" Size="14" /> Remove</button>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                        @if (_detail.InheritedRoles.Count > 0)
+                        {
+                            <div class="card mt-4">
+                                <div class="card-header"><div><h3><Icon Name="users" Size="16" /> Roles through groups</h3><div class="card-subtitle">Granted to every member of the listed groups.</div></div></div>
+                                <div class="card-body">
+                                    <div class="flex flex-wrap gap-2">
+                                        @foreach (var inherited in _detail.InheritedRoles)
+                                        {
+                                            <a class="tag" href="/admin/groups/@inherited.GroupId" title="Granted by @inherited.GroupName"><Icon Name="shield" Size="11" /> @inherited.RoleLabel <span class="faint">via @inherited.GroupName</span></a>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        break;
+                    case "groups":
+                        <div class="card">
+                            <div class="card-header">
+                                <div>
+                                    <h3><Icon Name="users" Size="16" /> Group memberships</h3>
+                                    <div class="card-subtitle">Groups route work, approvals and grant roles to their members.</div>
+                                </div>
+                                @if (_canManageGroups)
+                                {
+                                    <div class="flex gap-2 items-center">
+                                        <div style="min-width:260px"><GroupPicker Value="_groupToAdd" ValueChanged="v => _groupToAdd = v" Placeholder="Add to group…" /></div>
+                                        <button class="btn btn-primary" disabled="@(_groupToAdd is null || _busy)" @onclick="AddToGroupAsync"><Icon Name="plus" Size="15" /> Add</button>
+                                    </div>
+                                }
+                            </div>
+                            @if (_detail!.Groups.Count == 0)
+                            {
+                                <EmptyState Icon="users" Title="Not a member of any group" Text="Add the user to an assignment group so work can be routed to them." />
+                            }
+                            else
+                            {
+                                <div class="table-wrap">
+                                    <table class="table">
+                                        <thead><tr><th>Group</th><th>Type</th><th>Membership</th><th class="text-right"></th></tr></thead>
+                                        <tbody>
+                                            @foreach (var group in _detail.Groups)
+                                            {
+                                                <tr>
+                                                    <td class="cell-primary">
+                                                        <a class="cell-link" href="/admin/groups/@group.GroupId">@group.Name</a>
+                                                        @if (!group.IsGroupActive)
+                                                        {
+                                                            <span class="tag" style="margin-left:6px">inactive</span>
+                                                        }
+                                                    </td>
+                                                    <td><GroupTypeBadge Type="group.Type" /></td>
+                                                    <td>
+                                                        @if (group.IsFromDirectory)
+                                                        {
+                                                            <span class="pill pill-info no-dot"><Icon Name="id-card" Size="12" /> Directory mapping</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="pill pill-neutral no-dot">Manual</span>
+                                                        }
+                                                    </td>
+                                                    <td class="text-right">
+                                                        @if (_canManageGroups)
+                                                        {
+                                                            <button class="btn btn-ghost btn-sm" @onclick="() => AskRemoveGroup(group)"><Icon Name="trash" Size="14" /> Remove</button>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                        break;
+                    default:
+                        <div class="card">
+                            <div class="card-header">
+                                <div>
+                                    <h3><Icon Name="shield-check" Size="16" /> Effective permissions</h3>
+                                    <div class="card-subtitle">Union of all direct and group roles. Evaluated on every request.</div>
+                                </div>
+                                <span class="pill pill-primary no-dot">@_detail!.EffectivePermissions.Count keys</span>
+                            </div>
+                            <div class="card-body">
+                                @if (_detail.EffectivePermissions.Contains(Permissions.All))
+                                {
+                                    <div class="alert alert-warning mb-4"><Icon Name="sparkles" Size="18" /><div>This user has <b>full access</b> (<span class="mono">*</span>) through an administrator role.</div></div>
+                                }
+                                @if (_detail.EffectivePermissions.Count == 0)
+                                {
+                                    <EmptyState Icon="lock" Title="No permissions" Text="The user can sign in but cannot open any module until a role is assigned." />
+                                }
+                                else
+                                {
+                                    <div class="flex flex-wrap gap-2">
+                                        @foreach (var permission in _detail.EffectivePermissions)
+                                        {
+                                            <span class="tag mono" title="@DescribePermission(permission)">@permission</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        break;
+                }
+            }
+        </div>
+
+        <aside class="stack sticky-top">
+            @if (!IsNew)
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="info" Size="16" /> Account</h3></div>
+                    <div class="card-body">
+                        <dl class="kv">
+                            <dt>Status</dt>
+                            <dd>@(_detail!.IsActive ? "Active" : "Inactive")@(_detail.IsLockedOut ? $" · locked until {_detail.LockoutEndsAt!.Value.ToLocalTime():t}" : string.Empty)</dd>
+                            <dt>Source</dt>
+                            <dd><SourceBadge Source="_detail.Source" /></dd>
+                            <dt>Last sign-in</dt>
+                            <dd><RelativeTime Value="_detail.LastSignInAt" Placeholder="Never" /></dd>
+                            <dt>Created</dt>
+                            <dd><RelativeTime Value="_detail.CreatedAt" /> <span class="faint small">by @_detail.CreatedBy</span></dd>
+                            <dt>Updated</dt>
+                            <dd><RelativeTime Value="_detail.UpdatedAt" /> <span class="faint small">by @_detail.UpdatedBy</span></dd>
+                            @if (_detail.Source is UserSource.Directory or UserSource.Windows)
+                            {
+                                <dt>External ID</dt>
+                                <dd class="mono small">@(_detail.ExternalId ?? "—")</dd>
+                            }
+                            @if (!string.IsNullOrEmpty(_detail.DistinguishedName))
+                            {
+                                <dt>DN</dt>
+                                <dd class="mono small">@_detail.DistinguishedName</dd>
+                            }
+                            @if (_detail.LastSyncedAt is not null)
+                            {
+                                <dt>Last sync</dt>
+                                <dd><RelativeTime Value="_detail.LastSyncedAt" /></dd>
+                            }
+                        </dl>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="shield" Size="16" /> Access summary</h3></div>
+                    <div class="card-body">
+                        <div class="grid grid-2" style="gap:12px">
+                            <div><div class="eyebrow">Roles</div><div style="font-size:22px;font-weight:700">@(_detail.Roles.Count + _detail.InheritedRoles.Select(r => r.RoleId).Distinct().Count(id => _detail.Roles.All(r => r.RoleId != id)))</div></div>
+                            <div><div class="eyebrow">Groups</div><div style="font-size:22px;font-weight:700">@_detail.Groups.Count</div></div>
+                            <div><div class="eyebrow">Permissions</div><div style="font-size:22px;font-weight:700">@(_detail.EffectivePermissions.Contains(Permissions.All) ? "All" : _detail.EffectivePermissions.Count.ToString())</div></div>
+                            <div><div class="eyebrow">Sign-in</div><div style="font-size:14px;font-weight:600;margin-top:6px">@SignInMethod</div></div>
+                        </div>
+                    </div>
+                </div>
+                @if (CanManageThis && !_detail.IsSelf && !_detail.IsBootstrapAdmin)
+                {
+                    <div class="card">
+                        <div class="card-header"><h3 class="text-danger"><Icon Name="alert-octagon" Size="16" /> Danger zone</h3></div>
+                        <div class="card-body">
+                            <p class="small muted" style="margin-top:0">Deleting removes the account, its roles and memberships. Records that reference the user keep a dangling reference – prefer deactivation.</p>
+                            <button class="btn btn-outline-danger btn-block" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete user</button>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="lightbulb" Size="16" /> Tips</h3></div>
+                    <div class="card-body small muted stack" style="gap:10px">
+                        <div><b class="text-primary">Groups first.</b> Grant roles to groups and add people to groups – easier to audit than per-user roles.</div>
+                        <div><b class="text-primary">Directory users</b> are created automatically at their first sign-in when LDAP is enabled.</div>
+                        <div><b class="text-primary">Temporary passwords</b> must be changed at the first sign-in.</div>
+                    </div>
+                </div>
+            }
+        </aside>
+    </div>
+}
+
+<Modal Open="_resetOpen" OpenChanged="v => _resetOpen = v" Title="Reset password" Subtitle="@_detail?.UserName" Icon="key">
+    <ChildContent>
+        @if (_revealedPassword is not null)
+        {
+            <div class="alert alert-success mb-4"><Icon Name="check-circle" Size="18" /><div>The password was reset. The user must change it at the next sign-in. Copy it now – it is not shown again.</div></div>
+            <div class="secret-reveal">
+                <span class="flex-1">@_revealedPassword</span>
+                <button class="btn btn-secondary btn-sm" @onclick="CopyPassword"><Icon Name="copy" Size="14" /> Copy</button>
+            </div>
+        }
+        else
+        {
+            <p class="muted" style="margin-top:0">Set a temporary password. Existing sessions are signed out and the user must choose a new password at the next sign-in.</p>
+            <FormField Label="Temporary password" Help="@_policyHint">
+                <div class="input-group">
+                    <input class="input mono" type="text" @bind="_resetPassword" autocomplete="new-password" />
+                    <button type="button" class="btn btn-secondary" @onclick="() => _resetPassword = TemporaryPassword.Generate()"><Icon Name="refresh" Size="15" /> Generate</button>
+                </div>
+            </FormField>
+        }
+    </ChildContent>
+    <Footer>
+        @if (_revealedPassword is not null)
+        {
+            <button class="btn btn-primary" @onclick="CloseReset">Done</button>
+        }
+        else
+        {
+            <button class="btn btn-secondary" @onclick="CloseReset">Cancel</button>
+            <button class="btn btn-primary" disabled="@(_busy || string.IsNullOrEmpty(_resetPassword))" @onclick="ResetAsync">
+                @if (_busy)
+                {
+                    <span class="spinner"></span>
+                }
+                Reset password
+            </button>
+        }
+    </Footer>
+</Modal>
+
+<ConfirmDialog @bind-Open="_confirmDeactivate" Title="Deactivate user?" Danger="true" ConfirmText="Deactivate"
+               Message="@($"{_detail?.DisplayName} will be signed out immediately and can no longer sign in. Records keep their references.")"
+               OnConfirm="() => SetActiveAsync(false)" />
+<ConfirmDialog @bind-Open="_confirmSignOut" Title="Sign out everywhere?" ConfirmText="Sign out"
+               Message="@($"All sessions of {_detail?.DisplayName} end within seconds, including browser sessions on other devices.")"
+               OnConfirm="ForceSignOutAsync" />
+<ConfirmDialog @bind-Open="_confirmDelete" Title="Delete user permanently?" Danger="true" ConfirmText="Delete user"
+               Message="@($"{_detail?.DisplayName} ({_detail?.UserName}) and all role assignments and memberships will be deleted. This cannot be undone.")"
+               OnConfirm="DeleteAsync" />
+<ConfirmDialog @bind-Open="_confirmRemoveRole" Title="Remove role?" Danger="true" ConfirmText="Remove"
+               Message="@($"Remove the role '{_pendingRole?.Label}' from {_detail?.DisplayName}?{(_pendingRole?.IsFromDirectory == true ? " It is directory-managed and may be re-added at the next sign-in while the mapping applies." : string.Empty)}")"
+               OnConfirm="RemoveRoleAsync" />
+<ConfirmDialog @bind-Open="_confirmRemoveGroup" Title="Remove from group?" Danger="true" ConfirmText="Remove"
+               Message="@($"Remove {_detail?.DisplayName} from '{_pendingGroup?.Name}'? Roles granted by the group are revoked.")"
+               OnConfirm="RemoveFromGroupAsync" />
+
+@code {
+    private static readonly IReadOnlyList<TimeZoneInfo> s_timeZones = TimeZoneInfo.GetSystemTimeZones();
+    private UserEditModel _model = new();
+    private UserDetail? _detail;
+    private IReadOnlyList<RoleOption> _roles = [];
+    private bool _loading = true;
+    private bool _busy;
+    private bool _canManageUsers;
+    private bool _canManageGroups;
+    private bool _showPassword;
+    private string _policyHint = PasswordPolicy.Default.Describe();
+    private string _tab = "roles";
+    private string? _roleToAdd;
+    private Guid? _groupToAdd;
+    private bool _resetOpen;
+    private string? _resetPassword;
+    private string? _revealedPassword;
+    private bool _confirmDeactivate;
+    private bool _confirmSignOut;
+    private bool _confirmDelete;
+    private bool _confirmRemoveRole;
+    private bool _confirmRemoveGroup;
+    private UserRoleItem? _pendingRole;
+    private UserGroupItem? _pendingGroup;
+
+    /// <summary>Gets or sets the user identifier (absent for a new user).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    [Inject] private IAuthPolicyProvider PolicyProvider { get; set; } = default!;
+
+    private bool IsNew => Id is null;
+
+    private bool CanManageThis => _canManageUsers && (IsNew || _detail?.CanManage == true);
+
+    private bool ReadOnly => !CanManageThis;
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("roles", "Roles", "shield", _detail?.Roles.Count),
+        new("groups", "Groups", "users", _detail?.Groups.Count),
+        new("permissions", "Effective permissions", "shield-check"),
+    ];
+
+    private string SignInMethod => _detail?.Source switch
+    {
+        UserSource.Directory => "LDAP / AD",
+        UserSource.Windows => "Windows SSO",
+        UserSource.Service => "Not allowed",
+        _ => "Password",
+    };
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _canManageUsers = await CurrentUser.HasPermissionAsync(Permissions.Identity.ManageUsers);
+        _canManageGroups = await CurrentUser.HasPermissionAsync(Permissions.Identity.ManageGroups);
+        _policyHint = (await PolicyProvider.GetPasswordPolicyAsync()).Describe();
+        _roles = (await Roles.GetOptionsAsync()).Value ?? [];
+        if (IsNew)
+        {
+            _detail = null;
+            _model = new UserEditModel();
+        }
+        else
+        {
+            await ReloadAsync();
+        }
+
+        _loading = false;
+    }
+
+    private async Task ReloadAsync()
+    {
+        var result = await Users.GetAsync(Id!.Value);
+        _detail = result.Value;
+        if (_detail is null)
+        {
+            if (result.ErrorKind != ResultErrorKind.NotFound)
+            {
+                Toasts.Error("Could not load the user", result.Error);
+            }
+
+            return;
+        }
+
+        _model = new UserEditModel
+        {
+            UserName = _detail.UserName,
+            DisplayName = _detail.DisplayName,
+            FirstName = _detail.FirstName,
+            LastName = _detail.LastName,
+            Email = _detail.Email,
+            Phone = _detail.Phone,
+            Title = _detail.Title,
+            Department = _detail.Department,
+            Location = _detail.Location,
+            ManagerId = _detail.ManagerId,
+            TimeZone = _detail.TimeZone,
+            Source = _detail.Source,
+        };
+    }
+
+    private void GenerateInitial()
+    {
+        _model.InitialPassword = TemporaryPassword.Generate();
+        _showPassword = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (IsNew)
+            {
+                var created = await Users.CreateAsync(_model);
+                if (Toasts.FromResult(created, "User created"))
+                {
+                    Nav.NavigateTo($"/admin/users/{created.Value}");
+                }
+            }
+            else
+            {
+                var updated = await Users.UpdateAsync(Id!.Value, _model, _detail!.Version);
+                if (Toasts.FromResult(updated, "Changes saved"))
+                {
+                    await ReloadAsync();
+                }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RunAsync(Func<Task<Result>> action, string success)
+    {
+        _busy = true;
+        try
+        {
+            if (Toasts.FromResult(await action(), success))
+            {
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task UnlockAsync() => RunAsync(() => Users.UnlockAsync(Id!.Value), "Account unlocked");
+
+    private Task ForceSignOutAsync() => RunAsync(() => Users.ForceSignOutAsync(Id!.Value), "All sessions were signed out");
+
+    private Task SetActiveAsync(bool active) => RunAsync(() => Users.SetActiveAsync(Id!.Value, active), active ? "User activated" : "User deactivated");
+
+    private async Task DeleteAsync()
+    {
+        var result = await Users.DeleteAsync(Id!.Value);
+        if (Toasts.FromResult(result, "User deleted"))
+        {
+            Nav.NavigateTo("/admin/users");
+        }
+    }
+
+    private async Task AddRoleAsync()
+    {
+        if (Guid.TryParse(_roleToAdd, out var roleId))
+        {
+            await RunAsync(() => Users.AddRoleAsync(Id!.Value, roleId), "Role assigned");
+            _roleToAdd = null;
+        }
+    }
+
+    private void AskRemoveRole(UserRoleItem role)
+    {
+        _pendingRole = role;
+        _confirmRemoveRole = true;
+    }
+
+    private Task RemoveRoleAsync() => _pendingRole is null ? Task.CompletedTask : RunAsync(() => Users.RemoveRoleAsync(Id!.Value, _pendingRole.RoleId), "Role removed");
+
+    private async Task AddToGroupAsync()
+    {
+        if (_groupToAdd is { } groupId)
+        {
+            _busy = true;
+            try
+            {
+                var result = await Groups.AddMembersAsync(groupId, [Id!.Value]);
+                if (Toasts.FromResult(result, "Added to group"))
+                {
+                    _groupToAdd = null;
+                    await ReloadAsync();
+                }
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private void AskRemoveGroup(UserGroupItem group)
+    {
+        _pendingGroup = group;
+        _confirmRemoveGroup = true;
+    }
+
+    private Task RemoveFromGroupAsync() => _pendingGroup is null ? Task.CompletedTask : RunAsync(() => Groups.RemoveMemberAsync(_pendingGroup.GroupId, Id!.Value), "Removed from group");
+
+    private void OpenReset()
+    {
+        _resetPassword = TemporaryPassword.Generate();
+        _revealedPassword = null;
+        _resetOpen = true;
+    }
+
+    private async Task ResetAsync()
+    {
+        _busy = true;
+        try
+        {
+            var result = await Users.ResetPasswordAsync(Id!.Value, _resetPassword ?? string.Empty);
+            if (result.Succeeded)
+            {
+                _revealedPassword = _resetPassword;
+                Toasts.Success("Password reset");
+                await ReloadAsync();
+            }
+            else
+            {
+                Toasts.Error("Password not reset", result.Error);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CopyPassword()
+    {
+        if (await JS.InvokeAsync<bool>("servora.copy", _revealedPassword))
+        {
+            Toasts.Info("Copied to clipboard");
+        }
+    }
+
+    private void CloseReset()
+    {
+        _resetOpen = false;
+        _resetPassword = null;
+        _revealedPassword = null;
+    }
+
+    private static string DescribePermission(string key) =>
+        PermissionCatalog.All.FirstOrDefault(p => p.Key == key)?.Description ?? key;
+}

@@ -1,0 +1,285 @@
+@page "/profile"
+@* Self-service profile: personal details, preferences (time zone, theme), roles and groups, sessions and password. *@
+@using Servora.Infrastructure.Security
+@inject IProfileService Profile
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>My profile · Servora</PageTitle>
+
+@if (_profile is null)
+{
+    <div class="card"><div class="card-body"><Skeleton Lines="8" Height="18px" /></div></div>
+}
+else
+{
+    <PageHeader Title="My profile" Subtitle="Your personal details, preferences and access." Icon="user">
+        <Actions>
+            @if (_profile.CanChangePassword && _authSource == "local")
+            {
+                <a class="btn btn-secondary" href="/account/change-password" data-enhance-nav="false"><Icon Name="key" Size="16" /> Change password</a>
+            }
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+                @if (_busy)
+                {
+                    <span class="spinner"></span>
+                }
+                <Icon Name="save" Size="16" /> Save
+            </button>
+        </Actions>
+    </PageHeader>
+
+    <div class="card glass mb-6">
+        <div class="card-body flex items-center gap-4 flex-wrap">
+            <Avatar Name="@_profile.DisplayName" Size="xl" />
+            <div class="flex-1" style="min-width:220px">
+                <h2 style="margin:0">@_profile.DisplayName</h2>
+                <div class="muted">@(_profile.Title ?? "—")@(string.IsNullOrEmpty(_profile.Department) ? null : $" · {_profile.Department}")</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2">
+                    <span class="tag mono"><Icon Name="user" Size="11" /> @_profile.UserName</span>
+                    <span class="tag">@SourceLabel</span>
+                    @if (_profile.IsAdministrator)
+                    {
+                        <span class="pill pill-warning no-dot"><Icon Name="sparkles" Size="11" /> Administrator</span>
+                    }
+                </div>
+            </div>
+            <div class="grid grid-3" style="gap:24px;min-width:300px">
+                <div><div class="eyebrow">Roles</div><div style="font-size:22px;font-weight:700">@_profile.Roles.Select(r => r.Label).Distinct().Count()</div></div>
+                <div><div class="eyebrow">Groups</div><div style="font-size:22px;font-weight:700">@_profile.Groups.Count</div></div>
+                <div><div class="eyebrow">Permissions</div><div style="font-size:22px;font-weight:700">@(_profile.IsAdministrator ? "All" : _profile.PermissionCount.ToString())</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-sidebar">
+        <div class="stack">
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="user" Size="16" /> Personal details</h3>@if (_profile.IsDirectoryManaged) { <div class="card-subtitle">Name, e-mail and organisation are managed by your company directory.</div> }</div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="First name">
+                            <input class="input" @bind="_update.FirstName" disabled="@_profile.IsDirectoryManaged" />
+                        </FormField>
+                        <FormField Label="Last name">
+                            <input class="input" @bind="_update.LastName" disabled="@_profile.IsDirectoryManaged" />
+                        </FormField>
+                        <FormField Label="Display name">
+                            <input class="input" @bind="_update.DisplayName" disabled="@_profile.IsDirectoryManaged" />
+                        </FormField>
+                        <FormField Label="Phone">
+                            <input class="input" @bind="_update.Phone" />
+                        </FormField>
+                        <FormField Label="E-mail">
+                            <div class="readonly-value">@(_profile.Email ?? "—")</div>
+                        </FormField>
+                        <FormField Label="Manager">
+                            <div class="readonly-value">@(_profile.ManagerName ?? "—")</div>
+                        </FormField>
+                        <FormField Label="Location">
+                            <div class="readonly-value">@(_profile.Location ?? "—")</div>
+                        </FormField>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="sliders" Size="16" /> Preferences</h3><div class="card-subtitle">How Servora looks and shows times for you.</div></div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Time zone">
+                            <select class="select" @bind="_update.TimeZone">
+                                <option value="">Server default</option>
+                                @foreach (var zone in s_timeZones)
+                                {
+                                    <option value="@zone.Id">@zone.DisplayName</option>
+                                }
+                            </select>
+                        </FormField>
+                        <FormField Label="Theme">
+                            <div class="segmented">
+                                @foreach (var theme in s_themes)
+                                {
+                                    <button type="button" class="@(_update.Theme == theme.Key ? "active" : null)" @onclick="() => _update.Theme = theme.Key"><Icon Name="@theme.Icon" Size="14" /> @theme.Label</button>
+                                }
+                            </div>
+                        </FormField>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="shield" Size="16" /> My roles</h3><div class="card-subtitle">What you can do in Servora and where it comes from.</div></div></div>
+                @if (_profile.Roles.Count == 0)
+                {
+                    <EmptyState Icon="shield" Title="No roles" Text="Ask your administrator for access to the modules you need." />
+                }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead><tr><th>Role</th><th>Granted through</th></tr></thead>
+                            <tbody>
+                                @foreach (var role in _profile.Roles)
+                                {
+                                    <tr>
+                                        <td><div class="cell-primary">@role.Label</div><div class="cell-sub">@role.Description</div></td>
+                                        <td>
+                                            @switch (role.Origin)
+                                            {
+                                                case "Direct":
+                                                    <span class="pill pill-neutral no-dot">Direct assignment</span>
+                                                    break;
+                                                case "Directory":
+                                                    <span class="pill pill-info no-dot"><Icon Name="id-card" Size="11" /> Directory group</span>
+                                                    break;
+                                                default:
+                                                    <span class="pill pill-primary no-dot"><Icon Name="users" Size="11" /> @role.Origin</span>
+                                                    break;
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <aside class="stack sticky-top">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="users" Size="16" /> My groups</h3><span class="badge">@_profile.Groups.Count</span></div>
+                <div class="card-body">
+                    @if (_profile.Groups.Count == 0)
+                    {
+                        <p class="small muted" style="margin:0">You are not a member of any group.</p>
+                    }
+                    else
+                    {
+                        <div class="stack" style="gap:12px">
+                            @foreach (var group in _profile.Groups)
+                            {
+                                <div class="flex items-center gap-3">
+                                    <div class="page-icon" style="width:32px;height:32px;border-radius:9px"><Icon Name="@(group.Type == GroupType.Approval ? "check-square" : group.Type == GroupType.Security ? "shield" : "inbox")" Size="15" /></div>
+                                    <div style="min-width:0">
+                                        <div style="font-weight:600" class="truncate">@group.Name</div>
+                                        <div class="tiny faint">@group.Type@(group.IsFromDirectory ? " · from directory" : null)</div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="activity" Size="16" /> Sessions &amp; security</h3></div>
+                <div class="card-body">
+                    <dl class="kv" style="grid-template-columns:130px 1fr">
+                        <dt>This session</dt><dd>@AuthSourceLabel</dd>
+                        <dt>Last sign-in</dt><dd><RelativeTime Value="_profile.LastSignInAt" Placeholder="—" /></dd>
+                        <dt>Account since</dt><dd>@_profile.CreatedAt.ToLocalTime().ToString("d MMM yyyy")</dd>
+                        <dt>Password</dt><dd>@(_profile.CanChangePassword ? "Managed in Servora" : "Managed by the directory")</dd>
+                    </dl>
+                    <p class="small muted mt-4">Lost a device or signed in on a shared computer? End every session, including this one.</p>
+                    <button class="btn btn-outline-danger btn-block" @onclick="() => _confirmSignOut = true"><Icon Name="log-out" Size="16" /> Sign out everywhere</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+}
+
+<ConfirmDialog @bind-Open="_confirmSignOut" Title="Sign out everywhere?" Danger="true" ConfirmText="Sign out everywhere"
+               Message="All of your sessions end, including this one. You will need to sign in again."
+               OnConfirm="SignOutEverywhereAsync" />
+
+@code {
+    private static readonly IReadOnlyList<TimeZoneInfo> s_timeZones = TimeZoneInfo.GetSystemTimeZones();
+    private static readonly (string Key, string Label, string Icon)[] s_themes = [("dark", "Dark", "moon"), ("light", "Light", "sun"), ("system", "System", "monitor")];
+    private MyProfile? _profile;
+    private MyProfileUpdate _update = new();
+    private string _authSource = "local";
+    private bool _busy;
+    private bool _confirmSignOut;
+
+    /// <summary>Gets or sets the cascading authentication state.</summary>
+    [CascadingParameter] private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    private string SourceLabel => _profile?.Source switch
+    {
+        UserSource.Directory => "Directory account",
+        UserSource.Windows => "Windows account",
+        UserSource.Service => "Service identity",
+        _ => "Local account",
+    };
+
+    private string AuthSourceLabel => _authSource switch
+    {
+        "directory" => "Directory password",
+        "windows" => "Windows single sign-on",
+        _ => "Local password",
+    };
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationState is not null)
+        {
+            var state = await AuthenticationState;
+            _authSource = state.User.FindFirst(ServoraClaimTypes.AuthSource)?.Value ?? "local";
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var result = await Profile.GetAsync();
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Could not load your profile", result.Error);
+            return;
+        }
+
+        _profile = result.Value;
+        _update = new MyProfileUpdate
+        {
+            DisplayName = _profile!.DisplayName,
+            FirstName = _profile.FirstName,
+            LastName = _profile.LastName,
+            Phone = _profile.Phone,
+            TimeZone = _profile.TimeZone,
+            Theme = _profile.Theme ?? "dark",
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (Toasts.FromResult(await Profile.UpdateAsync(_update), "Profile saved"))
+            {
+                if (!string.IsNullOrEmpty(_update.Theme))
+                {
+                    await JS.InvokeVoidAsync("servora.setTheme", _update.Theme);
+                }
+
+                await LoadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SignOutEverywhereAsync()
+    {
+        if (Toasts.FromResult(await Profile.SignOutEverywhereAsync(), "All sessions signed out"))
+        {
+            Nav.NavigateTo("/login?sessionsRevoked=1", forceLoad: true);
+        }
+    }
+}

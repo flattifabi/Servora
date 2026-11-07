@@ -1,0 +1,259 @@
+@* Permission matrix for the role editor: permissions grouped by module (PermissionCatalog) with search, per-group
+   select / clear, the global wildcard and custom keys (prefix wildcards, table ACLs). Keys the acting user does not hold
+   are locked for granting (the backend enforces the same escalation guard). *@
+
+<div class="matrix-toolbar">
+    <div class="input-icon flex-1" style="max-width:360px">
+        <Icon Name="search" Size="16" />
+        <input class="input" placeholder="Search permissions…" value="@_search" @oninput="e => _search = e.Value?.ToString() ?? string.Empty" />
+    </div>
+    <div class="segmented">
+        <button class="@(!_grantedOnly ? "active" : null)" @onclick="() => _grantedOnly = false">All</button>
+        <button class="@(_grantedOnly ? "active" : null)" @onclick="() => _grantedOnly = true">Granted</button>
+    </div>
+    <div class="spacer"></div>
+    <span class="small muted"><b class="text-primary">@GrantedCount</b> of @PermissionCatalog.All.Count permissions granted</span>
+</div>
+
+<div class="wildcard-card @(HasWildcard ? "on" : null)">
+    <div class="flex items-center gap-3">
+        <div class="wildcard-icon"><Icon Name="sparkles" Size="18" /></div>
+        <div>
+            <div class="wildcard-title">Full access <span class="mono faint">*</span></div>
+            <div class="small muted">Grants every current and future permission. Reserved for administrators.</div>
+        </div>
+    </div>
+    <div class="flex items-center gap-2">
+        @if (IsLocked(Permissions.All))
+        {
+            <span class="tag"><Icon Name="lock" Size="12" /> Protected</span>
+        }
+        else if (!CanGrant(Permissions.All) && !HasWildcard)
+        {
+            <span class="tag" title="You do not hold this permission yourself"><Icon Name="lock" Size="12" /> Not grantable</span>
+        }
+        <Switch Value="HasWildcard" Disabled="@(ReadOnly || IsLocked(Permissions.All) || (!HasWildcard && !CanGrant(Permissions.All)))" ValueChanged="v => Toggle(Permissions.All, v)" />
+    </div>
+</div>
+
+@if (HasWildcard)
+{
+    <div class="alert alert-warning mb-4"><Icon Name="alert-triangle" Size="18" /><div>This role grants full access. Individual permissions below are covered by the wildcard.</div></div>
+}
+
+<div class="matrix-groups">
+    @foreach (var group in VisibleGroups)
+    {
+        var granted = group.Items.Count(p => IsGranted(p.Key));
+        <section class="matrix-group">
+            <header>
+                <div>
+                    <h4>@group.Name</h4>
+                    <div class="tiny faint">@granted of @group.Items.Count granted</div>
+                </div>
+                @if (!ReadOnly)
+                {
+                    <div class="flex gap-1">
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SetGroup(group.Items, true)">Select all</button>
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SetGroup(group.Items, false)">Clear</button>
+                    </div>
+                }
+            </header>
+            <div class="matrix-rows">
+                @foreach (var permission in group.Items)
+                {
+                    var on = Selected.Contains(permission.Key);
+                    var covered = !on && IsGranted(permission.Key);
+                    var grantable = on || CanGrant(permission.Key);
+                    <label class="matrix-row @(on ? "on" : null) @(covered ? "covered" : null) @(!grantable ? "locked" : null)" title="@(grantable ? permission.Key : "You do not hold this permission yourself")">
+                        <input type="checkbox" checked="@(on || covered)" disabled="@(ReadOnly || covered || !grantable || IsLocked(permission.Key))"
+                               @onchange="e => Toggle(permission.Key, e.Value is true)" />
+                        <span class="matrix-text">
+                            <span class="matrix-desc">@permission.Description</span>
+                            <span class="mono tiny faint">@permission.Key</span>
+                        </span>
+                        @if (!grantable)
+                        {
+                            <Icon Name="lock" Size="13" Class="faint" />
+                        }
+                    </label>
+                }
+            </div>
+        </section>
+    }
+    @if (!VisibleGroups.Any())
+    {
+        <EmptyState Icon="search" Title="No permissions match" Text="Try a different search term or show all permissions." />
+    }
+</div>
+
+<section class="matrix-group mt-4">
+    <header>
+        <div>
+            <h4>Custom keys</h4>
+            <div class="tiny faint">Prefix wildcards such as <span class="mono">incident.*</span> and table ACLs such as <span class="mono">table.u_vendor.read</span>.</div>
+        </div>
+    </header>
+    <div class="custom-keys">
+        @foreach (var key in CustomKeys)
+        {
+            <span class="tag mono">
+                @key
+                @if (!ReadOnly && !IsLocked(key))
+                {
+                    <button type="button" class="tag-remove" title="Remove" @onclick="() => Toggle(key, false)"><Icon Name="x" Size="11" /></button>
+                }
+            </span>
+        }
+        @if (!CustomKeys.Any())
+        {
+            <span class="small faint">No custom keys.</span>
+        }
+    </div>
+    @if (!ReadOnly)
+    {
+        <div class="flex gap-2 items-start mt-3">
+            <div class="field flex-1" style="max-width:360px">
+                <input class="input mono" placeholder="e.g. incident.*" value="@_customKey" @oninput="e => _customKey = e.Value?.ToString() ?? string.Empty" @onkeydown="OnCustomKeyDown" />
+                @if (_customError is not null)
+                {
+                    <div class="error">@_customError</div>
+                }
+            </div>
+            <button type="button" class="btn btn-secondary" @onclick="AddCustomKey"><Icon Name="plus" Size="15" /> Add key</button>
+        </div>
+    }
+</section>
+
+@code {
+    private string _search = string.Empty;
+    private bool _grantedOnly;
+    private string _customKey = string.Empty;
+    private string? _customError;
+
+    /// <summary>Gets or sets the selected permission keys (modified in place).</summary>
+    [Parameter, EditorRequired] public HashSet<string> Selected { get; set; } = [];
+
+    /// <summary>Raised after the selection changed.</summary>
+    [Parameter] public EventCallback SelectedChanged { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the matrix is read-only.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Gets or sets keys that cannot be removed (for example <c>*</c> of the administrator role).</summary>
+    [Parameter] public IReadOnlySet<string>? LockedKeys { get; set; }
+
+    /// <summary>Gets or sets the acting user's permissions; keys not covered cannot be granted. Null disables the hint.</summary>
+    [Parameter] public IReadOnlySet<string>? ActorPermissions { get; set; }
+
+    private bool HasWildcard => Selected.Contains(Permissions.All);
+
+    private int GrantedCount => HasWildcard ? PermissionCatalog.All.Count : PermissionCatalog.All.Count(p => IsGranted(p.Key));
+
+    private IEnumerable<string> CustomKeys => Selected
+        .Where(k => k != Permissions.All && PermissionCatalog.All.All(p => p.Key != k))
+        .OrderBy(k => k, StringComparer.Ordinal);
+
+    private IEnumerable<(string Name, List<PermissionDefinition> Items)> VisibleGroups
+    {
+        get
+        {
+            var term = _search.Trim();
+            return PermissionCatalog.All
+                .Where(p => term.Length == 0
+                    || p.Key.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || p.Description.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || p.Group.Contains(term, StringComparison.OrdinalIgnoreCase))
+                .Where(p => !_grantedOnly || IsGranted(p.Key))
+                .GroupBy(p => p.Group)
+                .OrderBy(g => g.Key)
+                .Select(g => (g.Key, g.ToList()));
+        }
+    }
+
+    private bool IsGranted(string key) => PermissionMatcher.IsGranted(Selected, key);
+
+    private bool IsLocked(string key) => LockedKeys?.Contains(key) == true;
+
+    private bool CanGrant(string key) => ActorPermissions is null || PermissionMatcher.IsGranted(ActorPermissions, key);
+
+    private async Task Toggle(string key, bool on)
+    {
+        if (ReadOnly || IsLocked(key))
+        {
+            return;
+        }
+
+        if (on)
+        {
+            if (!CanGrant(key))
+            {
+                return;
+            }
+
+            Selected.Add(key);
+        }
+        else
+        {
+            Selected.Remove(key);
+        }
+
+        await SelectedChanged.InvokeAsync();
+    }
+
+    private async Task SetGroup(IEnumerable<PermissionDefinition> items, bool on)
+    {
+        foreach (var item in items)
+        {
+            if (IsLocked(item.Key))
+            {
+                continue;
+            }
+
+            if (on && CanGrant(item.Key))
+            {
+                Selected.Add(item.Key);
+            }
+            else if (!on)
+            {
+                Selected.Remove(item.Key);
+            }
+        }
+
+        await SelectedChanged.InvokeAsync();
+    }
+
+    private async Task AddCustomKey()
+    {
+        var key = _customKey.Trim();
+        _customError = null;
+        if (key.Length == 0)
+        {
+            return;
+        }
+
+        if (!PermissionCatalog.IsKnown(key))
+        {
+            _customError = "Unknown key. Use a catalog key, a prefix wildcard of existing keys (e.g. incident.*), table.* or mcp.tool.* keys.";
+            return;
+        }
+
+        if (!CanGrant(key))
+        {
+            _customError = "You can only grant permissions you hold yourself.";
+            return;
+        }
+
+        Selected.Add(key);
+        _customKey = string.Empty;
+        await SelectedChanged.InvokeAsync();
+    }
+
+    private async Task OnCustomKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddCustomKey();
+        }
+    }
+}
