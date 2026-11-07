@@ -1,0 +1,53 @@
+.kb-title-input { font-size: 17px; font-weight: 600; height: 46px; }
+
+.kb-editor-card { overflow: hidden; }
+
+.kb-editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+}
+
+.kb-editor-toolbar .spacer { flex: 1; }
+.kb-format { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.kb-format .icon-btn { width: 34px; height: 34px; font-size: 13px; color: var(--text-2); }
+.kb-format .divider-v { width: 1px; height: 20px; margin: 0 6px; background: var(--border-strong); }
+
+.kb-editor { display: grid; grid-template-columns: 1fr 1fr; min-height: 560px; }
+.kb-editor.view-write { grid-template-columns: 1fr; }
+.kb-editor.view-write .kb-editor-preview { display: none; }
+.kb-editor.view-preview { grid-template-columns: 1fr; }
+.kb-editor.view-preview .kb-editor-pane { display: none; }
+
+.kb-editor-pane { display: flex; border-right: 1px solid var(--border); }
+.kb-editor.view-write .kb-editor-pane { border-right: 0; }
+
+.kb-editor-input {
+    flex: 1;
+    width: 100%;
+    min-height: 560px;
+    padding: 22px 24px;
+    border: 0;
+    outline: none;
+    resize: vertical;
+    background: color-mix(in srgb, var(--bg) 45%, var(--surface));
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    line-height: 1.75;
+    tab-size: 4;
+}
+
+.kb-editor-preview { position: relative; padding: 22px 28px; max-height: 760px; overflow-y: auto; }
+.kb-preview-label { position: sticky; top: -22px; display: inline-flex; align-items: center; gap: 6px; margin: -6px 0 14px; padding: 4px 10px; border-radius: var(--r-full); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); z-index: 1; }
+
+.kb-editor-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-faint); }
+
+@media (max-width: 1024px) {
+    .kb-editor, .kb-editor.view-split { grid-template-columns: 1fr; }
+    .kb-editor-pane { border-right: 0; border-bottom: 1px solid var(--border); }
+}

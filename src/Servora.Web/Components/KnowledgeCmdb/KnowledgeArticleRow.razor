@@ -1,0 +1,37 @@
+@* Compact, clickable knowledge article row used in lists on the knowledge home page and on CI pages. *@
+<a class="kb-row" href="/knowledge/@Article.Id">
+    <span class="kb-row-icon"><Icon Name="file-text" Size="16" /></span>
+    <span class="kb-row-main">
+        <span class="kb-row-title">@Article.Title</span>
+        @if (ShowSummary && !string.IsNullOrEmpty(Article.Summary))
+        {
+            <span class="kb-row-summary">@Article.Summary</span>
+        }
+        <span class="kb-row-meta">
+            <span class="mono">@Article.Number</span>
+            @if (!string.IsNullOrEmpty(Article.CategoryName))
+            {
+                <span>· @Article.CategoryName</span>
+            }
+            @if (Article.State != KnowledgeArticleState.Published)
+            {
+                <StatusPill Text="@KnowledgeWorkflow.Label(Article.State)" />
+            }
+        </span>
+    </span>
+    <span class="kb-row-stats">
+        <span title="Views"><Icon Name="eye" Size="13" /> @Article.ViewCount.ToString("N0")</span>
+        @if (Article.HelpfulPercent is { } helpful)
+        {
+            <span title="Helpful"><Icon Name="thumbs-up" Size="13" /> @helpful%</span>
+        }
+    </span>
+</a>
+
+@code {
+    /// <summary>Gets or sets the article.</summary>
+    [Parameter, EditorRequired] public KnowledgeArticleSummary Article { get; set; } = default!;
+
+    /// <summary>Gets or sets a value indicating whether the summary is shown.</summary>
+    [Parameter] public bool ShowSummary { get; set; }
+}

@@ -1,0 +1,80 @@
+@* Renders the class-specific attributes of a CI class (JSON schema) as form fields. Place inside a form-grid. *@
+@foreach (var definition in Definitions)
+{
+    var name = definition.Name;
+    var label = string.IsNullOrEmpty(definition.Unit) ? definition.Label : $"{definition.Label} ({definition.Unit})";
+    <FormField Label="@label" Required="definition.Required" Help="@definition.Help" Class="@(definition.Type == CiAttributeType.LongText ? "span-all" : null)">
+        @if (ReadOnly)
+        {
+            <div class="readonly-value">@Display(definition)</div>
+        }
+        else
+        {
+            switch (definition.Type)
+            {
+                case CiAttributeType.Boolean:
+                    <Switch Value="@(Get(name) == "true")" ValueChanged="@(v => Set(name, v ? "true" : "false"))" Label="@(Get(name) == "true" ? "Yes" : "No")" />
+                    break;
+                case CiAttributeType.Choice:
+                    <select class="select" value="@Get(name)" @onchange="e => Set(name, e.Value?.ToString())">
+                        <option value="">— Select —</option>
+                        @foreach (var choice in definition.Choices)
+                        {
+                            <option value="@choice">@choice</option>
+                        }
+                    </select>
+                    break;
+                case CiAttributeType.Number:
+                    <input class="input" type="number" step="any" value="@Get(name)" @onchange="e => Set(name, e.Value?.ToString())" />
+                    break;
+                case CiAttributeType.Date:
+                    <input class="input" type="date" value="@Get(name)" @onchange="e => Set(name, e.Value?.ToString())" />
+                    break;
+                case CiAttributeType.LongText:
+                    <textarea class="textarea" rows="3" value="@Get(name)" @onchange="e => Set(name, e.Value?.ToString())"></textarea>
+                    break;
+                default:
+                    <input class="input" value="@Get(name)" maxlength="4000" @onchange="e => Set(name, e.Value?.ToString())" />
+                    break;
+            }
+        }
+    </FormField>
+}
+
+@code {
+    /// <summary>Gets or sets the effective attribute definitions.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<CiAttributeDefinition> Definitions { get; set; } = [];
+
+    /// <summary>Gets or sets the values keyed by attribute name (mutated in place).</summary>
+    [Parameter, EditorRequired] public Dictionary<string, string?> Values { get; set; } = [];
+
+    /// <summary>Gets or sets a value indicating whether the values are displayed read-only.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Raised after a value changed.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private string? Get(string name) => Values.GetValueOrDefault(name);
+
+    private async Task Set(string name, string? value)
+    {
+        Values[name] = string.IsNullOrWhiteSpace(value) ? null : value;
+        await OnChanged.InvokeAsync();
+    }
+
+    private string Display(CiAttributeDefinition definition)
+    {
+        var value = Get(definition.Name);
+        if (string.IsNullOrEmpty(value))
+        {
+            return "—";
+        }
+
+        return definition.Type switch
+        {
+            CiAttributeType.Boolean => value == "true" ? "Yes" : "No",
+            CiAttributeType.Number when !string.IsNullOrEmpty(definition.Unit) => $"{value} {definition.Unit}",
+            _ => value,
+        };
+    }
+}

@@ -1,0 +1,268 @@
+@page "/cmdb/classes"
+@* CI class administration: class hierarchy with icons and colors, attribute schemas edited in a drawer. *@
+@attribute [RequirePermission(Permissions.Cmdb.Read)]
+@inject ICiClassService Classes
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+
+<PageTitle>CI classes · CMDB · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="CI classes" Subtitle="Classes define what can be stored about a configuration item. Sub-classes inherit attributes." Icon="layers">
+    <Breadcrumbs><a href="/cmdb">CMDB</a> <Icon Name="chevron-right" Size="12" /> <span>Classes</span></Breadcrumbs>
+    <Actions>
+        @if (_canManage)
+        {
+            <button class="btn btn-primary" @onclick="() => OpenEditor(null)"><Icon Name="plus" Size="16" /> New class</button>
+        }
+    </Actions>
+</PageHeader>
+
+@if (_classes is null)
+{
+    <div class="card card-body"><Skeleton Lines="8" Height="40px" /></div>
+}
+else
+{
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Classes" Value="@_classes.Count.ToString()" Icon="layers" Caption="@($"{_classes.Count(c => c.IsSystem)} built-in")" />
+        <StatCard Label="Attributes" Value="@_classes.Sum(c => c.Attributes.Count).ToString()" Icon="sliders" Tone="info" Caption="class-specific fields" />
+        <StatCard Label="Configuration items" Value="@_classes.Sum(c => c.CiCount).ToString("N0")" Icon="server" Tone="accent" Caption="across all classes" />
+        <StatCard Label="Sub-classes" Value="@_classes.Count(c => c.ParentKey is not null).ToString()" Icon="git-branch" Tone="success" Caption="inherit their parent's attributes" />
+    </div>
+
+    <div class="card card-flush">
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Class</th><th>Key</th><th>Attributes</th><th class="num">CIs</th><th>Type</th><th style="width:90px"></th></tr></thead>
+                <tbody>
+                    @foreach (var (cls, depth) in Ordered())
+                    {
+                        <tr class="clickable" @onclick="() => OpenEditor(cls)" @key="cls.Id">
+                            <td>
+                                <div class="flex items-center gap-3" style="padding-left:@(depth * 28)px">
+                                    @if (depth > 0)
+                                    {
+                                        <Icon Name="chevron-right" Size="13" Class="faint" />
+                                    }
+                                    <CiClassBadge Label="@cls.Label" Icon="@cls.Icon" Color="@cls.Color" IconOnly="true" Large="true" />
+                                    <div>
+                                        <div class="cell-primary">@cls.Label</div>
+                                        <div class="cell-sub">@cls.Description</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="mono muted">@cls.Key</td>
+                            <td>
+                                <div class="flex flex-wrap gap-1">
+                                    @foreach (var attr in cls.Attributes.Take(5))
+                                    {
+                                        <span class="tag">@attr.Label</span>
+                                    }
+                                    @if (cls.Attributes.Count > 5)
+                                    {
+                                        <span class="tag">+@(cls.Attributes.Count - 5)</span>
+                                    }
+                                    @if (cls.Attributes.Count == 0)
+                                    {
+                                        <span class="faint small">—</span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="num"><a href="/cmdb?class=@cls.Key" @onclick:stopPropagation="true">@cls.CiCount</a></td>
+                            <td><StatusPill Text="@(cls.IsSystem ? "Built-in" : "Custom")" Tone="@(cls.IsSystem ? "neutral" : "primary")" NoDot="true" /></td>
+                            <td class="text-right" @onclick:stopPropagation="true">
+                                @if (_canManage && !cls.IsSystem)
+                                {
+                                    <button class="icon-btn" title="Delete" @onclick="() => AskDelete(cls)"><Icon Name="trash" Size="15" /></button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<Drawer Open="_drawer" OpenChanged="v => _drawer = v" Title="@(_editId is null ? "New CI class" : $"Class: {_input.Label}")" Subtitle="@(_canManage ? "Attributes are rendered as fields on the CI form." : "Read-only – requires CMDB administration permission.")" Size="lg">
+    <ChildContent>
+        <div class="form-grid">
+            <FormField Label="Label" Required="true"><input class="input" @bind="_input.Label" maxlength="150" disabled="@(!_canManage)" /></FormField>
+            <FormField Label="Key" Required="true" Help="Lower case, letters, digits and underscores. Cannot be changed later.">
+                <input class="input mono" @bind="_input.Key" maxlength="100" disabled="@(_editId is not null || !_canManage)" />
+            </FormField>
+            <FormField Label="Parent class" Help="Sub-classes inherit all parent attributes.">
+                <select class="select" @bind="_input.ParentKey" disabled="@(!_canManage)">
+                    <option value="">— None (root class) —</option>
+                    @foreach (var cls in (_classes ?? []).Where(c => c.Id != _editId))
+                    {
+                        <option value="@cls.Key">@cls.Label</option>
+                    }
+                </select>
+            </FormField>
+            <FormField Label="Order"><input class="input" type="number" @bind="_input.SortOrder" disabled="@(!_canManage)" /></FormField>
+            <FormField Label="Icon"><IconSelect @bind-Value="_input.Icon" /></FormField>
+            <FormField Label="Color">
+                <div class="flex items-center gap-2">
+                    <input type="color" class="color-input" @bind="_input.Color" disabled="@(!_canManage)" />
+                    <input class="input mono" @bind="_input.Color" maxlength="7" disabled="@(!_canManage)" />
+                </div>
+            </FormField>
+            <FormField Label="Description" Class="span-all"><textarea class="textarea" rows="2" @bind="_input.Description" maxlength="1000" disabled="@(!_canManage)"></textarea></FormField>
+        </div>
+
+        <div class="form-section-title mt-6 flex items-center justify-between">
+            <span>Attributes (@_input.Attributes.Count)</span>
+            @if (_canManage)
+            {
+                <button class="btn btn-secondary btn-sm" @onclick="AddAttribute"><Icon Name="plus" Size="14" /> Attribute</button>
+            }
+        </div>
+        @if (_inherited.Count > 0)
+        {
+            <div class="small faint mb-3">Inherited: @string.Join(", ", _inherited.Select(a => a.Label))</div>
+        }
+        @if (_input.Attributes.Count == 0)
+        {
+            <div class="small faint">No class-specific attributes.</div>
+        }
+        <div class="stack" style="gap:10px">
+            @foreach (var attribute in _input.Attributes)
+            {
+                var current = attribute;
+                <div class="attr-row" @key="current">
+                    <div class="form-grid cols-3">
+                        <FormField Label="Label"><input class="input" @bind="current.Label" maxlength="100" disabled="@(!_canManage)" /></FormField>
+                        <FormField Label="Name"><input class="input mono" @bind="current.Name" maxlength="64" disabled="@(!_canManage)" /></FormField>
+                        <FormField Label="Type">
+                            <select class="select" @bind="current.Type" disabled="@(!_canManage)">
+                                @foreach (var type in Enum.GetValues<CiAttributeType>())
+                                {
+                                    <option value="@type">@type</option>
+                                }
+                            </select>
+                        </FormField>
+                        @if (current.Type == CiAttributeType.Choice)
+                        {
+                            <FormField Label="Choices" Class="span-2" Help="Comma separated">
+                                <input class="input" value="@string.Join(", ", current.Choices)" disabled="@(!_canManage)"
+                                       @onchange="e => current.Choices = (e.Value?.ToString() ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()" />
+                            </FormField>
+                        }
+                        else
+                        {
+                            <FormField Label="Unit"><input class="input" @bind="current.Unit" maxlength="20" placeholder="GB, %, TB…" disabled="@(!_canManage)" /></FormField>
+                            <FormField Label="Help text"><input class="input" @bind="current.Help" maxlength="300" disabled="@(!_canManage)" /></FormField>
+                        }
+                        <FormField Label="Required"><Switch @bind-Value="current.Required" Disabled="!_canManage" /></FormField>
+                    </div>
+                    @if (_canManage)
+                    {
+                        <button class="icon-btn attr-remove" title="Remove attribute" @onclick="() => _input.Attributes.Remove(current)"><Icon Name="x" Size="15" /></button>
+                    }
+                </div>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _drawer = false">Close</button>
+        @if (_canManage)
+        {
+            <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync"><Icon Name="save" Size="16" /> Save class</button>
+        }
+    </Footer>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete class?" ConfirmText="Delete"
+               Message="@($"The class '{_deleteCandidate?.Label}' will be deleted. Only classes without configuration items and sub-classes can be deleted.")" OnConfirm="DeleteAsync" />
+
+@code {
+    private IReadOnlyList<CiClassDto>? _classes;
+    private CiClassInput _input = new();
+    private IReadOnlyList<CiAttributeDefinition> _inherited = [];
+    private CiClassDto? _deleteCandidate;
+    private Guid? _editId;
+    private bool _canManage;
+    private bool _drawer;
+    private bool _saving;
+    private bool _confirmDelete;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Cmdb.Manage);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _classes = (await Classes.ListAsync()).Value ?? [];
+
+    private IEnumerable<(CiClassDto Class, int Depth)> Ordered()
+    {
+        var all = _classes ?? [];
+        IEnumerable<(CiClassDto, int)> Walk(string? parent, int depth) =>
+            depth > 8 ? [] : all.Where(c => c.ParentKey == parent || (parent is null && c.ParentKey is not null && all.All(p => p.Key != c.ParentKey)))
+                .SelectMany(c => new[] { (c, depth) }.Concat(Walk(c.Key, depth + 1)));
+        return Walk(null, 0);
+    }
+
+    private async Task OpenEditor(CiClassDto? cls)
+    {
+        _editId = cls?.Id;
+        _input = cls is null
+            ? new CiClassInput { SortOrder = ((_classes?.Count ?? 0) + 1) * 10 }
+            : new CiClassInput
+            {
+                Key = cls.Key,
+                Label = cls.Label,
+                Icon = cls.Icon,
+                Color = cls.Color,
+                ParentKey = cls.ParentKey,
+                Description = cls.Description,
+                SortOrder = cls.SortOrder,
+                Attributes = cls.Attributes.Select(a => new CiAttributeDefinition
+                {
+                    Name = a.Name, Label = a.Label, Type = a.Type, Required = a.Required, Choices = [.. a.Choices], Help = a.Help, Unit = a.Unit,
+                }).ToList(),
+            };
+        _inherited = [];
+        if (cls?.ParentKey is { } parentKey)
+        {
+            _inherited = (await Classes.GetEffectiveAttributesAsync(parentKey)).Value ?? [];
+        }
+
+        _drawer = true;
+    }
+
+    private void AddAttribute()
+    {
+        var index = _input.Attributes.Count + 1;
+        _input.Attributes.Add(new CiAttributeDefinition { Name = $"attribute_{index}", Label = $"Attribute {index}" });
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        var result = await Classes.SaveAsync(_editId, _input);
+        _saving = false;
+        if (Toasts.FromResult(result, "Class saved"))
+        {
+            _drawer = false;
+            await LoadAsync();
+        }
+    }
+
+    private void AskDelete(CiClassDto cls)
+    {
+        _deleteCandidate = cls;
+        _confirmDelete = true;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleteCandidate is not null && Toasts.FromResult(await Classes.DeleteAsync(_deleteCandidate.Id), "Class deleted"))
+        {
+            await LoadAsync();
+        }
+    }
+}

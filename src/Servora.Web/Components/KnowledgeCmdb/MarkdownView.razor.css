@@ -1,0 +1,99 @@
+.md-body {
+    color: var(--text-2);
+    font-size: 15px;
+    line-height: 1.75;
+    overflow-wrap: anywhere;
+}
+
+.md-body ::deep > :first-child { margin-top: 0; }
+
+.md-body ::deep h1,
+.md-body ::deep h2,
+.md-body ::deep h3,
+.md-body ::deep h4 {
+    color: var(--text);
+    scroll-margin-top: calc(var(--topbar-h) + 24px);
+    outline: none;
+}
+
+.md-body ::deep h1 { font-size: 24px; margin: 32px 0 12px; }
+.md-body ::deep h2 { font-size: 20px; margin: 34px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.md-body ::deep h3 { font-size: 16.5px; margin: 26px 0 8px; }
+.md-body ::deep h4 { font-size: 14.5px; margin: 20px 0 6px; }
+.md-body ::deep h2:focus, .md-body ::deep h3:focus { color: var(--primary); }
+
+.md-body ::deep p { margin: 0 0 14px; color: var(--text-2); }
+.md-body ::deep strong { color: var(--text); font-weight: 650; }
+.md-body ::deep del { color: var(--text-faint); }
+.md-body ::deep a { color: var(--primary); text-decoration: underline; text-decoration-color: rgba(124, 108, 255, .4); text-underline-offset: 3px; }
+.md-body ::deep a:hover { color: var(--accent); text-decoration-color: currentColor; }
+.md-body ::deep a.md-image-link::before { content: "🖼 "; }
+
+.md-body ::deep ul,
+.md-body ::deep ol { margin: 0 0 16px; padding-left: 24px; }
+.md-body ::deep li { margin: 6px 0; padding-left: 4px; }
+.md-body ::deep li::marker { color: var(--primary); font-weight: 600; }
+.md-body ::deep li > ul, .md-body ::deep li > ol { margin: 6px 0 0; }
+
+.md-body ::deep code {
+    font-size: 12.5px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.md-body ::deep pre {
+    position: relative;
+    margin: 0 0 18px;
+    padding: 16px 18px;
+    border-radius: var(--r);
+    background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+    border: 1px solid var(--border-strong);
+    overflow-x: auto;
+    line-height: 1.6;
+}
+
+.md-body ::deep pre code { padding: 0; border: 0; background: transparent; color: var(--text-2); font-size: 12.8px; }
+
+.md-body ::deep pre code[class*="language-"]::before {
+    content: attr(class);
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
+.md-body ::deep blockquote {
+    margin: 0 0 18px;
+    padding: 14px 18px;
+    border-left: 3px solid var(--primary);
+    border-radius: 0 var(--r) var(--r) 0;
+    background: var(--gradient-soft);
+    color: var(--text);
+}
+
+.md-body ::deep blockquote p:last-child { margin-bottom: 0; }
+
+.md-body ::deep hr { margin: 28px 0; border: 0; border-top: 1px solid var(--border-strong); }
+
+.md-body ::deep .md-table {
+    margin: 0 0 18px;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+}
+
+.md-body ::deep table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.md-body ::deep th { text-align: left; padding: 10px 14px; background: var(--surface-2); color: var(--text); font-weight: 600; border-bottom: 1px solid var(--border-strong); }
+.md-body ::deep td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.md-body ::deep tr:last-child td { border-bottom: 0; }
+.md-body ::deep tbody tr:hover td { background: var(--surface-hover); }
+.md-body ::deep .align-center { text-align: center; }
+.md-body ::deep .align-right { text-align: right; }
+
+.md-body.compact { font-size: 14px; line-height: 1.65; }

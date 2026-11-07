@@ -1,0 +1,432 @@
+@page "/knowledge/{Id:guid}"
+@* Knowledge article reader: rendered Markdown with table of contents, helpfulness votes, related CIs, workflow actions,
+   versions, activity and attachments. *@
+@attribute [RequirePermission(Permissions.Knowledge.Read)]
+@inject IKnowledgeService Knowledge
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(_article?.Title ?? "Article") · Knowledge · Servora</PageTitle>
+<ModuleStyles />
+
+@if (_notFound)
+{
+    <EmptyState Icon="book-open" Title="Article not available" Text="@_error">
+        <a class="btn btn-primary" href="/knowledge"><Icon Name="arrow-left" Size="16" /> Back to the knowledge base</a>
+    </EmptyState>
+}
+else if (_article is null)
+{
+    <Skeleton Lines="1" Height="34px" Width="50%" />
+    <div class="grid grid-sidebar mt-6">
+        <div class="card card-body"><Skeleton Lines="12" /></div>
+        <div class="card card-body"><Skeleton Lines="6" /></div>
+    </div>
+}
+else
+{
+    <PageHeader Title="@_article.Title" Icon="book-open">
+        <Breadcrumbs>
+            <a href="/knowledge">Knowledge</a> <Icon Name="chevron-right" Size="12" />
+            <span>@_article.KnowledgeBaseName</span>
+            @if (_article.CategoryId is { } categoryId)
+            {
+                <Icon Name="chevron-right" Size="12" />
+                <a href="/knowledge?category=@categoryId">@_article.CategoryName</a>
+            }
+        </Breadcrumbs>
+        <SubtitleContent>
+            <div class="kb-meta">
+                <span class="mono">@_article.Number</span>
+                <StatusPill Text="@KnowledgeWorkflow.Label(_article.State)" />
+                <span class="person"><Avatar Name="@_article.AuthorName" Size="sm" /><span class="person-name">@_article.AuthorName</span></span>
+                <span class="faint">Updated <RelativeTime Value="_article.UpdatedAt" /></span>
+                <span class="faint"><Icon Name="eye" Size="13" /> @_article.ViewCount.ToString("N0") views</span>
+                <span class="faint">v@_article.ArticleVersion</span>
+            </div>
+        </SubtitleContent>
+        <Actions>
+            @foreach (var action in _article.AllowedActions)
+            {
+                var current = action;
+                <button class="btn @(current == KnowledgeWorkflowAction.Publish ? "btn-success" : current == KnowledgeWorkflowAction.Retire ? "btn-outline-danger" : "btn-secondary")"
+                        disabled="@_busy" @onclick="() => StartAction(current)">
+                    <Icon Name="@ActionIcon(current)" Size="16" /> @KnowledgeWorkflow.Label(current)
+                </button>
+            }
+            @if (_article.CanEdit)
+            {
+                <a class="btn btn-primary" href="/knowledge/edit/@_article.Id"><Icon Name="edit" Size="16" /> Edit</a>
+            }
+            @if (_article.CanDelete)
+            {
+                <button class="icon-btn" title="Delete article" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="18" /></button>
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (_isAuthor)
+    {
+        <div class="mb-4"><StateFlow States="@(KnowledgeWorkflow.OrderedStates.Select(KnowledgeWorkflow.Label).ToList())" Current="@KnowledgeWorkflow.Label(_article.State)" /></div>
+    }
+
+    @if (_isAuthor && _article.State == KnowledgeArticleState.Draft && !string.IsNullOrEmpty(_article.ReviewComment))
+    {
+        <div class="alert alert-warning mb-4"><Icon Name="message-square" Size="16" /> <div><b>Reviewer feedback:</b> @_article.ReviewComment</div></div>
+    }
+
+    @if (_article.IsExpired)
+    {
+        <div class="alert alert-danger mb-4"><Icon Name="clock" Size="16" /> <div>This article expired on <b>@_article.ValidTo?.ToString("d MMM yyyy")</b> and is hidden from readers.</div></div>
+    }
+    else if (_article.State == KnowledgeArticleState.Retired)
+    {
+        <div class="alert alert-info mb-4"><Icon Name="info" Size="16" /> <div>This article is retired and no longer visible to readers.</div></div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="stack" style="gap:20px;min-width:0">
+            <article class="card kb-article">
+                <div class="card-body">
+                    @if (!string.IsNullOrEmpty(_article.Summary))
+                    {
+                        <p class="kb-lead">@_article.Summary</p>
+                    }
+                    @if (string.IsNullOrWhiteSpace(_article.Body))
+                    {
+                        <EmptyState Icon="file-text" Title="This article has no content yet" />
+                    }
+                    else
+                    {
+                        <MarkdownView SafeHtml="@_article.Html" />
+                    }
+                </div>
+                @if (_article.State == KnowledgeArticleState.Published && !_article.IsExpired)
+                {
+                    <div class="card-footer kb-feedback">
+                        <div>
+                            <div class="kb-feedback-title">Was this article helpful?</div>
+                            <div class="small faint">@_article.HelpfulCount of @(_article.HelpfulCount + _article.NotHelpfulCount) readers found it helpful</div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn @(_article.MyVote == true ? "btn-success" : "btn-secondary")" disabled="@_voting" @onclick="() => VoteAsync(true)"><Icon Name="thumbs-up" Size="16" /> Yes · @_article.HelpfulCount</button>
+                            <button class="btn @(_article.MyVote == false ? "btn-danger" : "btn-secondary")" disabled="@_voting" @onclick="() => VoteAsync(false)"><Icon Name="thumbs-down" Size="16" /> No · @_article.NotHelpfulCount</button>
+                        </div>
+                    </div>
+                }
+            </article>
+
+            <div class="card">
+                <div class="card-body" style="padding-bottom:0">
+                    <Tabs Items="Tabs" @bind-ActiveKey="_tab" />
+                </div>
+                <div class="card-body">
+                    @switch (_tab)
+                    {
+                        case "activity":
+                            <ActivityStream Table="@TableNames.KnowledgeArticle" RecordId="_article.Id" />
+                            break;
+                        case "versions":
+                            if (_versions is null)
+                            {
+                                <Skeleton Lines="3" Height="40px" />
+                            }
+                            else
+                            {
+                                <div class="kb-versions">
+                                    @foreach (var version in _versions)
+                                    {
+                                        <div class="kb-version" @key="version.Id">
+                                            <span class="kb-version-num">v@(version.VersionNumber)</span>
+                                            <div class="flex-1" style="min-width:0">
+                                                <div class="truncate"><b>@version.Title</b></div>
+                                                <div class="tiny faint">@(version.ChangeNote ?? "No change note") · @version.CreatedBy · <RelativeTime Value="version.CreatedAt" /></div>
+                                            </div>
+                                            <StatusPill Text="@KnowledgeWorkflow.Label(version.State)" />
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => ShowVersionAsync(version)"><Icon Name="eye" Size="14" /> View</button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            break;
+                        default:
+                            <AttachmentList Table="@TableNames.KnowledgeArticle" RecordId="_article.Id" AllowUpload="_canWrite" AllowDelete="_canWrite" />
+                            break;
+                    }
+                </div>
+            </div>
+        </div>
+
+        <aside class="stack sticky-top kb-side" style="gap:16px">
+            @if (_article.Headings.Count(h => h.Level <= 3) >= 2)
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="list" Size="16" /> On this page</h3></div>
+                    <nav class="card-body kb-toc">
+                        @foreach (var heading in _article.Headings.Where(h => h.Level <= 3))
+                        {
+                            <a class="lvl-@(heading.Level - MinHeadingLevel + 1)" href="@($"/knowledge/{_article.Id}#{heading.Id}")">@heading.Text</a>
+                        }
+                    </nav>
+                </div>
+            }
+
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="info" Size="16" /> Details</h3></div>
+                <div class="card-body">
+                    <dl class="kv">
+                        <dt>Number</dt><dd class="mono">@_article.Number</dd>
+                        <dt>Knowledge base</dt><dd>@_article.KnowledgeBaseName</dd>
+                        <dt>Category</dt><dd>@(_article.CategoryName ?? "—")</dd>
+                        <dt>Published</dt><dd>@(_article.PublishedAt?.ToLocalTime().ToString("d MMM yyyy") ?? "—")</dd>
+                        <dt>Valid to</dt><dd>@(_article.ValidTo?.ToString("d MMM yyyy") ?? "No expiry")</dd>
+                        <dt>Version</dt><dd>@_article.ArticleVersion</dd>
+                        @if (!string.IsNullOrEmpty(_article.Keywords))
+                        {
+                            <dt>Keywords</dt>
+                            <dd class="flex flex-wrap gap-1">
+                                @foreach (var keyword in _article.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                {
+                                    <span class="tag">@keyword</span>
+                                }
+                            </dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="server" Size="16" /> Related configuration items</h3></div>
+                <div class="card-body stack" style="gap:8px">
+                    @if (_article.RelatedCis.Count == 0)
+                    {
+                        <div class="small faint">No configuration items linked.</div>
+                    }
+                    @foreach (var ci in _article.RelatedCis)
+                    {
+                        <div class="kb-ci" @key="ci.Id">
+                            <a href="/cmdb/@ci.Id" class="flex items-center gap-2 flex-1" style="min-width:0">
+                                <Icon Name="server" Size="15" /> <span class="truncate">@ci.Display</span>
+                            </a>
+                            <span class="tiny faint">@ci.Secondary</span>
+                            @if (_canWrite)
+                            {
+                                <button class="icon-btn" title="Remove link" @onclick="() => RemoveCiAsync(ci.Id)"><Icon Name="x" Size="14" /></button>
+                            }
+                        </div>
+                    }
+                    @if (_canWrite)
+                    {
+                        <div class="flex gap-2 mt-2">
+                            <div class="flex-1"><CiPicker @bind-Value="_ciToAdd" Placeholder="Link a CI…" /></div>
+                            <button class="btn btn-secondary" disabled="@(_ciToAdd is null)" @onclick="AddCiAsync"><Icon Name="link" Size="15" /></button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <Modal Open="_actionModal" OpenChanged="v => _actionModal = v" Title="@(_pendingAction is { } a ? KnowledgeWorkflow.Label(a) : string.Empty)" Icon="@(_pendingAction is { } p ? ActionIcon(p) : null)"
+           Subtitle="@($"{_article.Number} · {_article.Title}")">
+        <ChildContent>
+            <FormField Label="@(_pendingAction == KnowledgeWorkflowAction.Reject ? "Feedback for the author" : "Comment (optional)")" Required="_pendingAction == KnowledgeWorkflowAction.Reject"
+                       Help="The comment is stored in the activity stream of the article.">
+                <textarea class="textarea" rows="4" @bind="_actionComment" @bind:event="oninput" maxlength="2000"></textarea>
+            </FormField>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _actionModal = false">Cancel</button>
+            <button class="btn btn-primary" disabled="@(_busy || (_pendingAction == KnowledgeWorkflowAction.Reject && string.IsNullOrWhiteSpace(_actionComment)))" @onclick="ConfirmActionAsync">
+                @if (_busy)
+                {
+                    <span class="spinner"></span>
+                }
+                Confirm
+            </button>
+        </Footer>
+    </Modal>
+
+    <Modal Open="_versionModal" OpenChanged="v => _versionModal = v" Size="lg" Title="@($"Version {_viewedVersion?.VersionNumber}")" Subtitle="@_viewedVersion?.Title" Icon="history">
+        @if (_versionBody is null)
+        {
+            <Skeleton Lines="8" />
+        }
+        else
+        {
+            <MarkdownView Markdown="@_versionBody" Class="compact" />
+        }
+    </Modal>
+
+    <ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete article?" ConfirmText="Delete permanently"
+                   Message="@($"{_article.Number} and all its versions, votes and links will be deleted. This cannot be undone. Consider retiring the article instead.")"
+                   OnConfirm="DeleteAsync" />
+}
+
+@code {
+    private KnowledgeArticleDetail? _article;
+    private IReadOnlyList<KnowledgeVersionDto>? _versions;
+    private KnowledgeVersionDto? _viewedVersion;
+    private string? _versionBody;
+    private string? _error;
+    private string _tab = "attachments";
+    private bool _notFound;
+    private bool _isAuthor;
+    private bool _canWrite;
+    private bool _busy;
+    private bool _voting;
+    private bool _actionModal;
+    private bool _versionModal;
+    private bool _confirmDelete;
+    private KnowledgeWorkflowAction? _pendingAction;
+    private string? _actionComment;
+    private Guid? _ciToAdd;
+    private Guid _loadedId;
+
+    /// <summary>Gets or sets the article id.</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    private int MinHeadingLevel => _article?.Headings.Where(h => h.Level <= 3).Select(h => h.Level).DefaultIfEmpty(1).Min() ?? 1;
+
+    private IReadOnlyList<TabItem> Tabs => _isAuthor
+        ? [new("activity", "Activity", "activity"), new("versions", "Versions", "history", _versions?.Count), new("attachments", "Attachments", "paperclip")]
+        : [new("attachments", "Attachments", "paperclip")];
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id)
+        {
+            return;
+        }
+
+        _loadedId = Id;
+        _article = null;
+        _versions = null;
+        _canWrite = await CurrentUser.HasPermissionAsync(Permissions.Knowledge.Write);
+        _isAuthor = _canWrite || await CurrentUser.HasPermissionAsync(Permissions.Knowledge.Publish);
+        _tab = _isAuthor ? "activity" : "attachments";
+        await LoadAsync();
+        if (_article?.State == KnowledgeArticleState.Published)
+        {
+            await Knowledge.RecordViewAsync(Id);
+        }
+    }
+
+    private static string ActionIcon(KnowledgeWorkflowAction action) => action switch
+    {
+        KnowledgeWorkflowAction.SubmitForReview => "send",
+        KnowledgeWorkflowAction.Publish => "rocket",
+        KnowledgeWorkflowAction.Reject => "arrow-left",
+        KnowledgeWorkflowAction.Retire => "x-circle",
+        _ => "refresh",
+    };
+
+    private async Task LoadAsync()
+    {
+        var result = await Knowledge.GetAsync(Id);
+        if (!result.Succeeded)
+        {
+            _notFound = true;
+            _error = result.Error;
+            return;
+        }
+
+        _notFound = false;
+        _article = result.Value;
+        if (_isAuthor)
+        {
+            var versions = await Knowledge.GetVersionsAsync(Id);
+            _versions = versions.Succeeded ? versions.Value : [];
+        }
+    }
+
+    private async Task StartAction(KnowledgeWorkflowAction action)
+    {
+        if (action is KnowledgeWorkflowAction.SubmitForReview or KnowledgeWorkflowAction.Revise)
+        {
+            _pendingAction = action;
+            _actionComment = null;
+            await ConfirmActionAsync();
+            return;
+        }
+
+        _pendingAction = action;
+        _actionComment = null;
+        _actionModal = true;
+    }
+
+    private async Task ConfirmActionAsync()
+    {
+        if (_pendingAction is not { } action)
+        {
+            return;
+        }
+
+        _busy = true;
+        var result = await Knowledge.TransitionAsync(Id, action, _actionComment);
+        _busy = false;
+        if (Toasts.FromResult(result, $"{KnowledgeWorkflow.Label(action)} – done"))
+        {
+            _actionModal = false;
+            if (action == KnowledgeWorkflowAction.Revise)
+            {
+                Nav.NavigateTo($"/knowledge/edit/{Id}");
+                return;
+            }
+
+            await LoadAsync();
+        }
+    }
+
+    private async Task VoteAsync(bool helpful)
+    {
+        _voting = true;
+        var result = await Knowledge.VoteAsync(Id, helpful);
+        _voting = false;
+        if (Toasts.FromResult(result, "Thanks for your feedback!"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task AddCiAsync()
+    {
+        if (_ciToAdd is not { } ciId)
+        {
+            return;
+        }
+
+        if (Toasts.FromResult(await Knowledge.AddRelatedCiAsync(Id, ciId), "Configuration item linked"))
+        {
+            _ciToAdd = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task RemoveCiAsync(Guid ciId)
+    {
+        if (Toasts.FromResult(await Knowledge.RemoveRelatedCiAsync(Id, ciId), "Link removed"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task ShowVersionAsync(KnowledgeVersionDto version)
+    {
+        _viewedVersion = version;
+        _versionBody = null;
+        _versionModal = true;
+        var result = await Knowledge.GetVersionBodyAsync(Id, version.Id);
+        _versionBody = result.Succeeded ? result.Value : result.Error;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Toasts.FromResult(await Knowledge.DeleteAsync(Id), "Article deleted"))
+        {
+            Nav.NavigateTo("/knowledge/articles");
+        }
+    }
+}

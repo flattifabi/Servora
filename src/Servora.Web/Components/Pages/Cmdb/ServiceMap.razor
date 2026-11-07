@@ -1,0 +1,76 @@
+@page "/cmdb/map"
+@* Service map: pick a business service (or any CI) and explore its full dependency tree. *@
+@attribute [RequirePermission(Permissions.Cmdb.Read)]
+@inject ICmdbService Cmdb
+@inject NavigationManager Nav
+
+<PageTitle>Service map · CMDB · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="Service map" Subtitle="See how business services depend on applications, servers, databases, storage and network." Icon="network">
+    <Breadcrumbs><a href="/cmdb">CMDB</a> <Icon Name="chevron-right" Size="12" /> <span>Service map</span></Breadcrumbs>
+</PageHeader>
+
+<div class="map-layout">
+    <aside class="card map-services">
+        <div class="card-header"><h3><Icon Name="target" Size="16" /> Business services</h3></div>
+        <div class="map-list">
+            @if (_services is null)
+            {
+                <div class="card-body"><Skeleton Lines="4" Height="44px" /></div>
+            }
+            else if (_services.Count == 0)
+            {
+                <div class="card-body small faint">No business services registered yet.</div>
+            }
+            else
+            {
+                @foreach (var service in _services)
+                {
+                    <button class="map-service @(service.Id == _selected ? "active" : null)" @onclick="() => _selected = service.Id" @key="service.Id">
+                        <span class="dot" style="background:@CiColor.ForStatus(service.Status)"></span>
+                        <span class="flex-1 truncate">@service.Name</span>
+                        <span class="crit-badge">P@(service.Criticality)</span>
+                    </button>
+                }
+            }
+        </div>
+        <div class="card-footer">
+            <div class="small faint mb-2">Or explore any CI</div>
+            <CiPicker Value="_picked" ValueChanged="OnPicked" Placeholder="Search configuration items…" />
+        </div>
+    </aside>
+    <div class="map-canvas">
+        @if (_selected is { } selected)
+        {
+            <CiDependencyGraph RootId="selected" InitialDepth="4" InitialDirection="CiGraphDirection.Downstream" Height="640" NavigateOnRootClick="true" />
+        }
+        else
+        {
+            <div class="card"><EmptyState Icon="network" Title="Select a service" Text="Choose a business service to visualise its dependencies." /></div>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<CiSummary>? _services;
+    private Guid? _selected;
+    private Guid? _picked;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Cmdb.ListAsync(new CiQuery { ClassKey = "business_service", Page = new PageRequest { PageSize = 100, SortBy = "Criticality" } });
+        _services = result.Value?.Items ?? [];
+        _selected = _services.FirstOrDefault()?.Id;
+    }
+
+    private void OnPicked(Guid? id)
+    {
+        _picked = id;
+        if (id is not null)
+        {
+            _selected = id;
+        }
+    }
+}

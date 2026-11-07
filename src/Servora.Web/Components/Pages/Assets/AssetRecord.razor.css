@@ -1,0 +1,22 @@
+.asset-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 8px; font-size: 12.5px; }
+.asset-meta .tag { display: inline-flex; align-items: center; gap: 5px; }
+.asset-number { font-weight: 650; color: var(--text-2); }
+
+.asset-category { flex-wrap: wrap; }
+.asset-category button { display: inline-flex; align-items: center; gap: 6px; }
+
+.asset-hero { --tone: var(--primary); position: relative; overflow: hidden; }
+.asset-hero.cat-2 { --tone: var(--accent); }
+.asset-hero.cat-3 { --tone: var(--purple); }
+.asset-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--tone) 22%, transparent), transparent 60%);
+    pointer-events: none;
+}
+.asset-hero .card-body { position: relative; }
+.asset-hero-icon { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; color: #fff; background: var(--tone); box-shadow: 0 8px 22px color-mix(in srgb, var(--tone) 40%, transparent); }
+.asset-hero-name { font-size: 16px; font-weight: 650; }
+.asset-value { display: flex; flex-direction: column; gap: 2px; padding-top: 14px; border-top: 1px solid var(--border); }
+.asset-value b { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
