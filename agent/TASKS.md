@@ -34,10 +34,10 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-04 | Incident & Problem Management + "My Work" workspace | ITSM Agent | T-01 | ✅ Done |
 | T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | ✅ Done |
 | T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | ✅ Done |
-| T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | 🔨 In Progress |
+| T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | ✅ Done |
 | T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | 🔨 In Progress |
 | T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | ✅ Done |
-| T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | 🔨 In Progress |
+| T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | ✅ Done |
 | T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | 🔨 In Progress |
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
@@ -284,7 +284,7 @@ navigates, asset lifecycle works; unit tests for Markdown renderer safety, graph
 
 ---
 
-## T-07 Platform Engine 🔨
+## T-07 Platform Engine ✅
 
 **Owned paths:** `*/Platform/**` (replace kernel `ReflectionTableRegistry` usage by registering your own registry;
 you may subclass it), `*/Conditions/**` implementations (contract files read-only), `*/Tables/**` implementations,
@@ -324,6 +324,10 @@ you may subclass it), `*/Conditions/**` implementations (contract files read-onl
 **Acceptance criteria:** custom table end-to-end (create table + fields in UI → records via generic list/form and
 Table API); business rule set-field and abort work; SLA timer appears for a task and breaches; notification e-mail
 rendered; comprehensive unit tests for the condition evaluator (in-memory and EF on SQLite).
+
+**Result (validated by orchestrator, merged `eb294cf`):** Condition engine (in memory + EF), table registry with custom tables/fields, record service, table designer, generic list `/table/{name}` and form, business rules (set field / abort), SLA engine with business-hours schedules and breach monitor, notifications + templates + in-app inbox and bell, Table REST API (`/api/v1/table`), `/go/{number}`.
+**Evidence:** All files in owned paths; build 0/0; tests 166 passed; custom table → records → rule verified in the app. Merged main: build 0 errors / 0 warnings, 960 tests passed, smoke on fresh SQLite healthy, API/MCP 401 without key, admin sign-in → forced password change.
+**Open follow-ups:** Inbox POST endpoints without antiforgery token (low impact, T-14); no CSV export in lists.
 
 ---
 
@@ -407,7 +411,7 @@ builder saves and renders a grouped chart.
 
 ---
 
-## T-10 API, MCP & AI 🔨
+## T-10 API, MCP & AI ✅
 
 **Owned paths:** `*/Api/**`, `*/Mcp/**`, `*/Ai/**`, `Components/Pages/Api/**`, `Components/Pages/Mcp/**`,
 `Components/Pages/Ai/**`, `Components/Ai/**`, `ApiMcpAiModule.cs`, `ApiMcpAiEndpoints.cs`, `ApiMcpAiWebModule.cs`,
@@ -451,6 +455,10 @@ builder saves and renders a grouped chart.
 `initialize` → `tools/list` → `tools/call` works with an API key and is denied without scope; AI assistant answers
 via a configured OpenAI-compatible endpoint; unit tests for key hashing/verification, MCP JSON-RPC dispatch and
 input validation, orchestrator delegation with a fake provider.
+
+**Result (validated by orchestrator, merged `7c14f98`):** API keys (SHA-256 hash, shown once, scopes ≤ creator, IP ranges, rotate/revoke), REST foundation with OpenAPI + API Explorer, in-house MCP server (`/mcp`, scoped tools, limits, audit), AI providers (OpenAI-compatible, key in secret store), orchestrator with 4 sub-agents, assistant with confirmation cards.
+**Evidence:** 207 files in owned paths; build 0/0; tests 133 passed (110 new); MCP/API verified against the running app. Merged main: build 0 errors / 0 warnings, 960 tests passed, smoke on fresh SQLite healthy, API/MCP 401 without key, admin sign-in → forced password change.
+**Open follow-ups:** No token streaming, no MCP SSE/OAuth; default role grants for `api.access`/`mcp.access`/`ai.assistant.use` to decide (T-13); host auth/rate-limit wiring lives in `ApiMcpAiWebModule` (review in T-14).
 
 ---
 
@@ -526,6 +534,13 @@ automatically with pre-migration backup (T-15). Document "adding a migration" in
   (T-03); apply saved `User.Theme` after sign-in (T-02); My Work approvals count via
   `IApprovalService.CountPendingForUserAsync` (T-05).
 - Remove `Components/KnowledgeCmdb/ModuleStyles.razor` and its usages (T-06).
+- Add `<NotificationBell />` to TopBar; nav entries `/admin/tables` and `/notifications`; embed `CustomFieldsSection`
+  and `SlaTimersCard` into typed forms; expose `Servora:Platform:PublicUrl` in settings (T-07).
+- Default role grants for `api.access`, `mcp.access`, `ai.assistant.use`; make `PermissionCatalog.IsKnown("table.*")`
+  consistent (T-10).
+- API paths must answer JSON 401/403 instead of HTML redirects (e.g. `/api/v1/me` with a cookie session that still
+  has to change its password); unauthenticated JSON POST to `/api/v1/table` returned 400 content-type (T-07 report).
+- Migrations must also include the T-07 entities (CustomTable … TaskSla) and the 9 T-10 tables.
 - Kernel: instance-specific auth/antiforgery cookie names, or a friendly redirect on antiforgery failure, so several
   localhost instances do not clash (T-05).
 
@@ -595,3 +610,4 @@ build green, tests pass.
 | 2026-11-07 | Product owner: automatic migrations + built-in backup/restore made binding; T-15 added and dispatched; interrupted T-02, T-03, T-05…T-10 resumed. |
 | 2026-11-07 | T-02, T-03, T-05, T-06, T-09 validated and merged (✅); integration requests collected under T-13. |
 | 2026-11-07 | T-11 dispatched (dependencies merged). |
+| 2026-11-07 | T-07, T-10 validated and merged (✅). |
