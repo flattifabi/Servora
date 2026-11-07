@@ -1,0 +1,286 @@
+@page "/admin/settings/outbox"
+@* Mail outbox (T-03): queued, retrying, delivered and failed e-mails with retry and delete. *@
+@attribute [RequirePermission(Permissions.Configuration.ManageSettings)]
+@inject IEmailConfigurationService Email
+@inject ToastService Toasts
+
+<PageTitle>Mail outbox · Servora</PageTitle>
+
+<PageHeader Title="Mail outbox" Subtitle="Outgoing e-mail is queued here and delivered in the background with automatic retries." Icon="inbox">
+    <Breadcrumbs>
+        <a href="/admin/settings">System Settings</a> <Icon Name="chevron-right" Size="12" /> <span>Mail outbox</span>
+    </Breadcrumbs>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="ReloadAsync" disabled="@_loading"><Icon Name="refresh" Size="16" /> Refresh</button>
+        <button class="btn btn-secondary" @onclick="RetryAllAsync" disabled="@(_stats is not { Failed: > 0 } || _busy)"><Icon Name="send" Size="16" /> Retry failed</button>
+        <a class="btn btn-primary" href="/admin/settings/email"><Icon Name="settings" Size="16" /> E-mail settings</a>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Queued" Value="@(_stats?.Pending.ToString() ?? "–")" Icon="inbox" Tone="info" Caption="waiting for delivery" OnClick="@(() => FilterAsync(OutboundEmailStatus.Pending))" />
+    <StatCard Label="Retrying" Value="@(_stats?.Retrying.ToString() ?? "–")" Icon="refresh" Tone="warning" Caption="failed at least once" OnClick="@(() => FilterAsync(OutboundEmailStatus.Pending))" />
+    <StatCard Label="Delivered" Value="@(_stats?.SentLast24Hours.ToString() ?? "–")" Icon="check-circle" Tone="success" Caption="last 24 hours" OnClick="@(() => FilterAsync(OutboundEmailStatus.Sent))" />
+    <StatCard Label="Failed" Value="@(_stats?.Failed.ToString() ?? "–")" Icon="x-circle" Tone="danger" Caption="all attempts used" OnClick="@(() => FilterAsync(OutboundEmailStatus.Failed))" />
+</div>
+
+<DataTable TItem="OutboxMessageSummary" Items="_page?.Items" TotalCount="@(_page?.TotalCount ?? 0)" PageNumber="_pageNumber" PageSize="PageSize"
+           Loading="_loading" SortBy="@_sortBy" SortDescending="_sortDescending" SearchPlaceholder="Search recipient or subject…"
+           OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="OpenAsync"
+           EmptyIcon="inbox" EmptyTitle="The outbox is empty" EmptyText="Queued and delivered e-mails appear here. Send a test e-mail from the e-mail settings to try it.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_status is null ? "active" : null)" @onclick="() => FilterAsync(null)">All</button>
+            <button class="@(_status == OutboundEmailStatus.Pending ? "active" : null)" @onclick="() => FilterAsync(OutboundEmailStatus.Pending)">Queued</button>
+            <button class="@(_status == OutboundEmailStatus.Sent ? "active" : null)" @onclick="() => FilterAsync(OutboundEmailStatus.Sent)">Delivered</button>
+            <button class="@(_status == OutboundEmailStatus.Failed ? "active" : null)" @onclick="() => FilterAsync(OutboundEmailStatus.Failed)">Failed</button>
+        </div>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="OutboxMessageSummary" Title="Queued" SortKey="CreatedAt" Width="130px">
+            <Template><RelativeTime Value="context.CreatedAt" /></Template>
+        </DataColumn>
+        <DataColumn TItem="OutboxMessageSummary" Title="Status" Width="120px">
+            <Template><StatusPill Text="@StatusText(context.Status, context.Attempts)" Tone="@StatusTone(context.Status, context.Attempts)" /></Template>
+        </DataColumn>
+        <DataColumn TItem="OutboxMessageSummary" Title="Subject" SortKey="Subject">
+            <Template>
+                <div class="cell-primary truncate outbox-subject">@context.Subject</div>
+                @if (context.LastError is not null && context.Status != OutboundEmailStatus.Sent)
+                {
+                    <div class="tiny text-danger truncate outbox-subject" title="@context.LastError">@context.LastError</div>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="OutboxMessageSummary" Title="Recipients">
+            <Template><span class="small muted truncate outbox-recipients" title="@context.Recipients">@context.Recipients.Replace(";", ", ")</span></Template>
+        </DataColumn>
+        <DataColumn TItem="OutboxMessageSummary" Title="Attempts" SortKey="Attempts" Width="100px" Align="right">
+            <Template>@context.Attempts</Template>
+        </DataColumn>
+        <DataColumn TItem="OutboxMessageSummary" Title="Delivered / next" Width="150px">
+            <Template>
+                @if (context.SentAt is { } sent)
+                {
+                    <RelativeTime Value="sent" />
+                }
+                else if (context.Status == OutboundEmailStatus.Pending)
+                {
+                    <span class="small muted">next <RelativeTime Value="context.NextAttemptAt" /></span>
+                }
+                else
+                {
+                    <span class="faint">—</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="OutboxMessageSummary" Title="Source" Width="110px">
+            <Template><span class="tag">@(context.Source ?? "—")</span></Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<Drawer @bind-Open="_drawerOpen" Title="@(_detail?.Summary.Subject ?? "Message")" Subtitle="@(_detail is null ? null : $"Queued {_detail.Summary.CreatedAt.ToLocalTime():g}")" Size="lg">
+    <ChildContent>
+        @if (_detail is null)
+        {
+            <Skeleton Lines="8" />
+        }
+        else
+        {
+            var summary = _detail.Summary;
+            <div class="flex items-center gap-2 mb-4">
+                <StatusPill Text="@StatusText(summary.Status, summary.Attempts)" Tone="@StatusTone(summary.Status, summary.Attempts)" />
+                <span class="tag">@(summary.Source ?? "unknown source")</span>
+            </div>
+            <dl class="kv">
+                <dt>To</dt>
+                <dd>@summary.Recipients.Replace(";", ", ")</dd>
+                @if (!string.IsNullOrEmpty(_detail.CcRecipients))
+                {
+                    <dt>Cc</dt>
+                    <dd>@_detail.CcRecipients.Replace(";", ", ")</dd>
+                }
+                <dt>Attempts</dt>
+                <dd>@summary.Attempts</dd>
+                <dt>Delivered</dt>
+                <dd>@(summary.SentAt is { } sent ? sent.ToLocalTime().ToString("g") : "—")</dd>
+                @if (summary.Status == OutboundEmailStatus.Pending)
+                {
+                    <dt>Next attempt</dt>
+                    <dd><RelativeTime Value="summary.NextAttemptAt" /></dd>
+                }
+            </dl>
+            @if (summary.LastError is not null)
+            {
+                <div class="alert alert-danger mt-4"><Icon Name="alert-circle" Size="18" /><div class="outbox-error">@summary.LastError</div></div>
+            }
+            <div class="form-section-title mt-6"><Icon Name="file-text" Size="16" /> @(string.IsNullOrEmpty(_detail.TextBody) ? "HTML source" : "Text body")</div>
+            <pre class="outbox-body">@(string.IsNullOrEmpty(_detail.TextBody) ? _detail.HtmlBody : _detail.TextBody)</pre>
+        }
+    </ChildContent>
+    <Footer>
+        @if (_detail is not null)
+        {
+            <button class="btn btn-outline-danger" @onclick="() => _deleteOpen = true" disabled="@(_detail.Summary.Status == OutboundEmailStatus.Sending)"><Icon Name="trash" Size="16" /> Delete</button>
+            @if (_detail.Summary.Status is OutboundEmailStatus.Failed or OutboundEmailStatus.Pending)
+            {
+                <button class="btn btn-primary" @onclick="RetryAsync" disabled="@_busy"><Icon Name="send" Size="16" /> Retry now</button>
+            }
+        }
+    </Footer>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_deleteOpen" Title="Delete message?" Message="The message is removed from the outbox and will not be delivered." ConfirmText="Delete" Danger="true" OnConfirm="DeleteAsync" />
+
+@code {
+    private const int PageSize = 25;
+    private PagedResult<OutboxMessageSummary>? _page;
+    private OutboxStatistics? _stats;
+    private OutboundEmailStatus? _status;
+    private bool _loading = true;
+    private bool _busy;
+    private int _pageNumber = 1;
+    private string? _search;
+    private string? _sortBy = "CreatedAt";
+    private bool _sortDescending = true;
+    private bool _drawerOpen;
+    private bool _deleteOpen;
+    private OutboxMessageDetail? _detail;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private static string StatusText(OutboundEmailStatus status, int attempts) => status switch
+    {
+        OutboundEmailStatus.Pending when attempts > 0 => "Retrying",
+        OutboundEmailStatus.Pending => "Queued",
+        OutboundEmailStatus.Sending => "Sending",
+        OutboundEmailStatus.Sent => "Delivered",
+        _ => "Failed",
+    };
+
+    private static string StatusTone(OutboundEmailStatus status, int attempts) => status switch
+    {
+        OutboundEmailStatus.Pending when attempts > 0 => "warning",
+        OutboundEmailStatus.Pending => "info",
+        OutboundEmailStatus.Sending => "primary",
+        OutboundEmailStatus.Sent => "success",
+        _ => "danger",
+    };
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var page = await Email.ListOutboxAsync(new PageRequest { Page = _pageNumber, PageSize = PageSize, Search = _search, SortBy = _sortBy, SortDescending = _sortDescending }, _status);
+            if (page.Succeeded)
+            {
+                _page = page.Value;
+            }
+            else
+            {
+                Toasts.Error("The outbox could not be loaded", page.Error);
+            }
+
+            var stats = await Email.GetOutboxStatisticsAsync();
+            _stats = stats.Succeeded ? stats.Value : _stats;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task FilterAsync(OutboundEmailStatus? status)
+    {
+        _status = status;
+        _pageNumber = 1;
+        await ReloadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _pageNumber = page;
+        await ReloadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        (_sortBy, _sortDescending) = sort;
+        await ReloadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _search = string.IsNullOrWhiteSpace(term) ? null : term;
+        _pageNumber = 1;
+        await ReloadAsync();
+    }
+
+    private async Task OpenAsync(OutboxMessageSummary row)
+    {
+        _detail = null;
+        _drawerOpen = true;
+        var result = await Email.GetOutboxMessageAsync(row.Id);
+        if (result.Succeeded)
+        {
+            _detail = result.Value;
+        }
+        else
+        {
+            _drawerOpen = false;
+            Toasts.Error("Message unavailable", result.Error);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        if (_detail is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            if (Toasts.FromResult(await Email.RetryAsync(_detail.Summary.Id), "Message re-queued"))
+            {
+                _drawerOpen = false;
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RetryAllAsync()
+    {
+        _busy = true;
+        try
+        {
+            var result = await Email.RetryAllFailedAsync();
+            if (Toasts.FromResult(result, $"{result.Value} message(s) re-queued"))
+            {
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_detail is not null && Toasts.FromResult(await Email.DeleteAsync(_detail.Summary.Id), "Message deleted"))
+        {
+            _drawerOpen = false;
+            _detail = null;
+            await ReloadAsync();
+        }
+    }
+}

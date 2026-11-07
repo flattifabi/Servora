@@ -1,0 +1,82 @@
+@* Editor for a single typed system setting (text, number, switch, color, choice, time zone). *@
+
+@switch (Definition.ValueType)
+{
+    case SettingValueType.Boolean:
+        <Switch Value="IsOn" ValueChanged="SwitchChanged" Label="@(IsOn ? "Enabled" : "Disabled")" Disabled="Disabled" />
+        break;
+    case SettingValueType.MultilineText:
+        <textarea class="textarea" rows="3" maxlength="@Definition.EffectiveMaxLength" placeholder="@Definition.Placeholder" disabled="@Disabled"
+                  value="@Value" @onchange="e => Changed(e.Value?.ToString())"></textarea>
+        break;
+    case SettingValueType.Integer:
+        <input class="input" type="number" min="@Definition.Min" max="@Definition.Max" disabled="@Disabled" value="@Value" @onchange="e => Changed(e.Value?.ToString())" />
+        break;
+    case SettingValueType.Color:
+        <div class="color-editor">
+            <label class="color-chip" style="background:@SafeColor" title="Pick a color">
+                <input type="color" value="@SafeColor" disabled="@Disabled" @onchange="e => Changed(e.Value?.ToString())" />
+            </label>
+            <input class="input mono" maxlength="7" disabled="@Disabled" value="@Value" @onchange="e => Changed(e.Value?.ToString())" />
+        </div>
+        break;
+    case SettingValueType.Choice:
+        <select class="select" disabled="@Disabled" value="@Value" @onchange="e => Changed(e.Value?.ToString())">
+            @foreach (var choice in Definition.Choices)
+            {
+                <option value="@choice">@choice</option>
+            }
+        </select>
+        break;
+    case SettingValueType.TimeZone:
+        <select class="select" disabled="@Disabled" value="@Value" @onchange="e => Changed(e.Value?.ToString())">
+            @if (s_timeZones.All(z => z.Id != Value))
+            {
+                <option value="@Value">@Value</option>
+            }
+            @foreach (var zone in s_timeZones)
+            {
+                <option value="@zone.Id">@zone.DisplayName</option>
+            }
+        </select>
+        break;
+    default:
+        <input class="input" type="@InputType" maxlength="@Definition.EffectiveMaxLength" placeholder="@Definition.Placeholder" disabled="@Disabled"
+               value="@Value" @onchange="e => Changed(e.Value?.ToString())" />
+        break;
+}
+
+@code {
+    private static readonly IReadOnlyList<TimeZoneInfo> s_timeZones = TimeZoneInfo.GetSystemTimeZones();
+
+    /// <summary>Gets or sets the setting definition.</summary>
+    [Parameter, EditorRequired] public SettingDefinition Definition { get; set; } = default!;
+
+    /// <summary>Gets or sets the current (edited) value.</summary>
+    [Parameter] public string Value { get; set; } = string.Empty;
+
+    /// <summary>Raised when the value changes.</summary>
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the editor is read-only.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    private string InputType => Definition.ValueType switch
+    {
+        SettingValueType.Email => "email",
+        SettingValueType.Url => "url",
+        _ => "text",
+    };
+
+    private string SafeColor => Value is { Length: 7 } && Value[0] == '#' && Value.Skip(1).All(Uri.IsHexDigit) ? Value : "#7c6cff";
+
+    private bool IsOn => Value == "true";
+
+    private Task SwitchChanged(bool value) => Changed(value ? "true" : "false");
+
+    private Task Changed(string? value)
+    {
+        Value = value ?? string.Empty;
+        return ValueChanged.InvokeAsync(Value);
+    }
+}

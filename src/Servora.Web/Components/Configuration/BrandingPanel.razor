@@ -1,0 +1,211 @@
+@* Branding editor: product name, company name, accent color and logo upload with live preview. *@
+@inject IBrandingService Branding
+@inject ToastService Toasts
+
+<div class="grid grid-sidebar">
+    <div class="card">
+        <div class="card-header">
+            <div>
+                <h3><Icon Name="sparkles" Size="18" /> Identity</h3>
+                <div class="card-subtitle">How the product presents itself to users, on the sign-in page and in e-mails.</div>
+            </div>
+        </div>
+        <div class="card-body">
+            @if (_loading)
+            {
+                <Skeleton Lines="4" Height="40px" />
+            }
+            else
+            {
+                <div class="form-grid">
+                    <FormField Label="Product name" Required="true" Help="Shown in the navigation, browser titles and e-mails.">
+                        <input class="input" maxlength="60" @bind="_productName" @bind:event="oninput" />
+                    </FormField>
+                    <FormField Label="Company name" Help="The organisation operating this instance.">
+                        <input class="input" maxlength="120" @bind="_companyName" @bind:event="oninput" />
+                    </FormField>
+                    <div class="field span-all">
+                        <label class="required">Accent color</label>
+                        <div class="swatches">
+                            @foreach (var color in s_swatches)
+                            {
+                                var value = color;
+                                <button type="button" class="swatch @(string.Equals(_accent, value, StringComparison.OrdinalIgnoreCase) ? "active" : null)"
+                                        style="background:@value" title="@value" aria-label="@($"Accent color {value}")" @onclick="() => _accent = value"></button>
+                            }
+                            <SettingEditor Definition="s_accentDefinition" Value="@_accent" ValueChanged="v => _accent = v" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section-title mt-6"><Icon Name="upload" Size="16" /> Logo</div>
+                <div class="logo-row">
+                    <div class="logo-frame">
+                        @if (_branding?.LogoUrl is { } url)
+                        {
+                            <img src="@url" alt="Current logo" />
+                        }
+                        else
+                        {
+                            <div class="logo-placeholder" style="background:@PreviewGradient"><Icon Name="sparkles" Size="22" /></div>
+                        }
+                    </div>
+                    <div class="flex-1">
+                        <div class="small muted mb-3">PNG, JPEG, GIF or WebP up to @(IBrandingService.MaxLogoBytes / 1024) KB. A square or wide image with a transparent background works best. SVG is not accepted for security reasons.</div>
+                        <div class="flex gap-2 flex-wrap">
+                            <label class="btn btn-secondary @(_uploading ? "disabled" : null)">
+                                @if (_uploading)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                else
+                                {
+                                    <Icon Name="upload" Size="16" />
+                                }
+                                Upload logo
+                                <InputFile class="hidden" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp" OnChange="UploadAsync" disabled="@_uploading" />
+                            </label>
+                            @if (_branding?.HasLogo == true)
+                            {
+                                <button class="btn btn-outline-danger" @onclick="() => _confirmRemove = true"><Icon Name="trash" Size="16" /> Remove</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+        <div class="card-footer settings-footer">
+            <span class="small faint">Changes are audited and apply without a restart.</span>
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(_saving || _loading || !IsDirty)">
+                @if (_saving)
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="save" Size="16" />
+                }
+                Save branding
+            </button>
+        </div>
+    </div>
+
+    <div class="stack sticky-top" style="gap:16px">
+        <div class="card">
+            <div class="card-header"><h3><Icon Name="eye" Size="18" /> Preview</h3></div>
+            <div class="card-body">
+                <div class="preview-shell">
+                    <div class="preview-brand">
+                        @if (_branding?.LogoUrl is { } previewUrl)
+                        {
+                            <img class="preview-logo" src="@previewUrl" alt="" />
+                        }
+                        else
+                        {
+                            <div class="preview-mark" style="background:@PreviewGradient"><Icon Name="sparkles" Size="15" /></div>
+                        }
+                        <div>
+                            <div class="preview-name">@(string.IsNullOrWhiteSpace(_productName) ? "Servora" : _productName)</div>
+                            <div class="preview-sub">@(string.IsNullOrWhiteSpace(_companyName) ? "Service Platform" : _companyName)</div>
+                        </div>
+                    </div>
+                    <div class="preview-nav">
+                        <div class="preview-link active" style="--accent-preview:@SafeAccent"><Icon Name="home" Size="14" /> My Work</div>
+                        <div class="preview-link"><Icon Name="alert-triangle" Size="14" /> Incidents</div>
+                        <div class="preview-link"><Icon Name="book-open" Size="14" /> Knowledge</div>
+                    </div>
+                    <span class="preview-button" style="background:@SafeAccent">Primary action</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<ConfirmDialog @bind-Open="_confirmRemove" Title="Remove the logo?" Message="The default Servora mark is shown again." ConfirmText="Remove logo" Danger="true" OnConfirm="RemoveAsync" />
+
+@code {
+    private static readonly string[] s_swatches = ["#7c6cff", "#6366f1", "#0ea5e9", "#14b8a6", "#22c55e", "#f59e0b", "#f43f5e", "#ec4899"];
+    private static readonly SettingDefinition s_accentDefinition = CoreSettingDefinitionProvider.All.First(d => d.Key == SystemSettingKeys.AccentColor);
+
+    private BrandingInfo? _branding;
+    private string _productName = string.Empty;
+    private string _companyName = string.Empty;
+    private string _accent = CoreSettingDefinitionProvider.DefaultAccentColor;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _uploading;
+    private bool _confirmRemove;
+
+    private bool IsDirty => _branding is not null
+        && (_productName != _branding.ProductName || _companyName != _branding.CompanyName || !string.Equals(_accent, _branding.AccentColor, StringComparison.OrdinalIgnoreCase));
+
+    private string SafeAccent => _accent is { Length: 7 } && _accent[0] == '#' && _accent.Skip(1).All(Uri.IsHexDigit) ? _accent : CoreSettingDefinitionProvider.DefaultAccentColor;
+
+    private string PreviewGradient => $"linear-gradient(135deg, {SafeAccent} 0%, #a855f7 55%, #22d3ee 100%)";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _branding = await Branding.GetAsync();
+        _productName = _branding.ProductName;
+        _companyName = _branding.CompanyName;
+        _accent = _branding.AccentColor;
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            var result = await Branding.UpdateAsync(_productName, _companyName, _accent);
+            if (Toasts.FromResult(result, "Branding saved"))
+            {
+                await LoadAsync();
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        if (e.File.Size > IBrandingService.MaxLogoBytes)
+        {
+            Toasts.Error("Logo too large", $"The logo must not exceed {IBrandingService.MaxLogoBytes / 1024} KB.");
+            return;
+        }
+
+        _uploading = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(IBrandingService.MaxLogoBytes);
+            var result = await Branding.UploadLogoAsync(stream);
+            if (Toasts.FromResult(result, "Logo updated"))
+            {
+                await LoadAsync();
+            }
+        }
+        catch (IOException)
+        {
+            Toasts.Error("Upload failed", "The file could not be read.");
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        var result = await Branding.RemoveLogoAsync();
+        if (Toasts.FromResult(result, "Logo removed"))
+        {
+            await LoadAsync();
+        }
+    }
+}

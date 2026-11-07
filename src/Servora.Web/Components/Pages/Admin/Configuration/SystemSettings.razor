@@ -1,0 +1,178 @@
+@page "/admin/settings"
+@page "/admin/settings/{Section}"
+@* System settings (T-03): general, branding, localization, e-mail, security, features and database, with change history. *@
+@attribute [RequirePermission(Permissions.Configuration.ManageSettings)]
+@inject ISystemSettingsService Settings
+@inject IEmailConfigurationService Email
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Navigation
+@inject ToastService Toasts
+
+<PageTitle>System Settings · Servora</PageTitle>
+
+<PageHeader Title="System Settings" Subtitle="Configure this instance. Changes apply immediately and are recorded in the audit log." Icon="sliders">
+    <Breadcrumbs>
+        <span>Administration</span> <Icon Name="chevron-right" Size="12" /> <span>System Settings</span>
+    </Breadcrumbs>
+    <Actions>
+        <button class="btn btn-secondary" @onclick="OpenHistoryAsync"><Icon Name="history" Size="16" /> Change history</button>
+        <a class="btn btn-secondary" href="/admin/settings/outbox"><Icon Name="inbox" Size="16" /> Mail outbox</a>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Customized settings" Value="@(_customized?.ToString() ?? "–")" Icon="sliders" Tone="primary" Caption="@($"of {_visibleCount} settings")" OnClick="() => Select(Sections[0].Key)" />
+    <StatCard Label="Features enabled" Value="@(_featuresOn is null ? "–" : $"{_featuresOn}/{_featuresTotal}")" Icon="zap" Tone="accent" Caption="feature flags" OnClick="@(() => Select("features"))" />
+    <StatCard Label="E-mail delivery" Value="@(_emailEnabled is null ? "–" : _emailEnabled.Value ? "On" : "Off")" Icon="mail" Tone="@(_emailEnabled == true ? "success" : "warning")" Caption="@_emailCaption" OnClick="@(() => Select("email"))" />
+    <StatCard Label="Outbox issues" Value="@(_outbox is null ? "–" : (_outbox.Failed + _outbox.Retrying).ToString())" Icon="alert-triangle" Tone="@(_outbox is { Failed: > 0 } ? "danger" : "info")" Caption="failed or retrying" OnClick="@(() => Navigation.NavigateTo("/admin/settings/outbox"))" />
+</div>
+
+<Tabs Items="_tabs" ActiveKey="@ActiveKey" ActiveKeyChanged="Select" />
+
+<div class="mt-6" @key="ActiveKey">
+    @switch (ActiveKey)
+    {
+        case "general":
+            <SettingsCategoryPanel Category="@SettingCategories.General" Title="General" Icon="settings" Description="Public address, contact information and defaults for this instance." OnChanged="RefreshAsync" />
+            break;
+        case "branding":
+            <BrandingPanel />
+            break;
+        case "localization":
+            <SettingsCategoryPanel Category="@SettingCategories.Localization" Title="Localization" Icon="globe" Description="Defaults for users without personal preferences, schedules and reports." OnChanged="RefreshAsync" />
+            break;
+        case "email":
+            <EmailSettingsPanel OnChanged="RefreshAsync" />
+            break;
+        case "security":
+            <SecurityInfoPanel />
+            break;
+        case "features":
+            <FeatureFlagsPanel OnChanged="RefreshAsync" />
+            break;
+        case "database":
+            <DatabasePanel />
+            break;
+    }
+</div>
+
+<Drawer @bind-Open="_historyOpen" Title="Change history" Subtitle="Recent configuration changes from the audit log" Size="lg">
+    @if (_history is null)
+    {
+        <Skeleton Lines="8" />
+    }
+    else if (_history.Count == 0)
+    {
+        <EmptyState Icon="history" Title="No changes yet" Text="Configuration changes appear here as soon as they are made." />
+    }
+    else
+    {
+        <ul class="history-list">
+            @foreach (var change in _history)
+            {
+                <li>
+                    <div class="history-dot"><Icon Name="@HistoryIcon(change.Action)" Size="14" /></div>
+                    <div class="flex-1">
+                        <div class="history-message">@(change.Message ?? change.Action)</div>
+                        <div class="tiny faint">@change.Actor · <RelativeTime Value="change.OccurredAt" /> · <span class="mono">@change.Action</span></div>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</Drawer>
+
+@code {
+    private static readonly TabItem[] s_allTabs =
+    [
+        new("general", "General", "settings"),
+        new("branding", "Branding", "sparkles"),
+        new("localization", "Localization", "globe"),
+        new("email", "E-mail", "mail"),
+        new("security", "Security", "shield-check"),
+        new("features", "Features", "zap"),
+        new("database", "Database", "database"),
+    ];
+
+    private IReadOnlyList<TabItem> _tabs = s_allTabs.Where(t => t.Key != "database").ToList();
+    private int? _customized;
+    private int _visibleCount;
+    private int? _featuresOn;
+    private int _featuresTotal;
+    private bool? _emailEnabled;
+    private string _emailCaption = "SMTP";
+    private OutboxStatistics? _outbox;
+    private bool _historyOpen;
+    private IReadOnlyList<SettingChange>? _history;
+
+    /// <summary>Gets or sets the active section from the route (<c>/admin/settings/{Section}</c>).</summary>
+    [Parameter] public string? Section { get; set; }
+
+    private IReadOnlyList<TabItem> Sections => _tabs;
+
+    private string ActiveKey => _tabs.Any(t => t.Key == Section?.ToLowerInvariant()) ? Section!.ToLowerInvariant() : "general";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        if (await CurrentUser.HasPermissionAsync(Permissions.Configuration.ManageDatabase))
+        {
+            _tabs = s_allTabs;
+        }
+
+        await RefreshAsync();
+    }
+
+    private static string HistoryIcon(string action) => action switch
+    {
+        _ when action.StartsWith("secret", StringComparison.Ordinal) => "key",
+        _ when action.StartsWith("feature", StringComparison.Ordinal) => "zap",
+        _ when action.StartsWith("email", StringComparison.Ordinal) => "mail",
+        _ when action.StartsWith("branding", StringComparison.Ordinal) => "sparkles",
+        _ when action.StartsWith("database", StringComparison.Ordinal) || action.StartsWith("setup", StringComparison.Ordinal) => "database",
+        _ => "sliders",
+    };
+
+    private void Select(string key) => Navigation.NavigateTo(key == "general" ? "/admin/settings" : $"/admin/settings/{key}");
+
+    private async Task RefreshAsync()
+    {
+        var all = await Settings.ListAsync();
+        if (all.Succeeded)
+        {
+            var items = all.Value!;
+            var editable = items.Where(i => i.Definition.Category != SettingCategories.Features).ToList();
+            _visibleCount = editable.Count;
+            _customized = editable.Count(i => !i.IsDefault);
+            var flags = items.Where(i => i.Definition.Category == SettingCategories.Features).ToList();
+            _featuresTotal = flags.Count;
+            _featuresOn = flags.Count(f => f.Value == "true");
+        }
+
+        var smtp = await Email.GetSettingsAsync();
+        if (smtp.Succeeded)
+        {
+            _emailEnabled = smtp.Value!.Enabled;
+            _emailCaption = smtp.Value.IsComplete ? smtp.Value.Host : "not configured";
+        }
+
+        var outbox = await Email.GetOutboxStatisticsAsync();
+        _outbox = outbox.Succeeded ? outbox.Value : null;
+    }
+
+    private async Task OpenHistoryAsync()
+    {
+        _historyOpen = true;
+        _history = null;
+        var result = await Settings.GetHistoryAsync(take: 100);
+        if (result.Succeeded)
+        {
+            _history = result.Value;
+        }
+        else
+        {
+            _history = [];
+            Toasts.Error("History unavailable", result.Error);
+        }
+    }
+}

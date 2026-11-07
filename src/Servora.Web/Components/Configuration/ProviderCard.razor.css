@@ -1,0 +1,93 @@
+.provider-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+    min-height: 132px;
+    padding: 16px 14px 14px;
+    border-radius: var(--r);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--speed), transform var(--speed) var(--ease), box-shadow var(--speed), background var(--speed);
+}
+
+.provider-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(124, 108, 255, .45);
+    box-shadow: var(--shadow);
+}
+
+.provider-card:focus-visible {
+    outline: none;
+    box-shadow: var(--ring);
+}
+
+.provider-card.selected {
+    border-color: transparent;
+    background: linear-gradient(var(--surface), var(--surface)) padding-box, var(--gradient) border-box;
+    border: 1px solid transparent;
+    box-shadow: var(--glow);
+}
+
+.provider-icon {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border-radius: 11px;
+    background: var(--gradient-soft);
+    color: var(--primary);
+    border: 1px solid var(--border);
+    margin-bottom: 4px;
+}
+
+.provider-title {
+    font-weight: 650;
+    font-size: 14px;
+}
+
+.provider-tagline {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.provider-badge {
+    margin-top: auto;
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: var(--r-full);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.provider-check {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--gradient);
+    color: #fff;
+    opacity: 0;
+    transform: scale(.6);
+    transition: opacity var(--speed), transform var(--speed) var(--ease);
+}
+
+.provider-card.selected .provider-check {
+    opacity: 1;
+    transform: none;
+}

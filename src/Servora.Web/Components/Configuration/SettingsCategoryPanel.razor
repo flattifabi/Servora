@@ -1,0 +1,168 @@
+@* Generic editor for all visible settings of one category, with save / discard, reset to default and restart badges. *@
+@inject ISystemSettingsService Settings
+@inject ToastService Toasts
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h3><Icon Name="@Icon" Size="18" /> @Title</h3>
+            @if (!string.IsNullOrEmpty(Description))
+            {
+                <div class="card-subtitle">@Description</div>
+            }
+        </div>
+        @if (DirtyCount > 0)
+        {
+            <span class="pill pill-warning">@DirtyCount unsaved change@(DirtyCount == 1 ? null : "s")</span>
+        }
+    </div>
+    <div class="card-body">
+        @if (_items is null)
+        {
+            <div class="form-grid">
+                @for (var i = 0; i < 4; i++)
+                {
+                    <div class="field"><Skeleton Width="40%" /><Skeleton Height="40px" /></div>
+                }
+            </div>
+        }
+        else if (_items.Count == 0)
+        {
+            <EmptyState Icon="sliders" Title="No settings in this category" Text="Modules can contribute settings here." />
+        }
+        else
+        {
+            <div class="form-grid">
+                @foreach (var item in _items)
+                {
+                    var key = item.Key;
+                    <div class="field @(item.Definition.ValueType == SettingValueType.MultilineText ? "span-all" : null)">
+                        <label class="@(item.Definition.Required ? "required" : null)">
+                            @item.Definition.Label
+                            @if (!item.IsDefault)
+                            {
+                                <span class="tag" title="@($"Changed {item.UpdatedAt?.ToString("g")} by {item.UpdatedBy}")">Customized</span>
+                            }
+                            @if (item.Definition.RequiresRestart)
+                            {
+                                <span class="pill pill-warning no-dot">Restart required</span>
+                            }
+                            @if (!item.IsDefault)
+                            {
+                                <button type="button" class="link-btn" title="Reset to default (@(string.IsNullOrEmpty(item.Definition.DefaultValue) ? "empty" : item.Definition.DefaultValue))" @onclick="() => ResetAsync(key)">
+                                    <Icon Name="refresh" Size="12" /> Reset
+                                </button>
+                            }
+                        </label>
+                        <SettingEditor Definition="item.Definition" Value="@_values[key]" ValueChanged="v => _values[key] = v" Disabled="_saving" />
+                        @if (!string.IsNullOrEmpty(item.Definition.Description))
+                        {
+                            <div class="help">@item.Definition.Description</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+    @if (_items is { Count: > 0 })
+    {
+        <div class="card-footer settings-footer">
+            <span class="small faint">Changes take effect immediately and are recorded in the audit log.</span>
+            <div class="flex gap-2">
+                <button class="btn btn-ghost" @onclick="Discard" disabled="@(DirtyCount == 0 || _saving)">Discard</button>
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(DirtyCount == 0 || _saving)">
+                    @if (_saving)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="save" Size="16" />
+                    }
+                    Save changes
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<SettingItem>? _items;
+    private Dictionary<string, string> _values = [];
+    private bool _saving;
+    private string? _loadedCategory;
+
+    /// <summary>Gets or sets the category to edit.</summary>
+    [Parameter, EditorRequired] public string Category { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the card title.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the card description.</summary>
+    [Parameter] public string? Description { get; set; }
+
+    /// <summary>Gets or sets the card icon.</summary>
+    [Parameter] public string Icon { get; set; } = "sliders";
+
+    /// <summary>Raised after settings were saved or reset.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private int DirtyCount => _items?.Count(i => _values.TryGetValue(i.Key, out var v) && v != i.Value) ?? 0;
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        // Reload only when the category changes, so a parent re-render never discards unsaved edits.
+        if (_loadedCategory != Category)
+        {
+            _loadedCategory = Category;
+            _items = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var result = await Settings.ListAsync(Category);
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Settings could not be loaded", result.Error);
+            _items = [];
+            return;
+        }
+
+        _items = result.Value!;
+        _values = _items.ToDictionary(i => i.Key, i => i.Value);
+    }
+
+    private void Discard() => _values = _items!.ToDictionary(i => i.Key, i => i.Value);
+
+    private async Task SaveAsync()
+    {
+        var changed = _items!.Where(i => _values[i.Key] != i.Value).ToDictionary(i => i.Key, i => (string?)_values[i.Key]);
+        _saving = true;
+        try
+        {
+            var result = await Settings.SetManyAsync(changed);
+            if (Toasts.FromResult(result, $"{changed.Count} setting{(changed.Count == 1 ? null : "s")} saved"))
+            {
+                await LoadAsync();
+                await OnChanged.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ResetAsync(string key)
+    {
+        var result = await Settings.ResetAsync(key);
+        if (Toasts.FromResult(result, "Setting reset to its default"))
+        {
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+    }
+}

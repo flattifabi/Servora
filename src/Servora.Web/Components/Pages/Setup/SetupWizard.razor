@@ -1,0 +1,685 @@
+@page "/setup"
+@* First-run setup wizard (T-03): Welcome → Database → Organisation → Review → Install. Works without a configured
+   database: it only uses SetupSession, which never touches the database itself. Remote clients need the setup token. *@
+@attribute [AllowAnonymous]
+@layout AuthLayout
+@inject SetupSession Session
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Set up · Servora</PageTitle>
+
+<div class="setup-card">
+    <div class="setup-top">
+        <div class="setup-mark" style="background: @MarkGradient"><Icon Name="sparkles" Size="16" /></div>
+        <div class="flex-1">
+            <div class="eyebrow">First-run setup</div>
+            <div class="setup-product">@(string.IsNullOrWhiteSpace(_organization.ProductName) ? "Servora" : _organization.ProductName)</div>
+        </div>
+        @if (Session.IsAuthorized && Session.CanRunSetup && _step < SetupWizardStep.Install)
+        {
+            <span class="tag"><Icon Name="@(Session.IsLocalClient ? "monitor" : "key")" Size="12" /> @(Session.IsLocalClient ? "Local session" : "Verified with token")</span>
+        }
+    </div>
+
+    @if (!Session.CanRunSetup && !Session.IsCompleted)
+    {
+        <div class="setup-panel">
+            <div class="setup-hero-icon success"><Icon Name="check-circle" Size="30" /></div>
+            <h2>Setup is already complete</h2>
+            <p class="lead">This instance is configured. Sign in to continue, or change settings under Administration › System Settings.</p>
+            <button class="btn btn-primary btn-lg btn-block" @onclick="GoToSignIn"><Icon Name="log-in" Size="18" /> Go to sign-in</button>
+        </div>
+    }
+    else if (!Session.IsAuthorized)
+    {
+        <div class="setup-panel">
+            <div class="setup-hero-icon"><Icon Name="lock" Size="28" /></div>
+            <h2>Enter the setup token</h2>
+            <p class="lead">You are connecting from another computer. To protect this new installation, enter the one-time setup token stored on the server.</p>
+            <div class="setup-path mb-4">
+                <Icon Name="file-text" Size="15" />
+                <span class="mono">@Session.Backend.SetupTokenPath</span>
+            </div>
+            <form class="stack" style="gap:14px" @onsubmit="VerifyTokenAsync">
+                <FormField Label="Setup token" Error="@_tokenError">
+                    <div class="input-icon">
+                        <Icon Name="key" Size="16" />
+                        <input class="input mono" type="password" autocomplete="off" spellcheck="false" placeholder="48 hexadecimal characters"
+                               @bind="_token" @bind:event="oninput" disabled="@(_verifying || Session.IsLockedOut)" />
+                    </div>
+                </FormField>
+                <button type="submit" class="btn btn-primary btn-lg btn-block" disabled="@(_verifying || Session.IsLockedOut || string.IsNullOrWhiteSpace(_token))">
+                    @if (_verifying)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="unlock" Size="18" />
+                    }
+                    Unlock setup
+                </button>
+            </form>
+            <p class="small faint mt-4">Tip: open the wizard directly on the server (http://localhost) to skip this step.</p>
+        </div>
+    }
+    else
+    {
+        <ol class="setup-steps" aria-label="Setup progress">
+            @for (var i = 0; i < s_stepTitles.Length; i++)
+            {
+                var index = i;
+                <li class="@StepClass(index)">
+                    <span class="dot">
+                        @if ((int)_step > index || (Session.IsCompleted && index == (int)SetupWizardStep.Install))
+                        {
+                            <Icon Name="check" Size="13" StrokeWidth="3" />
+                        }
+                        else
+                        {
+                            @(index + 1)
+                        }
+                    </span>
+                    <span class="label">@s_stepTitles[index]</span>
+                </li>
+            }
+        </ol>
+
+        <div class="setup-panel" @key="_step">
+            @switch (_step)
+            {
+                case SetupWizardStep.Welcome:
+                    <h2>Welcome to Servora</h2>
+                    <p class="lead">A few steps and your self-hosted service platform is ready. Nothing is written until you confirm the summary.</p>
+                    <div class="welcome-list">
+                        <div class="welcome-item"><span class="icon-wrap"><Icon Name="database" Size="17" /></span><div><b>Connect a database</b><span>SQLite for a quick start, SQL Server or PostgreSQL for production.</span></div></div>
+                        <div class="welcome-item"><span class="icon-wrap"><Icon Name="building" Size="17" /></span><div><b>Make it yours</b><span>Company name, product name, accent color and time zone.</span></div></div>
+                        <div class="welcome-item"><span class="icon-wrap"><Icon Name="shield-check" Size="17" /></span><div><b>Secure by default</b><span>Credentials are encrypted, the administrator must choose a new password.</span></div></div>
+                    </div>
+                    <dl class="kv setup-kv">
+                        <dt>Data directory</dt>
+                        <dd class="mono small">@Session.Backend.DataDirectory</dd>
+                        <dt>Connection</dt>
+                        <dd>@(Session.IsLocalClient ? "This computer (loopback)" : "Remote, unlocked with the setup token")</dd>
+                    </dl>
+                    <div class="setup-actions">
+                        <span></span>
+                        <button class="btn btn-primary btn-lg" @onclick="() => GoTo(SetupWizardStep.Database)">Get started <Icon Name="arrow-right" Size="18" /></button>
+                    </div>
+                    break;
+
+                case SetupWizardStep.Database:
+                    <h2>Choose your database</h2>
+                    <p class="lead">Servora creates its schema automatically. For SQL Server and PostgreSQL, create an empty database first.</p>
+                    <div class="provider-grid">
+                        @foreach (var provider in s_providers)
+                        {
+                            var key = provider.Key;
+                            <ProviderCard Title="@provider.Title" Tagline="@provider.Tagline" Icon="@provider.Icon" Badge="@provider.Badge"
+                                          Selected="@(_connection.Provider == key)" OnSelect="() => SelectProvider(key)" />
+                        }
+                    </div>
+
+                    <div class="flex items-center justify-between mt-6 mb-4">
+                        <div class="form-section-title mb-0"><Icon Name="plug" Size="16" /> Connection</div>
+                        <Switch Value="_connection.UseRawConnectionString" ValueChanged="ToggleRaw" Label="Connection string" />
+                    </div>
+
+                    @if (_connection.UseRawConnectionString)
+                    {
+                        <FormField Label="Connection string" Help="@($"Example: {ExampleConnectionString}")">
+                            <textarea class="textarea mono" rows="3" spellcheck="false" @bind="_connection.RawConnectionString" @bind:after="InvalidateTest"></textarea>
+                        </FormField>
+                    }
+                    else if (_connection.Provider == DatabaseProviderKeys.Sqlite)
+                    {
+                        <FormField Label="Database file" Required="true" Help="@($"Relative paths are stored in {Session.Backend.DataDirectory}.")">
+                            <div class="input-icon">
+                                <Icon Name="hard-drive" Size="16" />
+                                <input class="input mono" @bind="_connection.FilePath" @bind:after="InvalidateTest" spellcheck="false" />
+                            </div>
+                        </FormField>
+                        <div class="alert alert-info mt-4"><Icon Name="info" Size="18" /><div>SQLite is ideal for evaluation and small teams on a single server. You can move to SQL Server or PostgreSQL later.</div></div>
+                    }
+                    else
+                    {
+                        <div class="form-grid">
+                            <FormField Label="Server" Required="true" Class="@(_connection.Provider == DatabaseProviderKeys.SqlServer ? "span-all" : null)"
+                                       Help="@(_connection.Provider == DatabaseProviderKeys.SqlServer ? @"Host or host\instance" : null)">
+                                <input class="input" @bind="_connection.Server" @bind:after="InvalidateTest" spellcheck="false" />
+                            </FormField>
+                            <FormField Label="Port" Help="@(_connection.Provider == DatabaseProviderKeys.SqlServer ? "Leave empty for the default / named instance" : null)">
+                                <input class="input" type="number" min="1" max="65535" @bind="_connection.Port" @bind:after="InvalidateTest" />
+                            </FormField>
+                            <FormField Label="Database" Required="true">
+                                <input class="input" @bind="_connection.Database" @bind:after="InvalidateTest" spellcheck="false" />
+                            </FormField>
+                            @if (_connection.Provider == DatabaseProviderKeys.SqlServer)
+                            {
+                                <div class="field span-all">
+                                    <label>Authentication</label>
+                                    <div class="segmented">
+                                        <button type="button" class="@(_connection.IntegratedSecurity ? "active" : null)" @onclick="() => SetIntegrated(true)">Windows (service account)</button>
+                                        <button type="button" class="@(!_connection.IntegratedSecurity ? "active" : null)" @onclick="() => SetIntegrated(false)">SQL login</button>
+                                    </div>
+                                </div>
+                            }
+                            @if (_connection.Provider == DatabaseProviderKeys.PostgreSql || !_connection.IntegratedSecurity)
+                            {
+                                <FormField Label="User name" Required="true">
+                                    <input class="input" autocomplete="off" @bind="_connection.UserName" @bind:after="InvalidateTest" spellcheck="false" />
+                                </FormField>
+                                <FormField Label="Password">
+                                    <input class="input" type="password" autocomplete="new-password" @bind="_connection.Password" @bind:after="InvalidateTest" />
+                                </FormField>
+                            }
+                            @if (_connection.Provider == DatabaseProviderKeys.SqlServer)
+                            {
+                                <div class="field span-all">
+                                    <div class="flex flex-wrap gap-6">
+                                        <Switch Value="_connection.Encrypt" ValueChanged="v => { _connection.Encrypt = v; InvalidateTest(); }" Label="Encrypt connection" />
+                                        <Switch Value="_connection.TrustServerCertificate" ValueChanged="v => { _connection.TrustServerCertificate = v; InvalidateTest(); }" Label="Trust server certificate" />
+                                    </div>
+                                    @if (_connection.TrustServerCertificate)
+                                    {
+                                        <div class="help text-warning">Certificate validation is disabled. Only use this for test systems.</div>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <FormField Label="SSL mode" Class="span-all">
+                                    <select class="select" @bind="_connection.SslMode" @bind:after="InvalidateTest">
+                                        @foreach (var mode in ConnectionStringComposer.PostgreSqlSslModes)
+                                        {
+                                            <option value="@mode">@mode</option>
+                                        }
+                                    </select>
+                                </FormField>
+                            }
+                        </div>
+                    }
+
+                    <div class="test-row mt-6">
+                        <button class="btn btn-secondary" @onclick="TestConnectionAsync" disabled="@_testing">
+                            @if (_testing)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="activity" Size="16" />
+                            }
+                            Test connection
+                        </button>
+                        @if (_testResult is { } test && !_testing)
+                        {
+                            @if (test.Succeeded)
+                            {
+                                <span class="test-ok"><Icon Name="check-circle" Size="16" /> Connected in @test.Value.TotalMilliseconds.ToString("0") ms</span>
+                            }
+                            else
+                            {
+                                <span class="test-fail"><Icon Name="x-circle" Size="16" /> Connection failed</span>
+                            }
+                        }
+                    </div>
+                    @if (_testResult is { Succeeded: false } failed && !_testing)
+                    {
+                        <div class="alert alert-danger mt-3"><Icon Name="alert-circle" Size="18" /><div class="setup-error">@failed.Error</div></div>
+                    }
+
+                    <div class="setup-actions">
+                        <button class="btn btn-ghost" @onclick="() => GoTo(SetupWizardStep.Welcome)"><Icon Name="arrow-left" Size="16" /> Back</button>
+                        <button class="btn btn-primary btn-lg" @onclick="ContinueFromDatabase" disabled="@(!IsTestCurrent)">Continue <Icon Name="arrow-right" Size="18" /></button>
+                    </div>
+                    break;
+
+                case SetupWizardStep.Organization:
+                    <h2>Your organisation</h2>
+                    <p class="lead">Shown in the navigation, on the sign-in page and in e-mails. You can change everything later.</p>
+                    <div class="form-grid">
+                        <FormField Label="Company name" Class="span-all">
+                            <div class="input-icon">
+                                <Icon Name="building" Size="16" />
+                                <input class="input" placeholder="Contoso Ltd." maxlength="120" @bind="_organization.CompanyName" @bind:event="oninput" />
+                            </div>
+                        </FormField>
+                        <FormField Label="Product name" Required="true" Help="What your users see, e.g. 'Contoso Service Hub'." Class="span-all">
+                            <input class="input" maxlength="60" @bind="_organization.ProductName" @bind:event="oninput" />
+                        </FormField>
+                        <div class="field span-all">
+                            <label>Accent color</label>
+                            <div class="swatches">
+                                @foreach (var color in s_swatches)
+                                {
+                                    var value = color;
+                                    <button type="button" class="swatch @(string.Equals(_organization.AccentColor, value, StringComparison.OrdinalIgnoreCase) ? "active" : null)"
+                                            style="background:@value" title="@value" aria-label="@($"Accent color {value}")" @onclick="() => _organization.AccentColor = value"></button>
+                                }
+                                <label class="swatch custom" title="Custom color">
+                                    <input type="color" value="@ColorInputValue" @onchange="e => _organization.AccentColor = e.Value?.ToString() ?? _organization.AccentColor" />
+                                    <Icon Name="plus" Size="14" />
+                                </label>
+                                <input class="input mono swatch-hex" maxlength="7" @bind="_organization.AccentColor" @bind:event="oninput" aria-label="Accent color hex value" />
+                            </div>
+                        </div>
+                        <FormField Label="Time zone" Required="true" Class="span-all" Help="Default for schedules, reports and users without a personal preference.">
+                            <select class="select" @bind="_organization.TimeZone">
+                                @foreach (var zone in _timeZones)
+                                {
+                                    <option value="@zone.Id">@zone.DisplayName</option>
+                                }
+                            </select>
+                        </FormField>
+                    </div>
+
+                    <div class="brand-preview mt-6">
+                        <div class="setup-mark" style="background: @MarkGradient"><Icon Name="sparkles" Size="15" /></div>
+                        <div class="flex-1">
+                            <div class="brand-preview-name">@(string.IsNullOrWhiteSpace(_organization.ProductName) ? "Servora" : _organization.ProductName)</div>
+                            <div class="small faint">@(string.IsNullOrWhiteSpace(_organization.CompanyName) ? "Service Platform" : _organization.CompanyName)</div>
+                        </div>
+                        <span class="preview-button" style="background:@SafeAccent">Primary action</span>
+                    </div>
+
+                    @if (_organizationError is not null)
+                    {
+                        <div class="alert alert-danger mt-4"><Icon Name="alert-circle" Size="18" /><div>@_organizationError</div></div>
+                    }
+
+                    <div class="setup-actions">
+                        <button class="btn btn-ghost" @onclick="() => GoTo(SetupWizardStep.Database)"><Icon Name="arrow-left" Size="16" /> Back</button>
+                        <button class="btn btn-primary btn-lg" @onclick="ContinueFromOrganization">Review <Icon Name="arrow-right" Size="18" /></button>
+                    </div>
+                    break;
+
+                case SetupWizardStep.Review:
+                    <h2>Ready to install</h2>
+                    <p class="lead">Please review the configuration. Installing creates the schema, stores the encrypted connection settings and the administrator account.</p>
+                    <div class="review-card">
+                        <div class="review-section"><Icon Name="database" Size="15" /> Database</div>
+                        <dl class="kv setup-kv">
+                            <dt>Provider</dt>
+                            <dd>@ProviderTitle(_connection.Provider)</dd>
+                            <dt>Connection</dt>
+                            <dd class="mono small">@Session.Redact(_connection.Provider, _composed ?? string.Empty)</dd>
+                        </dl>
+                        <div class="review-section mt-4"><Icon Name="building" Size="15" /> Organisation</div>
+                        <dl class="kv setup-kv">
+                            <dt>Company</dt>
+                            <dd>@(string.IsNullOrWhiteSpace(_organization.CompanyName) ? "—" : _organization.CompanyName)</dd>
+                            <dt>Product name</dt>
+                            <dd>@_organization.ProductName</dd>
+                            <dt>Accent color</dt>
+                            <dd><span class="inline-swatch" style="background:@SafeAccent"></span> <span class="mono small">@_organization.AccentColor</span></dd>
+                            <dt>Time zone</dt>
+                            <dd>@TimeZoneName</dd>
+                        </dl>
+                        <div class="review-section mt-4"><Icon Name="user-check" Size="15" /> Administrator</div>
+                        <dl class="kv setup-kv">
+                            <dt>Account</dt>
+                            <dd><span class="mono">admin</span> · must choose a new password at first sign-in</dd>
+                        </dl>
+                    </div>
+                    <div class="setup-actions">
+                        <button class="btn btn-ghost" @onclick="() => GoTo(SetupWizardStep.Organization)"><Icon Name="arrow-left" Size="16" /> Back</button>
+                        <button class="btn btn-primary btn-lg" @onclick="InstallAsync"><Icon Name="rocket" Size="18" /> Install Servora</button>
+                    </div>
+                    break;
+
+                case SetupWizardStep.Install:
+                    @if (Session.IsCompleted)
+                    {
+                        <div class="setup-hero-icon success celebrate"><Icon Name="check" Size="30" StrokeWidth="3" /></div>
+                        <h2 class="text-center">@_organization.ProductName is ready</h2>
+                        <p class="lead text-center">Sign in with the bootstrap administrator. You will be asked to choose a personal password right away.</p>
+                        <div class="cred-box">
+                            <div><span class="faint small">User name</span><b class="mono">admin</b></div>
+                            <div><span class="faint small">Initial password</span><b class="mono">admin</b></div>
+                        </div>
+                        <div class="alert alert-warning mt-4"><Icon Name="shield" Size="18" /><div>The initial password is only valid for the first sign-in. Store the new password safely.</div></div>
+                        <button class="btn btn-primary btn-lg btn-block mt-6" @onclick="GoToSignIn"><Icon Name="log-in" Size="18" /> Go to sign-in</button>
+                    }
+                    else
+                    {
+                        <h2>@(_installing ? "Installing…" : "Installation stopped")</h2>
+                        <p class="lead">@(_installing ? "This usually takes a few seconds. Please keep this page open." : "Something went wrong. Review the message below.")</p>
+                        <div class="progress mb-4"><span style="width:@ProgressPercent%"></span></div>
+                        <ul class="install-list">
+                            @foreach (var step in Enum.GetValues<SetupStep>())
+                            {
+                                var state = _progress.GetValueOrDefault(step);
+                                <li class="install-item @state.Status.ToString().ToLowerInvariant()">
+                                    <span class="install-icon">
+                                        @switch (state.Status)
+                                        {
+                                            case SetupStepStatus.Running:
+                                                <span class="spinner"></span>
+                                                break;
+                                            case SetupStepStatus.Done:
+                                                <Icon Name="check" Size="14" StrokeWidth="3" />
+                                                break;
+                                            case SetupStepStatus.Failed:
+                                                <Icon Name="x" Size="14" StrokeWidth="3" />
+                                                break;
+                                            default:
+                                                <Icon Name="dot" Size="14" />
+                                                break;
+                                        }
+                                    </span>
+                                    <div class="flex-1">
+                                        <div class="install-title">@StepTitle(step)</div>
+                                        @if (!string.IsNullOrEmpty(state.Message))
+                                        {
+                                            <div class="install-message">@state.Message</div>
+                                        }
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                        @if (!_installing && _installError is not null)
+                        {
+                            <div class="alert alert-danger mt-4"><Icon Name="alert-circle" Size="18" /><div class="setup-error">@_installError</div></div>
+                            <div class="setup-actions">
+                                @if (Session.Backend.HasIncompleteInstallation)
+                                {
+                                    <span class="small faint">The database settings were saved. Retry with the same settings.</span>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-ghost" @onclick="() => GoTo(SetupWizardStep.Database)"><Icon Name="arrow-left" Size="16" /> Change database</button>
+                                }
+                                <button class="btn btn-primary" @onclick="InstallAsync"><Icon Name="refresh" Size="16" /> Retry</button>
+                            </div>
+                        }
+                    }
+                    break;
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly string[] s_stepTitles = ["Welcome", "Database", "Organisation", "Review", "Install"];
+    private static readonly string[] s_swatches = ["#7c6cff", "#6366f1", "#0ea5e9", "#14b8a6", "#22c55e", "#f59e0b", "#f43f5e", "#ec4899"];
+    private static readonly (string Key, string Title, string Tagline, string Icon, string? Badge)[] s_providers =
+    [
+        (DatabaseProviderKeys.Sqlite, "SQLite", "Zero configuration, single file.", "hard-drive", "Quick start"),
+        (DatabaseProviderKeys.SqlServer, "SQL Server", "SQL Server 2019+ or Azure SQL.", "server", "Enterprise"),
+        (DatabaseProviderKeys.PostgreSql, "PostgreSQL", "PostgreSQL 13 or newer.", "layers", "Open source"),
+    ];
+
+    private readonly SetupConnectionInput _connection = new();
+    private readonly SetupOrganizationInput _organization = new();
+    private readonly Dictionary<SetupStep, (SetupStepStatus Status, string? Message)> _progress = [];
+    private IReadOnlyList<TimeZoneInfo> _timeZones = [];
+    private SetupWizardStep _step = SetupWizardStep.Welcome;
+    private string? _token;
+    private string? _tokenError;
+    private bool _verifying;
+    private bool _testing;
+    private Result<TimeSpan>? _testResult;
+    private string? _testedFingerprint;
+    private string? _composed;
+    private string? _organizationError;
+    private bool _installing;
+    private string? _installError;
+
+    private bool IsTestCurrent => _testResult is { Succeeded: true } && _testedFingerprint is not null && _testedFingerprint == Fingerprint();
+
+    private string SafeAccent => IsHexColor(_organization.AccentColor) ? _organization.AccentColor : CoreSettingDefinitionProvider.DefaultAccentColor;
+
+    private string ColorInputValue => IsHexColor(_organization.AccentColor) && _organization.AccentColor.Length == 7 ? _organization.AccentColor.ToLowerInvariant() : CoreSettingDefinitionProvider.DefaultAccentColor;
+
+    private string MarkGradient => $"linear-gradient(135deg, {SafeAccent} 0%, #a855f7 55%, #22d3ee 100%)";
+
+    private string ExampleConnectionString => Session.Backend.GetProviders().FirstOrDefault(p => p.Key == _connection.Provider)?.ExampleConnectionString ?? string.Empty;
+
+    private string TimeZoneName => _timeZones.FirstOrDefault(z => z.Id == _organization.TimeZone)?.DisplayName ?? _organization.TimeZone;
+
+    private int ProgressPercent
+    {
+        get
+        {
+            var total = Enum.GetValues<SetupStep>().Length;
+            var done = _progress.Values.Count(p => p.Status == SetupStepStatus.Done);
+            return (int)Math.Round(done * 100.0 / total);
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        // The setup token is deliberately not accepted from the query string: URLs end up in logs and browser history.
+        _timeZones = TimeZoneInfo.GetSystemTimeZones();
+        _organization.TimeZone = TimeZoneInfo.Local.Id;
+        _connection.IntegratedSecurity = OperatingSystem.IsWindows();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // AuthLayout (unlike MainLayout) does not remove the interactive splash screen.
+            try
+            {
+                await JS.InvokeVoidAsync("servora.hideSplash");
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit closed before the first render completed.
+            }
+        }
+    }
+
+    private static bool IsHexColor(string? value) =>
+        value is { Length: 4 or 7 } && value[0] == '#' && value.Skip(1).All(Uri.IsHexDigit);
+
+    private static string ProviderTitle(string key) => s_providers.FirstOrDefault(p => p.Key == key).Title ?? key;
+
+    private static string StepTitle(SetupStep step) => step switch
+    {
+        SetupStep.ValidateConnection => "Verify database connection",
+        SetupStep.CreateSchema => "Create database schema",
+        SetupStep.SaveConfiguration => "Save encrypted configuration",
+        SetupStep.SeedData => "Create roles and administrator",
+        SetupStep.ApplyOrganization => "Apply organisation settings",
+        _ => "Finish setup",
+    };
+
+    private string StepClass(int index)
+    {
+        if ((int)_step > index || (Session.IsCompleted && index == (int)SetupWizardStep.Install))
+        {
+            return "done";
+        }
+
+        return (int)_step == index ? "active" : string.Empty;
+    }
+
+    private async Task VerifyTokenAsync()
+    {
+        if (_verifying)
+        {
+            return;
+        }
+
+        _verifying = true;
+        _tokenError = null;
+        try
+        {
+            var result = await Session.VerifyTokenAsync(_token);
+            if (!result.Succeeded)
+            {
+                _tokenError = result.Error;
+            }
+        }
+        finally
+        {
+            _token = null;
+            _verifying = false;
+        }
+    }
+
+    private void GoTo(SetupWizardStep step)
+    {
+        _organizationError = null;
+        _step = step;
+    }
+
+    private void SelectProvider(string key)
+    {
+        if (_connection.Provider == key)
+        {
+            return;
+        }
+
+        _connection.Provider = key;
+        _connection.UseRawConnectionString = false;
+        _connection.RawConnectionString = null;
+        switch (key)
+        {
+            case DatabaseProviderKeys.SqlServer:
+                _connection.Port = null;
+                _connection.Database = "Servora";
+                _connection.IntegratedSecurity = OperatingSystem.IsWindows();
+                break;
+            case DatabaseProviderKeys.PostgreSql:
+                _connection.Port = 5432;
+                _connection.Database = "servora";
+                _connection.IntegratedSecurity = false;
+                break;
+        }
+
+        InvalidateTest();
+    }
+
+    private void ToggleRaw(bool value)
+    {
+        _connection.UseRawConnectionString = value;
+        if (value && string.IsNullOrWhiteSpace(_connection.RawConnectionString))
+        {
+            var composed = Session.ComposeConnectionString(new SetupConnectionInput
+            {
+                Provider = _connection.Provider,
+                FilePath = _connection.FilePath,
+                Server = _connection.Server,
+                Port = _connection.Port,
+                Database = _connection.Database,
+                IntegratedSecurity = _connection.IntegratedSecurity,
+                UserName = _connection.UserName,
+                Encrypt = _connection.Encrypt,
+                TrustServerCertificate = _connection.TrustServerCertificate,
+                SslMode = _connection.SslMode,
+            });
+            _connection.RawConnectionString = composed.Succeeded ? composed.Value : ExampleConnectionString;
+        }
+
+        InvalidateTest();
+    }
+
+    private void SetIntegrated(bool value)
+    {
+        _connection.IntegratedSecurity = value;
+        InvalidateTest();
+    }
+
+    private void InvalidateTest()
+    {
+        _testResult = null;
+        _testedFingerprint = null;
+    }
+
+    private string? Fingerprint()
+    {
+        var composed = Session.ComposeConnectionString(_connection);
+        return composed.Succeeded ? _connection.Provider + "|" + composed.Value : null;
+    }
+
+    private async Task TestConnectionAsync()
+    {
+        var composed = Session.ComposeConnectionString(_connection);
+        if (!composed.Succeeded)
+        {
+            _testResult = Result<TimeSpan>.From(composed);
+            _testedFingerprint = null;
+            return;
+        }
+
+        _testing = true;
+        try
+        {
+            _testResult = await Session.TestConnectionAsync(_connection.Provider, composed.Value!);
+            _testedFingerprint = _testResult.Succeeded ? _connection.Provider + "|" + composed.Value : null;
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private void ContinueFromDatabase()
+    {
+        var composed = Session.ComposeConnectionString(_connection);
+        if (!composed.Succeeded || !IsTestCurrent)
+        {
+            _testResult = composed.Succeeded ? Result<TimeSpan>.Invalid("Test the connection before continuing.") : Result<TimeSpan>.From(composed);
+            return;
+        }
+
+        _composed = composed.Value;
+        GoTo(SetupWizardStep.Organization);
+    }
+
+    private void ContinueFromOrganization()
+    {
+        _organizationError = _organization.Validate();
+        if (_organizationError is null)
+        {
+            _step = SetupWizardStep.Review;
+        }
+    }
+
+    private async Task InstallAsync()
+    {
+        if (_installing || _composed is null)
+        {
+            return;
+        }
+
+        _step = SetupWizardStep.Install;
+        _installing = true;
+        _installError = null;
+        _progress.Clear();
+        StateHasChanged();
+
+        var progress = new Progress<SetupProgressUpdate>(update =>
+        {
+            _progress[update.Step] = (update.Status, update.Message);
+            StateHasChanged();
+        });
+
+        try
+        {
+            var result = await Session.InstallAsync(_connection.Provider, _composed, _organization, progress);
+            if (!result.Succeeded)
+            {
+                _installError = result.Error;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Unexpected technical failure: show a generic message, details are in the server log.
+            _installError = "The installation failed unexpectedly (" + ex.GetType().Name + "). See the server log for details.";
+        }
+        finally
+        {
+            _installing = false;
+        }
+    }
+
+    private void GoToSignIn() => Navigation.NavigateTo("/login", forceLoad: true);
+}

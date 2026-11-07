@@ -1,0 +1,22 @@
+.settings-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 22px;
+    border-top: 1px solid var(--border);
+}
+
+.outbox-kv {
+    grid-template-columns: 1fr auto;
+}
+
+.outbox-kv dd {
+    text-align: right;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+.break-anywhere {
+    overflow-wrap: anywhere;
+}
