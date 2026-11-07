@@ -97,4 +97,8 @@ generic dump/restore is the only place allowed to issue (parameterised, identifi
 **Why:** Product owner wants scheduled backups and roll back from the UI on SQLite, SQL Server and PostgreSQL without
 external tools (`pg_dump`, `sqlcmd`) or downloads; restoring at startup avoids live connections and stale caches, and
 makes failed upgrades self-healing together with the installer's binary rollback.
+**Addendum (T-15 implementation):** the key ring is *merged* on restore (existing keys are never removed, so secrets
+written after the backup stay readable); a UI restore stops the process with exit code 75 (`ServiceBase.ExitCode` as a
+service) so service recovery restarts it; the restore request file carries the archive password protected with Data
+Protection; the archive schema is taken from the target model of the migration the database is at.
 

@@ -42,7 +42,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
-| T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | 🔨 In Progress |
+| T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | ✅ Done |
 
 Dependency graph:
 
@@ -546,6 +546,10 @@ automatically with pre-migration backup (T-15). Document "adding a migration" in
   has to change its password); unauthenticated JSON POST to `/api/v1/table` returned 400 content-type (T-07 report).
 - Migrations must also include the T-07 entities (CustomTable … TaskSla) and the 9 T-10 tables.
 - Migrations must also include the 10 T-08 tables (`automation_*`, `int_*`).
+- Backup (T-15): generated migrations must keep designer files (`TargetModel`); run one backup → restore round trip
+  on SQL Server and PostgreSQL; verify the update path with a real migration (pre-migration backup + auto-restore on a
+  failing migration); consider raising the installer `--health-timeout` default; optionally move `AddBackupWeb()` into
+  `WebModuleRegistration`.
 - Kernel: instance-specific auth/antiforgery cookie names, or a friendly redirect on antiforgery failure, so several
   localhost instances do not clash (T-05).
 
@@ -553,7 +557,7 @@ automatically with pre-migration backup (T-15). Document "adding a migration" in
 
 Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings; record residual risks.
 
-## T-15 Backup & Restore, automatic migrations hardening 🔨
+## T-15 Backup & Restore, automatic migrations hardening ✅
 
 **Owned paths:** `*/Backup/**` (Domain/Application/Infrastructure/Web pages `Components/Pages/Admin/Backup/**` and
 `Components/Backup/**`), `BackupModule.cs`, `BackupEndpoints.cs`, `BackupWebModule.cs`, `Permissions.Backup.cs`,
@@ -603,6 +607,10 @@ feasible; schedule calculation unit tests (weekly at 02:00 local, DST change, mi
 archive tamper detection test; encryption round trip; `docs/operations/backup-restore.md` and `upgrade.md` updated;
 build green, tests pass.
 
+**Result (validated by orchestrator, merged `5a02f35`):** `.svbak` archive (manifest with schema of the migration the DB is at, streamed typed dumps, keys, attachments, branding; SHA-256 per entry; optional AES-256-GCM + HMAC-signed manifest), restore at startup before migrations (migrate to backup migration → replace rows in FK order with second pass for cycles → files → migrate forward; automatic rollback to the safety backup on failure; retry once then park), `DatabaseMigrationRunner` (pre-migration backup, auto-restore on failed migration, legacy / newer DB detection), scheduler in `backup.json` (daily/weekly/monthly, DST-safe, catch-up, retention), `/admin/backups`, CLI `Servora backup list|create|verify|restore`.
+**Evidence:** files only in owned + granted paths; kernel diffs reviewed; build 0/0; tests 331 passed (98 new). Merged main: build 0/0, **1264 tests passed**. End-to-end by the orchestrator on the full merged schema (SQLite, 70 tables, 469 seeded rows): CLI create → verify → damage data (deleted 58 rows, renamed 10 users) → CLI restore (pre-restore safety backup created) → **all 70 tables content-identical** (per-table hash) → host starts healthy on the restored DB; in the browser `/admin/backups` shows restore status, list, KPIs and schema card; schedule set to weekly Sunday 02:00 (Europe/Berlin), persisted in `backup.json`, next run Sun 08 Nov 02:00; "Back up now" created an archive.
+**Open follow-ups:** SQL Server / PostgreSQL paths only compiled + unit-tested on SQLite → one round trip per provider in T-13; visual review in both themes not done (browser pane hidden); form inputs in the schedule drawer lack label/aria association (T-14 a11y); UI restore restarts via exit code 75 (service recovery after ~1 min; manual restart in development).
+
 ---
 
 ## Change log of this board
@@ -617,3 +625,4 @@ build green, tests pass.
 | 2026-11-07 | T-11 dispatched (dependencies merged). |
 | 2026-11-07 | T-07, T-10 validated and merged (✅). |
 | 2026-11-07 | T-08 validated and merged (✅). |
+| 2026-11-07 | T-15 validated (incl. orchestrator end-to-end backup/restore on the full schema) and merged (✅). |
