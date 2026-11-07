@@ -55,7 +55,7 @@ paths. Shared kernel files belong to the orchestrator (`T-01`).
 folder, `MainLayout`, `NavMenu`, `NavigationCatalog.cs`, `servora.css`, `Components/UI/**`, `CoreModule.cs`,
 `ServoraDbContext.cs`, `Directory.*.props`, `.csproj` files, other tasks' folders. If you need a change there,
 describe it in the hand-off report under **"Requests to orchestrator"**. Need a new CSS class? Put module-specific
-styles in a scoped `*.razor.css` file next to your component.
+styles in a scoped `*.razor.css` file next to your component (the `Servora.styles.css` bundle is linked in `App.razor`).
 
 Need a NuGet package? Don't add it – request it (only free OSI licenses are acceptable; see ADR-010).
 

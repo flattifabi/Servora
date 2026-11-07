@@ -26,7 +26,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-01 | Kernel: solution, architecture, persistence, auth pipeline, design system, contracts | Orchestrator | – | ✅ Done |
 | T-02 | Identity & Access: users, groups, roles, LDAP/AD, Windows SSO, profile | Identity Agent | T-01 | 🔨 In Progress |
 | T-03 | Setup wizard, system settings, branding, SMTP e-mail, secrets admin, database admin | Configuration Agent | T-01 | 🔨 In Progress |
-| T-04 | Incident & Problem Management + "My Work" workspace | ITSM Agent | T-01 | 🔨 In Progress |
+| T-04 | Incident & Problem Management + "My Work" workspace | ITSM Agent | T-01 | ✅ Done |
 | T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | 🔨 In Progress |
 | T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | 🔨 In Progress |
 | T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | 🔨 In Progress |
@@ -148,7 +148,7 @@ unit tests for settings typing/defaults and SMTP option validation.
 
 ---
 
-## T-04 Incident & Problem Management + My Work 🔨
+## T-04 Incident & Problem Management + My Work ✅
 
 **Owned paths:** `*/Itsm/**` (excluding kernel files `TaskRecord.cs`, `Priority*.cs`, `Impact.cs`, `Urgency.cs`,
 `TaskRecordConfigurationExtensions.cs` – read-only), `Components/Pages/Itsm/**`, `Components/Itsm/**`,
@@ -177,6 +177,19 @@ unit tests for settings typing/defaults and SMTP option validation.
 
 **Acceptance criteria:** full lifecycle works with validation; lists page/sort/search server-side; priority
 calculated; activity/attachments work; unit tests for state machine and priority hook.
+
+**Result (validated, merged `4ee2873`):** `Incident`, `Problem`, `IncidentCategory`; domain state machines; `ItsmSavingHook`
+(priority matrix, transition validation, Active/resolved/closed timestamps – applies to every writer incl. Table API and
+flows); `IIncidentService`, `IProblemService`, `IMyWorkService` with permission checks, optimistic concurrency and
+field-change journal; list + record pages; My Work dashboard; idempotent seed (7 categories, 25 incidents, 4 problems).
+**Evidence:** 62 files in owned paths; build 0/0; tests 74 passed on branch (51 new), 213 on main after merge; agent
+smoke-tested all flows in the running app.
+**Kernel findings fixed by orchestrator:** combo-menu z-index under click-catcher (pickers unclickable), pickers
+clipped in modals/drawers, scoped CSS bundle not linked, h1 focus outline, tabs scrollbar. Workaround component removed.
+Contracts extended (default interface methods): `IApprovalService.CountPendingForUserAsync`,
+`ISlaService.GetBreachedRecordIdsAsync`.
+**Follow-ups (T-13):** wire My Work approvals count once T-05 implements it; use bulk SLA lookup for KPI; attachment
+file cleanup on record delete.
 
 ---
 
@@ -482,3 +495,4 @@ Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings
 |------|--------|
 | 2026-11-07 | Board created; T-01 completed by orchestrator; T-02…T-10, T-12 dispatched in parallel. |
 | 2026-11-07 | T-12 validated and merged (✅). |
+| 2026-11-07 | T-04 validated and merged (✅); kernel UI fixes + 2 contract extensions. |
