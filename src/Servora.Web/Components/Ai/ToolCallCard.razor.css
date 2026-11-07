@@ -1,0 +1,13 @@
+.trace-step { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2); overflow: hidden; }
+.trace-step + .trace-step { margin-top: 8px; }
+.step-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; font-size: 13px; color: var(--text-2); }
+.step-head:hover { background: var(--surface-hover); }
+.step-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-icon { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--primary-soft); color: var(--primary); }
+.trace-delegation .step-icon { background: var(--accent-soft); color: var(--accent); }
+.status-pendingconfirmation { border-color: rgba(245, 158, 11, .45); box-shadow: 0 0 0 3px rgba(245, 158, 11, .08); }
+.status-pendingconfirmation .step-icon { background: var(--warning-soft); color: var(--warning); }
+.status-denied .step-icon, .status-failed .step-icon { background: var(--danger-soft); color: var(--danger); }
+.step-body { padding: 4px 14px 14px; border-top: 1px solid var(--border); }
+.step-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border-top: 1px solid var(--border); background: var(--warning-soft); }
+.step-pre { margin: 0; max-height: 260px; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }

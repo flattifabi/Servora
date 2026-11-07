@@ -1,0 +1,435 @@
+@page "/admin/api-docs"
+@attribute [RequirePermission(Permissions.Api.Access)]
+@implements IAsyncDisposable
+@* API Explorer: operations from the OpenAPI document, schemas, "try it" with the user's cookie and curl snippets. *@
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject ToastService Toasts
+
+<PageTitle>API Explorer · Servora</PageTitle>
+
+<PageHeader Title="API Explorer" Icon="code" Subtitle="Discover and try the Servora REST API. Requests sent from here use your own session and permissions.">
+    <Breadcrumbs><span>Developer</span> <Icon Name="chevron-right" Size="12" /> <span>API Explorer</span></Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="/openapi/v1.json" target="_blank" rel="noopener"><Icon Name="download" Size="16" /> OpenAPI JSON</a>
+        <PermissionView Permission="@Permissions.Api.ManageApiKeys">
+            <a class="btn btn-primary" href="/admin/api-keys"><Icon Name="key" Size="16" /> API keys</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="explorer-hero card highlight mb-6">
+    <div class="hero-main">
+        <div class="eyebrow">@(_title ?? "Servora REST API") · @(_version ?? "v1")</div>
+        <div class="hero-url mono">@BaseUrl<span class="faint">api/v1</span></div>
+        <div class="small muted">Authenticate with <code>X-Api-Key: srv_…</code> or <code>Authorization: Bearer srv_…</code>. Errors follow RFC 7807; every response carries <code>X-Correlation-Id</code>. Lists accept <code>page</code> / <code>pageSize</code> (max 100).</div>
+    </div>
+    <div class="hero-stats">
+        <div><div class="hero-number">@_operations.Count</div><div class="tiny faint">operations</div></div>
+        <div><div class="hero-number">@_operations.Select(o => o.Tag).Distinct().Count()</div><div class="tiny faint">groups</div></div>
+        <div><div class="hero-number">@_operations.Count(o => o.IsAnonymous)</div><div class="tiny faint">public</div></div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="grid explorer-grid">
+        <div class="card card-body"><Skeleton Lines="10" Height="18px" /></div>
+        <div class="card card-body"><Skeleton Lines="14" Height="18px" /></div>
+    </div>
+}
+else if (_error is not null)
+{
+    <div class="card"><EmptyState Icon="alert-octagon" Title="The OpenAPI document could not be loaded" Text="@_error"><button class="btn btn-primary" @onclick="LoadAsync"><Icon Name="refresh" Size="16" /> Retry</button></EmptyState></div>
+}
+else if (_operations.Count == 0)
+{
+    <div class="card"><EmptyState Icon="code" Title="No operations documented yet" Text="Modules publish their endpoints under /api/v1; they appear here automatically." /></div>
+}
+else
+{
+    <div class="grid explorer-grid">
+        <div class="card op-list">
+            <div class="op-search">
+                <div class="input-icon">
+                    <Icon Name="search" Size="16" />
+                    <input class="input" placeholder="Filter operations…" @bind="_filter" @bind:event="oninput" />
+                </div>
+            </div>
+            <div class="op-groups">
+                @foreach (var group in FilteredOperations.GroupBy(o => o.Tag))
+                {
+                    <div class="op-group-title">@group.Key <span class="badge">@group.Count()</span></div>
+                    @foreach (var operation in group)
+                    {
+                        <button class="op-item @(operation.Key == _selected?.Key ? "active" : null)" @onclick="() => Select(operation)">
+                            <span class="method method-@operation.Method.ToLowerInvariant()">@operation.Method</span>
+                            <span class="op-text">
+                                <span class="op-path mono">@operation.Path</span>
+                                @if (!string.IsNullOrEmpty(operation.Summary))
+                                {
+                                    <span class="tiny faint truncate">@operation.Summary</span>
+                                }
+                            </span>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+
+        @if (_selected is { } op)
+        {
+            <div class="stack">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <span class="method method-@op.Method.ToLowerInvariant() method-lg">@op.Method</span>
+                            <span class="op-title mono">@op.Path</span>
+                            @if (op.IsAnonymous)
+                            {
+                                <span class="pill pill-success">Public</span>
+                            }
+                            else
+                            {
+                                <span class="pill pill-primary"><Icon Name="lock" Size="12" /> API key or session</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(op.Summary))
+                        {
+                            <h2 class="mt-4">@op.Summary</h2>
+                        }
+                        @if (!string.IsNullOrEmpty(op.Description))
+                        {
+                            <p class="muted">@op.Description</p>
+                        }
+                        @if (op.OperationId is not null)
+                        {
+                            <div class="tiny faint">Operation id <code>@op.OperationId</code></div>
+                        }
+                    </div>
+                    <Tabs Items="_tabs" @bind-ActiveKey="_tab" />
+                    <div class="card-body">
+                        @switch (_tab)
+                        {
+                            case "params":
+                                @if (op.Parameters.Count == 0 && op.RequestContentType is null)
+                                {
+                                    <div class="small muted">This operation takes no parameters.</div>
+                                }
+                                else
+                                {
+                                    @if (op.Parameters.Count > 0)
+                                    {
+                                        <table class="table compact">
+                                            <thead><tr><th>Name</th><th>In</th><th>Type</th><th>Description</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var p in op.Parameters)
+                                                {
+                                                    <tr><td><code>@p.Name</code>@if (p.Required){<span class="text-danger"> *</span>}</td><td>@p.In</td><td class="mono small">@p.Type</td><td class="small muted">@p.Description</td></tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    }
+                                    @if (op.RequestContentType is not null)
+                                    {
+                                        <div class="eyebrow mt-4 mb-2">Request body · @op.RequestContentType</div>
+                                        <pre>@(op.RequestSchemaJson ?? "{}")</pre>
+                                    }
+                                }
+                                break;
+                            case "responses":
+                                @foreach (var r in op.Responses)
+                                {
+                                    <div class="response-row">
+                                        <span class="pill @StatusPill(r.Status) no-dot mono">@r.Status</span>
+                                        <span class="small">@(r.Description ?? "—")</span>
+                                        @if (r.ContentType is not null)
+                                        {
+                                            <span class="tag mono">@r.ContentType</span>
+                                        }
+                                    </div>
+                                    @if (r.SchemaJson is not null)
+                                    {
+                                        <pre class="mb-4">@r.SchemaJson</pre>
+                                    }
+                                }
+                                break;
+                            default:
+                                <div class="code-block">
+                                    <button class="btn btn-secondary btn-sm copy" @onclick="CopyCurlAsync"><Icon Name="copy" Size="14" /> Copy</button>
+                                    <pre>@Curl(op)</pre>
+                                </div>
+                                break;
+                        }
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div><h3><Icon Name="play" Size="16" /> Try it</h3><div class="card-subtitle">Runs in your browser with your session – the result reflects your permissions.</div></div>
+                        <button class="btn btn-primary" disabled="@_sending" @onclick="SendAsync">
+                            @if (_sending)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="send" Size="16" />
+                            }
+                            Send request
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        @if (op.Parameters.Any(p => p.In is "path" or "query"))
+                        {
+                            <div class="form-grid mb-4">
+                                @foreach (var p in op.Parameters.Where(p => p.In is "path" or "query"))
+                                {
+                                    <FormField Label="@($"{p.Name} ({p.In})")" Required="p.Required" Help="@p.Type">
+                                        <input class="input" value="@GetValue(p.Name)" @onchange="e => _values[p.Name] = e.Value?.ToString() ?? string.Empty" />
+                                    </FormField>
+                                }
+                            </div>
+                        }
+                        @if (op.RequestContentType is not null)
+                        {
+                            <FormField Label="Request body" Class="mb-4">
+                                <textarea class="textarea mono" rows="8" @bind="_body" spellcheck="false"></textarea>
+                            </FormField>
+                        }
+                        <div class="small faint mb-4 mono">@op.Method @BuildUrl(op)</div>
+
+                        @if (_response is { } res)
+                        {
+                            <div class="response-head">
+                                @if (res.Error is not null)
+                                {
+                                    <span class="pill pill-danger">Network error</span>
+                                    <span class="small">@res.Error</span>
+                                }
+                                else
+                                {
+                                    <span class="pill @StatusPill(res.Status.ToString()) mono">@res.Status @res.StatusText</span>
+                                    <span class="tag"><Icon Name="timer" Size="12" /> @res.DurationMs ms</span>
+                                    <span class="tag"><Icon Name="file" Size="12" /> @((res.Body?.Length ?? 0).ToString("N0")) chars</span>
+                                }
+                            </div>
+                            @if (res.Error is null)
+                            {
+                                <details class="mt-3">
+                                    <summary class="small muted">Response headers</summary>
+                                    <pre class="mt-2">@res.Headers</pre>
+                                </details>
+                                <pre class="mt-3 response-body">@Pretty(res.Body)</pre>
+                            }
+                        }
+                        else
+                        {
+                            <div class="small muted">Fill in the parameters and press <b>Send request</b>.</div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+    private readonly IReadOnlyList<TabItem> _tabs = [new("curl", "curl", "terminal"), new("params", "Parameters", "sliders"), new("responses", "Responses", "inbox")];
+    private IJSObjectReference? _module;
+    private IReadOnlyList<ApiOperation> _operations = [];
+    private ApiOperation? _selected;
+    private ApiTryResult? _response;
+    private string? _title;
+    private string? _version;
+    private string? _error;
+    private string _filter = string.Empty;
+    private string _tab = "curl";
+    private string? _body;
+    private bool _loading = true;
+    private bool _sending;
+
+    private string BaseUrl => Navigation.BaseUri;
+
+    private IEnumerable<ApiOperation> FilteredOperations => string.IsNullOrWhiteSpace(_filter)
+        ? _operations
+        : _operations.Where(o => o.Path.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                                 || (o.Summary?.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false)
+                                 || o.Method.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                                 || o.Tag.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone.
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }
+    }
+
+    private static string StatusPill(string status) => status.FirstOrDefault() switch
+    {
+        '2' => "pill-success",
+        '3' => "pill-info",
+        '4' => "pill-warning",
+        '5' => "pill-danger",
+        _ => "pill-neutral",
+    };
+
+    private static string Pretty(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return "(empty body)";
+        }
+
+        return Servora.Application.Mcp.McpJson.TryParse(body, out var node) && node is not null
+            ? node.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
+            : body;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Api/ApiExplorer.razor.js");
+            var result = await _module.InvokeAsync<ApiTryResult>("fetchText", "/openapi/v1.json");
+            if (result.Status != 200 || result.Body is null)
+            {
+                _error = $"GET /openapi/v1.json returned HTTP {result.Status}.";
+            }
+            else
+            {
+                _operations = OpenApiOperationReader.Read(result.Body, out _title, out _version);
+                if (_operations.Count > 0)
+                {
+                    Select(_operations[0]);
+                }
+            }
+        }
+        catch (JSException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Select(ApiOperation operation)
+    {
+        _selected = operation;
+        _response = null;
+        _values.Clear();
+        _body = operation.RequestContentType is null ? null : "{\n  \n}";
+    }
+
+    private string GetValue(string name) => _values.TryGetValue(name, out var value) ? value : string.Empty;
+
+    private string BuildUrl(ApiOperation operation)
+    {
+        var path = operation.Path;
+        var query = new List<string>();
+        foreach (var p in operation.Parameters)
+        {
+            if (!_values.TryGetValue(p.Name, out var value) || string.IsNullOrEmpty(value))
+            {
+                continue;
+            }
+
+            if (p.In == "path")
+            {
+                path = path.Replace("{" + p.Name + "}", Uri.EscapeDataString(value), StringComparison.Ordinal);
+            }
+            else if (p.In == "query")
+            {
+                query.Add($"{Uri.EscapeDataString(p.Name)}={Uri.EscapeDataString(value)}");
+            }
+        }
+
+        return query.Count == 0 ? path : $"{path}?{string.Join('&', query)}";
+    }
+
+    private string Curl(ApiOperation operation)
+    {
+        var lines = new List<string> { $"curl -X {operation.Method} \"{BaseUrl.TrimEnd('/')}{BuildUrl(operation)}\"" };
+        if (!operation.IsAnonymous)
+        {
+            lines.Add("  -H \"X-Api-Key: $SERVORA_API_KEY\"");
+        }
+
+        lines.Add("  -H \"Accept: application/json\"");
+        if (operation.RequestContentType is not null)
+        {
+            lines.Add($"  -H \"Content-Type: {operation.RequestContentType}\"");
+            lines.Add("  -d @request.json");
+        }
+
+        return string.Join(" \\\n", lines);
+    }
+
+    private async Task CopyCurlAsync()
+    {
+        if (_selected is not null && await JS.InvokeAsync<bool>("servora.copy", Curl(_selected)))
+        {
+            Toasts.Success("curl command copied");
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (_selected is null || _module is null)
+        {
+            return;
+        }
+
+        var missing = _selected.Parameters.Where(p => p.Required && p.In is "path" or "query" && string.IsNullOrEmpty(GetValue(p.Name))).Select(p => p.Name).ToList();
+        if (missing.Count > 0)
+        {
+            Toasts.Warning("Missing parameters", string.Join(", ", missing));
+            return;
+        }
+
+        var url = BuildUrl(_selected);
+        if (!url.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+        {
+            Toasts.Error("Only /api/ operations can be tried here.");
+            return;
+        }
+
+        _sending = true;
+        try
+        {
+            _response = await _module.InvokeAsync<ApiTryResult>("send", _selected.Method, url, _body, _selected.RequestContentType);
+        }
+        catch (JSException ex)
+        {
+            _response = new ApiTryResult(0, null, 0, null, null, ex.Message);
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+}

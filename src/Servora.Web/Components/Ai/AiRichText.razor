@@ -1,0 +1,92 @@
+@* Safe renderer of the assistant's Markdown subset (paragraphs, headings, lists, quotes, code, **bold**, `code`). All text is HTML-encoded; no raw markup is ever emitted. *@
+
+<div class="ai-text">
+    @foreach (var block in AiTextBlock.Parse(Text))
+    {
+        switch (block.Kind)
+        {
+            case "code":
+                <pre class="ai-code">@string.Join("\n", block.Lines)</pre>
+                break;
+            case "h":
+                <div class="ai-heading level-@block.Level">@Inline(block.Lines[0])</div>
+                break;
+            case "ul":
+                <ul>@foreach (var item in block.Lines) { <li>@Inline(item)</li> }</ul>
+                break;
+            case "ol":
+                <ol>@foreach (var item in block.Lines) { <li>@Inline(item)</li> }</ol>
+                break;
+            case "quote":
+                <blockquote>@foreach (var item in block.Lines) { <div>@Inline(item)</div> }</blockquote>
+                break;
+            default:
+                <p>
+                    @for (var i = 0; i < block.Lines.Count; i++)
+                    {
+                        @Inline(block.Lines[i])
+                        @if (i < block.Lines.Count - 1)
+                        {
+                            <br />
+                        }
+                    }
+                </p>
+                break;
+        }
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the text to render.</summary>
+    [Parameter] public string? Text { get; set; }
+
+    private static RenderFragment Inline(string text) => builder =>
+    {
+        var position = 0;
+        while (position < text.Length)
+        {
+            var bold = text.IndexOf("**", position, StringComparison.Ordinal);
+            var code = text.IndexOf('`', position);
+            var next = new[] { bold, code }.Where(i => i >= 0).DefaultIfEmpty(-1).Min();
+            if (next < 0)
+            {
+                builder.AddContent(0, text[position..]);
+                break;
+            }
+
+            if (next > position)
+            {
+                builder.AddContent(1, text[position..next]);
+            }
+
+            if (next == bold)
+            {
+                var end = text.IndexOf("**", bold + 2, StringComparison.Ordinal);
+                if (end < 0)
+                {
+                    builder.AddContent(2, text[bold..]);
+                    break;
+                }
+
+                builder.OpenElement(3, "strong");
+                builder.AddContent(4, text[(bold + 2)..end]);
+                builder.CloseElement();
+                position = end + 2;
+            }
+            else
+            {
+                var end = text.IndexOf('`', code + 1);
+                if (end < 0)
+                {
+                    builder.AddContent(5, text[code..]);
+                    break;
+                }
+
+                builder.OpenElement(6, "code");
+                builder.AddContent(7, text[(code + 1)..end]);
+                builder.CloseElement();
+                position = end + 1;
+            }
+        }
+    };
+}

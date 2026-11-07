@@ -1,0 +1,261 @@
+@page "/admin/ai"
+@attribute [RequirePermission(Permissions.Ai.Manage)]
+@* AI administration: usage KPIs, model providers (add / edit / test / delete) and sub-agents with their scopes. *@
+@inject IAiConfigurationService AiConfig
+@inject ToastService Toasts
+
+<PageTitle>AI &amp; Agents · Servora</PageTitle>
+
+<PageHeader Title="AI & Agents" Icon="wand" Subtitle="Connect language models and control which specialist agents the assistant may delegate to.">
+    <Breadcrumbs><span>Administration</span> <Icon Name="chevron-right" Size="12" /> <span>AI &amp; Agents</span></Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="/assistant"><Icon Name="sparkles" Size="16" /> Open assistant</a>
+        <button class="btn btn-primary" @onclick="() => OpenEditor(null)"><Icon Name="plus" Size="16" /> Add provider</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_usage is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="card card-body"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Conversations" Value="@_usage.Conversations.ToString("N0")" Icon="message-square" Tone="primary" Caption="all users" />
+        <StatCard Label="Messages (7 days)" Value="@_usage.Messages7d.ToString("N0")" Icon="message-circle" Tone="accent" Trend="_usage.DailyMessages" Caption="@($"{_usage.Tokens7d:N0} tokens")" />
+        <StatCard Label="Agent steps (7 days)" Value="@_usage.ToolCalls7d.ToString("N0")" Icon="workflow" Tone="info" Caption="delegations and tool calls" />
+        <StatCard Label="Awaiting confirmation" Value="@_usage.PendingActions.ToString("N0")" Icon="check-square" Tone="@(_usage.PendingActions > 0 ? "warning" : "success")" Caption="proposed actions" />
+    }
+</div>
+
+<div class="section-head">
+    <div><h2>Model providers</h2><div class="small muted">The default enabled provider answers the assistant. OpenAI-compatible servers include local Ollama and LM Studio.</div></div>
+</div>
+
+@if (_providers is null)
+{
+    <div class="grid grid-3 mb-8"><div class="card card-body"><Skeleton Lines="5" Height="16px" /></div></div>
+}
+else if (_providers.Count == 0)
+{
+    <div class="card mb-8">
+        <EmptyState Icon="wand" Title="No AI provider configured" Text="Add an OpenAI-compatible endpoint (OpenAI, Ollama, LM Studio), Anthropic or Azure OpenAI to enable the AI assistant.">
+            <button class="btn btn-primary" @onclick="() => OpenEditor(null)"><Icon Name="plus" Size="16" /> Add provider</button>
+        </EmptyState>
+    </div>
+}
+else
+{
+    <div class="grid provider-grid mb-8">
+        @foreach (var provider in _providers)
+        {
+            <div class="card provider-card @(provider.IsDefault ? "highlight" : null)">
+                <div class="card-body stack" style="gap:14px">
+                    <div class="flex items-center gap-3">
+                        <div class="provider-icon"><Icon Name="@KindIcon(provider.Kind)" Size="20" /></div>
+                        <div class="flex-1 min-w-0">
+                            <div class="provider-name truncate">@provider.Name</div>
+                            <div class="tiny faint">@KindLabel(provider.Kind)</div>
+                        </div>
+                        @if (provider.IsDefault)
+                        {
+                            <span class="pill pill-primary">Default</span>
+                        }
+                        <StatusPill Text="@(provider.IsEnabled ? "Enabled" : "Disabled")" Tone="@(provider.IsEnabled ? "success" : "neutral")" />
+                    </div>
+                    <dl class="kv compact-kv">
+                        <dt>Endpoint</dt><dd class="mono small">@provider.BaseUrl</dd>
+                        <dt>@(provider.Kind == AiProviderKind.AzureOpenAi ? "Deployment" : "Model")</dt><dd class="mono small">@(provider.Kind == AiProviderKind.AzureOpenAi ? provider.Deployment : provider.Model)</dd>
+                        <dt>API key</dt><dd>@if (provider.HasApiKey){<span class="tag"><Icon Name="lock" Size="11" /> stored encrypted</span>}else{<span class="muted small">none</span>}</dd>
+                        <dt>Limits</dt><dd class="small">@provider.MaxTokens.ToString("N0") tokens · @provider.TimeoutSeconds s · temp @provider.Temperature.ToString("0.0#")</dd>
+                        <dt>Tool calling</dt><dd class="small">@(provider.SupportsTools ? "Yes" : "No (keyword routing)")</dd>
+                    </dl>
+                    <div class="test-line @(provider.LastTestSucceeded switch { true => "ok", false => "fail", _ => null })">
+                        <Icon Name="@(provider.LastTestSucceeded switch { true => "check-circle", false => "x-circle", _ => "help-circle" })" Size="14" />
+                        <span class="small truncate" title="@provider.LastTestMessage">@(provider.LastTestMessage ?? "Not tested yet")</span>
+                        @if (provider.LastTestedAt is { } tested)
+                        {
+                            <RelativeTime Value="tested" Class="tiny faint" />
+                        }
+                    </div>
+                    @if (_testReplies.TryGetValue(provider.Id, out var reply))
+                    {
+                        <div class="small muted">Model reply: <code>@reply</code></div>
+                    }
+                </div>
+                <div class="card-footer">
+                    <button class="btn btn-ghost btn-sm" @onclick="() => _deleting = provider"><Icon Name="trash" Size="14" /> Delete</button>
+                    <div class="flex-1"></div>
+                    <button class="btn btn-secondary btn-sm" disabled="@(_testing == provider.Id)" @onclick="() => TestAsync(provider)">
+                        @if (_testing == provider.Id)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="zap" Size="14" />
+                        }
+                        Test
+                    </button>
+                    <button class="btn btn-primary btn-sm" @onclick="() => OpenEditor(provider)"><Icon Name="edit" Size="14" /> Edit</button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<div class="section-head">
+    <div><h2>Specialist agents</h2><div class="small muted">Each agent runs with its own identity: the intersection of its scope and the requesting user's permissions. Consequential tools always require the user's confirmation.</div></div>
+</div>
+
+<div class="grid grid-2">
+    @if (_agents is null)
+    {
+        <div class="card card-body"><Skeleton Lines="5" Height="16px" /></div>
+    }
+    else
+    {
+        @foreach (var agent in _agents)
+        {
+            <div class="card agent-card @(agent.IsEnabled ? null : "disabled")">
+                <div class="card-body stack" style="gap:12px">
+                    <div class="flex items-center gap-3">
+                        <div class="agent-icon"><Icon Name="@agent.Icon" Size="20" /></div>
+                        <div class="flex-1">
+                            <div class="provider-name">@agent.Name</div>
+                            <div class="tiny faint mono">@agent.Key</div>
+                        </div>
+                        <Switch Value="agent.IsEnabled" ValueChanged="v => SetAgentAsync(agent, v)" />
+                    </div>
+                    <p class="small muted" style="margin:0">@agent.Description</p>
+                    <div>
+                        <div class="eyebrow mb-2">Tools</div>
+                        <div class="flex flex-wrap gap-2">
+                            @foreach (var tool in agent.Tools)
+                            {
+                                <span class="tag" title="@tool.Name"><Icon Name="@(tool.RequiresConfirmation ? "zap" : "eye")" Size="11" /> @tool.Title @if (tool.RequiresConfirmation){<span class="pill pill-warning no-dot" style="height:18px;font-size:10.5px">confirm</span>}</span>
+                            }
+                        </div>
+                    </div>
+                    <div>
+                        <div class="eyebrow mb-2">Maximum scope</div>
+                        <div class="flex flex-wrap gap-2">
+                            @foreach (var scope in agent.Scope)
+                            {
+                                <code>@scope</code>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<AiProviderEditor @bind-Open="_editorOpen" Existing="_editing" OnSaved="LoadAsync" />
+<ConfirmDialog Open="_deleting is not null" OpenChanged="v => { if (!v) _deleting = null; }" Danger="true" Title="Delete provider?" ConfirmText="Delete"
+               Message="@($"The provider “{_deleting?.Name}” and its stored API key are deleted. The assistant falls back to another enabled provider.")" OnConfirm="DeleteAsync" />
+
+@code {
+    private IReadOnlyList<AiProviderSummary>? _providers;
+    private IReadOnlyList<AiAgentInfo>? _agents;
+    private AiUsageStats? _usage;
+    private readonly Dictionary<Guid, string> _testReplies = [];
+    private bool _editorOpen;
+    private AiProviderSummary? _editing;
+    private AiProviderSummary? _deleting;
+    private Guid? _testing;
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private static string KindIcon(AiProviderKind kind) => kind switch
+    {
+        AiProviderKind.Anthropic => "bot",
+        AiProviderKind.AzureOpenAi => "cloud",
+        _ => "sparkles",
+    };
+
+    private static string KindLabel(AiProviderKind kind) => kind switch
+    {
+        AiProviderKind.Anthropic => "Anthropic Messages API",
+        AiProviderKind.AzureOpenAi => "Azure OpenAI",
+        _ => "OpenAI-compatible",
+    };
+
+    private async Task LoadAsync()
+    {
+        var providers = await AiConfig.ListProvidersAsync();
+        _providers = providers.Succeeded ? providers.Value : [];
+        var agents = await AiConfig.ListAgentsAsync();
+        _agents = agents.Succeeded ? agents.Value : [];
+        var usage = await AiConfig.GetUsageAsync();
+        _usage = usage.Succeeded ? usage.Value : null;
+        if (!providers.Succeeded)
+        {
+            Toasts.Error("Could not load AI providers", providers.Error);
+        }
+    }
+
+    private void OpenEditor(AiProviderSummary? provider)
+    {
+        _editing = provider;
+        _editorOpen = true;
+    }
+
+    private async Task TestAsync(AiProviderSummary provider)
+    {
+        _testing = provider.Id;
+        try
+        {
+            var result = await AiConfig.TestProviderAsync(provider.Id);
+            if (!result.Succeeded)
+            {
+                Toasts.Error("Test failed", result.Error);
+                return;
+            }
+
+            if (result.Value!.Succeeded)
+            {
+                Toasts.Success("Provider reachable", result.Value.Message);
+                _testReplies[provider.Id] = result.Value.Reply ?? string.Empty;
+            }
+            else
+            {
+                Toasts.Error("Provider test failed", result.Value.Message);
+                _testReplies.Remove(provider.Id);
+            }
+
+            await LoadAsync();
+        }
+        finally
+        {
+            _testing = null;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleting is null)
+        {
+            return;
+        }
+
+        if (Toasts.FromResult(await AiConfig.DeleteProviderAsync(_deleting.Id), "Provider deleted"))
+        {
+            _deleting = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task SetAgentAsync(AiAgentInfo agent, bool enabled)
+    {
+        if (Toasts.FromResult(await AiConfig.SetAgentEnabledAsync(agent.Key, enabled), $"{agent.Name} {(enabled ? "enabled" : "disabled")}"))
+        {
+            await LoadAsync();
+        }
+    }
+}

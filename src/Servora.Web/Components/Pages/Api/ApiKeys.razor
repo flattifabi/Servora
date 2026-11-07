@@ -1,0 +1,213 @@
+@page "/admin/api-keys"
+@attribute [RequirePermission(Permissions.Api.ManageApiKeys)]
+@* API key administration: KPIs, usage trend, key list with status filter, create / edit / rotate / revoke. *@
+@inject IApiKeyService KeyService
+@inject ToastService Toasts
+
+<PageTitle>API Keys · Servora</PageTitle>
+
+<PageHeader Title="API Keys" Icon="braces" Subtitle="Credentials for integrations calling the REST API and the MCP server. Secrets are hashed and shown only once.">
+    <Breadcrumbs><span>Administration</span> <Icon Name="chevron-right" Size="12" /> <span>API Keys</span></Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="/admin/api-docs"><Icon Name="code" Size="16" /> API Explorer</a>
+        <button class="btn btn-primary" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> Create API key</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_stats is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="card card-body"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Active keys" Value="@_stats.Active.ToString("N0")" Icon="key" Tone="primary" Caption="usable right now" OnClick="@(() => Filter(ApiKeyStatus.Active))" />
+        <StatCard Label="Requests today" Value="@_stats.RequestsToday.ToString("N0")" Icon="activity" Tone="accent"
+                  Caption="@($"{_stats.FailedToday:N0} rejected")" Trend="@_stats.Daily.Select(d => (double)d.Requests).ToList()" />
+        <StatCard Label="Expiring in 14 days" Value="@_stats.ExpiringSoon.ToString("N0")" Icon="timer" Tone="@(_stats.ExpiringSoon > 0 ? "warning" : "success")" Caption="rotate or extend" />
+        <StatCard Label="Revoked" Value="@_stats.Revoked.ToString("N0")" Icon="x-circle" Tone="danger" Caption="permanently disabled" OnClick="@(() => Filter(ApiKeyStatus.Revoked))" />
+    }
+</div>
+
+@if (_stats is not null && _stats.Daily.Any(d => d.Requests > 0 || d.Failed > 0))
+{
+    <div class="card mb-6">
+        <div class="card-header">
+            <div><h3><Icon Name="trending-up" Size="16" /> API traffic</h3><div class="card-subtitle">Authenticated requests and rejected attempts, last 14 days (UTC)</div></div>
+        </div>
+        <div class="card-body">
+            <LineChart Labels="@_stats.Daily.Select(d => d.Day.ToString("dd.MM")).ToList()" Height="200"
+                       Series="@([new ChartSeries("Requests", _stats.Daily.Select(d => (double)d.Requests).ToList()), new ChartSeries("Rejected", _stats.Daily.Select(d => (double)d.Failed).ToList(), "var(--danger)")])" />
+        </div>
+    </div>
+}
+
+<DataTable TItem="ApiKeySummary" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_pageNumber" PageSize="PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPage" OnSortChanged="SortAsync" OnSearch="SearchAsync"
+           OnRowClick="@(k => _selectedId = k.Id)" SearchPlaceholder="Search name, key id, service…"
+           EmptyIcon="key" EmptyTitle="No API keys yet" EmptyText="Create a key to let monitoring tools, scripts or AI clients use the REST API and the MCP server.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_status is null ? "active" : null)" @onclick="() => Filter(null)">All</button>
+            <button class="@(_status == ApiKeyStatus.Active ? "active" : null)" @onclick="() => Filter(ApiKeyStatus.Active)">Active</button>
+            <button class="@(_status == ApiKeyStatus.Expired ? "active" : null)" @onclick="() => Filter(ApiKeyStatus.Expired)">Expired</button>
+            <button class="@(_status == ApiKeyStatus.Revoked ? "active" : null)" @onclick="() => Filter(ApiKeyStatus.Revoked)">Revoked</button>
+        </div>
+    </Toolbar>
+    <EmptyContent>
+        <button class="btn btn-primary" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> Create API key</button>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="ApiKeySummary" Title="Name" SortKey="Name">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <div class="key-icon"><Icon Name="key" Size="15" /></div>
+                    <div class="min-w-0">
+                        <div class="cell-link">@context.Name</div>
+                        <div class="tiny faint mono">@context.KeyPreview</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ApiKeySummary" Title="Acts for">
+            <Template>
+                <span class="person"><Avatar Name="@context.OwnerName" Size="sm" /> @context.OwnerName</span>
+                @if (context.IsServiceIdentity)
+                {
+                    <span class="tag" style="margin-left:6px">service</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ApiKeySummary" Title="Status"><Template><StatusPill Text="@context.Status.ToString()" Tone="@StatusTone(context.Status)" /></Template></DataColumn>
+        <DataColumn TItem="ApiKeySummary" Title="Scopes" Align="right" Value="k => k.ScopeCount" />
+        <DataColumn TItem="ApiKeySummary" Title="Last used" SortKey="LastUsedAt"><Template><RelativeTime Value="context.LastUsedAt" Placeholder="Never" /></Template></DataColumn>
+        <DataColumn TItem="ApiKeySummary" Title="Expires" SortKey="ExpiresAt">
+            <Template>
+                @if (context.ExpiresAt is { } expires)
+                {
+                    <span class="@(context.Status == ApiKeyStatus.Active && expires - DateTimeOffset.UtcNow < TimeSpan.FromDays(14) ? "text-warning" : null)">@expires.ToString("yyyy-MM-dd")</span>
+                }
+                else
+                {
+                    <span class="muted">Never</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ApiKeySummary" Title="Requests" Align="right" Value="FormatUsage" />
+        <DataColumn TItem="ApiKeySummary" Title="Created" SortKey="CreatedAt"><Template><RelativeTime Value="context.CreatedAt" /></Template></DataColumn>
+    </Columns>
+</DataTable>
+
+<ApiKeyDetailsDrawer @ref="_drawer" KeyId="_selectedId" OnClose="() => _selectedId = null" OnChanged="ReloadAsync" OnSecret="ShowSecret" OnEdit="OpenEdit" />
+<ApiKeyEditorDialog @bind-Open="_editorOpen" Existing="_editing" OnSaved="OnSavedAsync" />
+<SecretRevealDialog @bind-Open="_secretOpen" Secret="_secret" />
+
+@code {
+    private const int PageSize = 25;
+    private PagedResult<ApiKeySummary>? _page;
+    private ApiKeyStats? _stats;
+    private ApiKeyStatus? _status;
+    private int _pageNumber = 1;
+    private string? _search;
+    private string? _sort = "CreatedAt";
+    private bool _desc = true;
+    private bool _loading = true;
+    private Guid? _selectedId;
+    private bool _editorOpen;
+    private ApiKeyDetails? _editing;
+    private bool _secretOpen;
+    private ApiKeySecretResult? _secret;
+    private ApiKeyDetailsDrawer? _drawer;
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private static object? FormatUsage(ApiKeySummary key) => key.UsageCount.ToString("N0");
+
+    private static string StatusTone(ApiKeyStatus status) => status switch
+    {
+        ApiKeyStatus.Active => "success",
+        ApiKeyStatus.Expired => "warning",
+        _ => "danger",
+    };
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        var stats = await KeyService.GetStatsAsync();
+        _stats = stats.Succeeded ? stats.Value : null;
+        var page = await KeyService.ListAsync(new PageRequest { Page = _pageNumber, PageSize = PageSize, Search = _search, SortBy = _sort, SortDescending = _desc }, _status);
+        if (page.Succeeded)
+        {
+            _page = page.Value;
+        }
+        else
+        {
+            Toasts.Error("Could not load API keys", page.Error);
+        }
+
+        _loading = false;
+    }
+
+    private Task GoToPage(int page)
+    {
+        _pageNumber = page;
+        return ReloadAsync();
+    }
+
+    private Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        return ReloadAsync();
+    }
+
+    private Task SearchAsync(string search)
+    {
+        _search = search;
+        _pageNumber = 1;
+        return ReloadAsync();
+    }
+
+    private Task Filter(ApiKeyStatus? status)
+    {
+        _status = status;
+        _pageNumber = 1;
+        return ReloadAsync();
+    }
+
+    private void OpenCreate()
+    {
+        _editing = null;
+        _editorOpen = true;
+    }
+
+    private void OpenEdit(ApiKeyDetails key)
+    {
+        _editing = key;
+        _editorOpen = true;
+    }
+
+    private void ShowSecret(ApiKeySecretResult secret)
+    {
+        _secret = secret;
+        _secretOpen = true;
+    }
+
+    private async Task OnSavedAsync(ApiKeySecretResult? secret)
+    {
+        if (secret is not null)
+        {
+            Toasts.Success("API key created", "Copy the secret now – it is shown only once.");
+            ShowSecret(secret);
+        }
+
+        await ReloadAsync();
+        if (_drawer is not null && _selectedId is not null)
+        {
+            await _drawer.ReloadAsync();
+        }
+    }
+}

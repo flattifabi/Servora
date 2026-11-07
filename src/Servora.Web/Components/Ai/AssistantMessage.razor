@@ -1,0 +1,136 @@
+@* One chat message: user bubble or assistant answer with agent chip, execution trace (tool-call cards) and confirmation cards. *@
+@implements IDisposable
+
+<div class="msg msg-@(Message.Role == AiMessageRole.User ? "user" : "assistant") @(Message.IsError ? "msg-error" : null)">
+    @if (Message.Role == AiMessageRole.User)
+    {
+        <div class="msg-bubble user-bubble">@Message.Content</div>
+        <Avatar Name="@UserName" Size="sm" />
+    }
+    else
+    {
+        <div class="assistant-avatar"><Icon Name="@(Message.IsError ? "alert-triangle" : "sparkles")" Size="16" /></div>
+        <div class="msg-main">
+            <div class="msg-meta">
+                <b>Servora Assistant</b>
+                @if (Message.AgentName is not null)
+                {
+                    <span class="agent-chip"><Icon Name="@AgentIcon(Message.AgentKey)" Size="11" /> via @Message.AgentName</span>
+                }
+                <RelativeTime Value="Message.CreatedAt" Class="tiny faint" />
+                @if (Message.DurationMs is { } ms && ms > 0)
+                {
+                    <span class="tiny faint">· @((ms / 1000.0).ToString("0.0")) s</span>
+                }
+            </div>
+
+            @if (Trace.Count > 0)
+            {
+                <div class="trace">
+                    <button class="trace-toggle" @onclick="() => _showTrace = !_showTrace">
+                        <Icon Name="workflow" Size="13" /> @Trace.Count step@(Trace.Count == 1 ? null : "s") · @string.Join(" → ", AgentsInvolved)
+                        <Icon Name="@(_showTrace ? "chevron-up" : "chevron-down")" Size="13" />
+                    </button>
+                    @if (_showTrace)
+                    {
+                        <div class="trace-steps">
+                            @foreach (var step in Trace)
+                            {
+                                <ToolCallCard Step="step" AgentNames="AgentNames" />
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            <div class="msg-bubble assistant-bubble">
+                <AiRichText Text="@VisibleText" />
+                @if (_revealing)
+                {
+                    <span class="caret"></span>
+                }
+            </div>
+
+            @foreach (var action in Actions)
+            {
+                <div class="mt-3">
+                    <ToolCallCard Step="action" AgentNames="AgentNames" Busy="BusyStepId == action.Id" OnConfirm="OnConfirm" OnReject="OnReject" />
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private System.Threading.Timer? _timer;
+    private int _visibleChars;
+    private bool _revealing;
+    private bool _showTrace;
+    private Guid _animatedId;
+
+    /// <summary>Gets or sets the message.</summary>
+    [Parameter, EditorRequired] public AiMessageView Message { get; set; } = default!;
+
+    /// <summary>Gets or sets the user's display name (avatar).</summary>
+    [Parameter] public string? UserName { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the answer is revealed progressively (newest answer).</summary>
+    [Parameter] public bool Animate { get; set; }
+
+    /// <summary>Gets or sets the agent names by key.</summary>
+    [Parameter] public IReadOnlyDictionary<string, string>? AgentNames { get; set; }
+
+    /// <summary>Gets or sets the step currently being confirmed or rejected.</summary>
+    [Parameter] public Guid? BusyStepId { get; set; }
+
+    /// <summary>Raised when a pending action is confirmed.</summary>
+    [Parameter] public EventCallback<AiToolCallView> OnConfirm { get; set; }
+
+    /// <summary>Raised when a pending action is rejected.</summary>
+    [Parameter] public EventCallback<AiToolCallView> OnReject { get; set; }
+
+    private IReadOnlyList<AiToolCallView> Trace => Message.Steps.Where(s => s.Kind != AiTraceKinds.Action).ToList();
+
+    private IReadOnlyList<AiToolCallView> Actions => Message.Steps.Where(s => s.Kind == AiTraceKinds.Action).ToList();
+
+    private IEnumerable<string> AgentsInvolved => Message.Steps.Where(s => s.Kind == AiTraceKinds.Delegation)
+        .Select(s => AgentNames?.GetValueOrDefault(s.ToolName) ?? s.ToolName).Distinct().DefaultIfEmpty("Orchestrator");
+
+    private string VisibleText => _revealing ? Message.Content[..Math.Min(_visibleChars, Message.Content.Length)] : Message.Content;
+
+    /// <inheritdoc />
+    public void Dispose() => _timer?.Dispose();
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Animate && Message.Role == AiMessageRole.Assistant && _animatedId != Message.Id && Message.Content.Length > 0)
+        {
+            _animatedId = Message.Id;
+            _visibleChars = 0;
+            _revealing = true;
+            _timer?.Dispose();
+            var step = Math.Max(4, Message.Content.Length / 60);
+            _timer = new System.Threading.Timer(_ => InvokeAsync(() =>
+            {
+                _visibleChars += step;
+                if (_visibleChars >= Message.Content.Length)
+                {
+                    _revealing = false;
+                    _timer?.Dispose();
+                }
+
+                StateHasChanged();
+            }), null, 20, 18);
+        }
+    }
+
+    private static string AgentIcon(string? key) => key switch
+    {
+        "triage" => "target",
+        "knowledge" => "book-open",
+        "records" => "search",
+        "automation" => "workflow",
+        _ => "sparkles",
+    };
+}

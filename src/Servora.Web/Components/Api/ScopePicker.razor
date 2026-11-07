@@ -1,0 +1,140 @@
+@* Grouped, searchable scope selection for API keys (only scopes the current user may grant are offered). *@
+
+<div class="scope-picker">
+    <div class="scope-toolbar">
+        <div class="input-icon flex-1">
+            <Icon Name="search" Size="16" />
+            <input class="input" placeholder="Filter scopes…" @bind="_filter" @bind:event="oninput" />
+        </div>
+        <div class="segmented">
+            <button type="button" @onclick="ApplyRestPreset" title="api.access plus every read permission you hold">REST read-only</button>
+            <button type="button" @onclick="ApplyMcpPreset" title="mcp.access plus every MCP tool scope">MCP client</button>
+            <button type="button" @onclick="Clear">Clear</button>
+        </div>
+    </div>
+    <div class="scope-summary small muted">
+        <span class="pill pill-primary no-dot">@Selected.Count selected</span>
+        <span>Calls are always limited to the intersection of these scopes and the owner's own permissions.</span>
+    </div>
+    <div class="scope-groups">
+        @foreach (var group in Groups)
+        {
+            var items = group.ToList();
+            var selectedCount = items.Count(i => Selected.Contains(i.Key));
+            <div class="scope-group">
+                <div class="scope-group-header">
+                    <label class="checkbox">
+                        <input type="checkbox" checked="@(selectedCount == items.Count)" @onchange="e => ToggleGroup(items, e.Value is true)" />
+                        <span class="scope-group-title">@group.Key</span>
+                    </label>
+                    <span class="badge">@selectedCount / @items.Count</span>
+                </div>
+                @foreach (var scope in items)
+                {
+                    <label class="scope-item @(Selected.Contains(scope.Key) ? "selected" : null)">
+                        <input type="checkbox" checked="@Selected.Contains(scope.Key)" @onchange="e => Toggle(scope.Key, e.Value is true)" />
+                        <span class="scope-text">
+                            <code>@scope.Key</code>
+                            <span class="small muted">@scope.Description</span>
+                        </span>
+                    </label>
+                }
+            </div>
+        }
+        @if (!Groups.Any())
+        {
+            <div class="small muted" style="padding:16px">No scopes match the filter.</div>
+        }
+    </div>
+</div>
+
+@code {
+    private string _filter = string.Empty;
+
+    /// <summary>Gets or sets the grantable scopes.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<GrantableScope> Scopes { get; set; } = [];
+
+    /// <summary>Gets or sets the selected scope keys.</summary>
+    [Parameter] public HashSet<string> Selected { get; set; } = [];
+
+    /// <summary>Raised when the selection changes.</summary>
+    [Parameter] public EventCallback<HashSet<string>> SelectedChanged { get; set; }
+
+    private IEnumerable<IGrouping<string, GrantableScope>> Groups
+    {
+        get
+        {
+            var all = Scopes.ToList();
+            foreach (var orphan in Selected.Where(s => all.All(a => a.Key != s)))
+            {
+                all.Add(new GrantableScope(orphan, "Existing scopes you cannot grant", "Already on the key. You may remove it but not add it again."));
+            }
+
+            return all
+                .Where(s => string.IsNullOrWhiteSpace(_filter)
+                            || s.Key.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                            || s.Description.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                            || s.Group.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+                .GroupBy(s => s.Group)
+                .OrderBy(g => g.Key == "API & API Keys" ? 0 : g.Key == "MCP Server" ? 1 : g.Key == "MCP Tools" ? 2 : 3)
+                .ThenBy(g => g.Key);
+        }
+    }
+
+    private Task Toggle(string key, bool selected)
+    {
+        if (selected)
+        {
+            Selected.Add(key);
+        }
+        else
+        {
+            Selected.Remove(key);
+        }
+
+        return SelectedChanged.InvokeAsync(Selected);
+    }
+
+    private Task ToggleGroup(IEnumerable<GrantableScope> items, bool selected)
+    {
+        foreach (var item in items)
+        {
+            if (selected)
+            {
+                Selected.Add(item.Key);
+            }
+            else
+            {
+                Selected.Remove(item.Key);
+            }
+        }
+
+        return SelectedChanged.InvokeAsync(Selected);
+    }
+
+    private Task ApplyRestPreset()
+    {
+        foreach (var scope in Scopes.Where(s => s.Key == Permissions.Api.Access || s.Key.EndsWith(".read", StringComparison.Ordinal)))
+        {
+            Selected.Add(scope.Key);
+        }
+
+        return SelectedChanged.InvokeAsync(Selected);
+    }
+
+    private Task ApplyMcpPreset()
+    {
+        foreach (var scope in Scopes.Where(s => s.Key == Permissions.Mcp.Access || s.Key == "mcp.tool.*"))
+        {
+            Selected.Add(scope.Key);
+        }
+
+        return SelectedChanged.InvokeAsync(Selected);
+    }
+
+    private Task Clear()
+    {
+        Selected.Clear();
+        return SelectedChanged.InvokeAsync(Selected);
+    }
+}
