@@ -1,0 +1,83 @@
+.status-hero {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    padding: 22px 24px;
+    border-radius: var(--r-xl);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    overflow: hidden;
+}
+
+.status-hero::before {
+    content: "";
+    position: absolute;
+    inset: -40% auto auto -10%;
+    width: 520px;
+    height: 320px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--hero-glow, rgba(34, 197, 94, .22)), transparent 70%);
+    pointer-events: none;
+}
+
+.status-healthy { --hero-color: var(--success); --hero-soft: var(--success-soft); --hero-glow: rgba(34, 197, 94, .22); border-color: rgba(34, 197, 94, .3); }
+.status-degraded { --hero-color: var(--warning); --hero-soft: var(--warning-soft); --hero-glow: rgba(245, 158, 11, .24); border-color: rgba(245, 158, 11, .35); }
+.status-unhealthy { --hero-color: var(--danger); --hero-soft: var(--danger-soft); --hero-glow: rgba(244, 63, 94, .26); border-color: rgba(244, 63, 94, .45); }
+
+.status-orb {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: var(--hero-color);
+    background: var(--hero-soft);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--hero-soft) 60%, transparent), 0 0 36px -4px var(--hero-color);
+}
+
+.status-orb::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid var(--hero-color);
+    opacity: .4;
+    animation: pulse-mark 2.4s infinite;
+}
+
+.status-title { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: -.01em; margin: 2px 0 4px; }
+
+.hero-facts { position: relative; display: grid; grid-template-columns: repeat(4, auto); gap: 6px 28px; }
+.hero-facts div { display: flex; flex-direction: column; gap: 2px; }
+.hero-facts span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-faint); font-weight: 600; }
+.hero-facts b { font-size: 14px; font-weight: 650; color: var(--text); }
+
+.checks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+.check-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; border-top: 3px solid var(--check-color, var(--border)); }
+.check-healthy { --check-color: var(--success); }
+.check-degraded { --check-color: var(--warning); }
+.check-unhealthy { --check-color: var(--danger); }
+
+.check-head { display: flex; align-items: center; gap: 12px; }
+.check-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); color: var(--check-color); border: 1px solid var(--border); }
+.check-name { font-weight: 650; }
+.check-desc { font-size: 13px; color: var(--text-2); }
+
+.check-data { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12px; }
+.check-data dt { color: var(--text-faint); }
+.check-data dd { margin: 0; color: var(--text-2); font-family: var(--font-mono); overflow-wrap: anywhere; }
+
+.beat { display: flex; align-items: center; gap: 10px; }
+.beat-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px var(--success); flex-shrink: 0; }
+.beat-dot.stale { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+
+.facts { grid-template-columns: 120px 1fr; font-size: 13px; }
+
+@media (max-width: 1024px) {
+    .hero-facts { grid-template-columns: repeat(2, auto); }
+}

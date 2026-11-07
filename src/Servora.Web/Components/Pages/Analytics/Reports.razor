@@ -1,0 +1,193 @@
+@page "/analytics/reports"
+@* Report library: saved reports visible to the user (own, shared with a role, shared with everyone, built-in samples). *@
+@attribute [RequirePermission(Permissions.Analytics.Read)]
+@inject IReportService ReportService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Reports · Servora</PageTitle>
+
+<PageHeader Title="Reports" Icon="bar-chart" Subtitle="Build, save and share reports on any table you can access — then pin them to your dashboard.">
+    <Breadcrumbs><a href="/analytics">Analytics</a> <Icon Name="chevron-right" Size="12" /> Reports</Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="/analytics"><Icon Name="pie-chart" Size="16" /> Dashboard</a>
+        @if (_canManage)
+        {
+            <a class="btn btn-primary" href="/analytics/reports/new"><Icon Name="plus" Size="16" /> New report</a>
+        }
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Available reports" Value="@_counts.All.ToString("N0")" Icon="bar-chart" Caption="visible to you" />
+    <StatCard Label="My reports" Value="@_counts.Mine.ToString("N0")" Icon="user" Tone="accent" Caption="owned by you" />
+    <StatCard Label="Shared with me" Value="@_counts.Shared.ToString("N0")" Icon="users" Tone="info" Caption="role, everyone & samples" />
+    <StatCard Label="Pinned" Value="@_counts.Pinned.ToString("N0")" Icon="star" Tone="warning" Caption="@($"on your dashboard (max {Servora.Application.Analytics.ReportService.MaxPins})")" />
+</div>
+
+<DataTable TItem="ReportSummary" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPage" OnSortChanged="Sort" OnSearch="Search"
+           SearchPlaceholder="Search reports…" OnRowClick="@(r => Nav.NavigateTo($"/analytics/reports/{r.Id}"))"
+           EmptyIcon="bar-chart" EmptyTitle="No reports yet" EmptyText="Create your first report — choose a table, group it and pick a chart.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_scope == ReportListScope.All ? "active" : null)" @onclick="() => SetScope(ReportListScope.All)">All</button>
+            <button class="@(_scope == ReportListScope.Mine ? "active" : null)" @onclick="() => SetScope(ReportListScope.Mine)">Mine</button>
+            <button class="@(_scope == ReportListScope.Shared ? "active" : null)" @onclick="() => SetScope(ReportListScope.Shared)">Shared with me</button>
+        </div>
+    </Toolbar>
+    <EmptyContent>
+        @if (_canManage)
+        {
+            <a class="btn btn-primary" href="/analytics/reports/new"><Icon Name="plus" Size="16" /> New report</a>
+        }
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="ReportSummary" Title="Report" SortKey="Name">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <div class="report-icon"><Icon Name="@ChartAdapters.IconOf(context.ChartType)" Size="16" /></div>
+                    <div style="min-width:0">
+                        <div class="cell-link truncate">@context.Name</div>
+                        @if (!string.IsNullOrEmpty(context.Description))
+                        {
+                            <div class="small faint truncate" style="max-width:420px">@context.Description</div>
+                        }
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ReportSummary" Title="Source" SortKey="TableName">
+            <Template>
+                <span class="flex items-center gap-2">
+                    <Icon Name="@context.TableIcon" Size="14" /> @context.TableLabel
+                    @if (!context.TableAvailable)
+                    {
+                        <span class="pill pill-warning no-dot" title="The module providing this table is not installed.">not installed</span>
+                    }
+                </span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ReportSummary" Title="Visualization">
+            <Template><span class="tag">@ChartAdapters.LabelOf(context.ChartType)@(context.GroupBy is null ? null : " · " + context.GroupBy)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="ReportSummary" Title="Sharing">
+            <Template>
+                @switch (context.Visibility)
+                {
+                    case ReportVisibility.Everyone:
+                        <span class="pill pill-success">Everyone</span>
+                        break;
+                    case ReportVisibility.Role:
+                        <span class="pill pill-info">Role · @context.SharedWithRole</span>
+                        break;
+                    default:
+                        <span class="pill pill-neutral">Private</span>
+                        break;
+                }
+                @if (context.IsSystem)
+                {
+                    <span class="pill pill-purple no-dot" style="margin-left:4px">Sample</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ReportSummary" Title="Owner">
+            <Template><span class="person"><Avatar Name="@context.OwnerName" Size="sm" /> @(context.IsMine ? "You" : context.OwnerName)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="ReportSummary" Title="Updated" SortKey="UpdatedAt">
+            <Template><RelativeTime Value="context.UpdatedAt" /></Template>
+        </DataColumn>
+        <DataColumn TItem="ReportSummary" Title="" Width="56px" Align="right">
+            <Template>
+                <button class="icon-btn @(context.IsPinned ? "pinned" : null)" title="@(context.IsPinned ? "Unpin from dashboard" : "Pin to dashboard")"
+                        @onclick="() => TogglePin(context)" @onclick:stopPropagation="true">
+                    <Icon Name="star" Size="16" />
+                </button>
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private PagedResult<ReportSummary> _page = PagedResult<ReportSummary>.Empty();
+    private (int All, int Mine, int Shared, int Pinned) _counts;
+    private ReportListScope _scope = ReportListScope.All;
+    private string? _search;
+    private string? _sort = "Name";
+    private bool _desc;
+    private int _pageNumber = 1;
+    private bool _loading = true;
+    private bool _canManage;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Analytics.ManageReports);
+        await LoadAsync();
+        await LoadCountsAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await ReportService.ListAsync(_scope, new PageRequest { Page = _pageNumber, PageSize = 25, Search = _search, SortBy = _sort, SortDescending = _desc });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Reports unavailable", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task LoadCountsAsync()
+    {
+        var small = new PageRequest { PageSize = 1 };
+        var all = await ReportService.ListAsync(ReportListScope.All, small);
+        var mine = await ReportService.ListAsync(ReportListScope.Mine, small);
+        var pinned = await ReportService.GetPinnedAsync();
+        var allCount = all.Value?.TotalCount ?? 0;
+        var mineCount = mine.Value?.TotalCount ?? 0;
+        _counts = (allCount, mineCount, allCount - mineCount, pinned.Value?.Count ?? 0);
+    }
+
+    private async Task SetScope(ReportListScope scope)
+    {
+        _scope = scope;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task GoToPage(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task Sort((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        await LoadAsync();
+    }
+
+    private async Task Search(string text)
+    {
+        _search = text;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task TogglePin(ReportSummary report)
+    {
+        var result = report.IsPinned ? await ReportService.UnpinAsync(report.Id) : await ReportService.PinAsync(report.Id);
+        if (Toasts.FromResult(result, report.IsPinned ? "Removed from your dashboard" : "Pinned to your dashboard"))
+        {
+            await LoadAsync();
+            await LoadCountsAsync();
+        }
+    }
+}

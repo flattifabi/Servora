@@ -1,0 +1,463 @@
+@page "/admin/audit"
+@* Audit log viewer: filters, detail drawer, CSV export, hash-chain integrity verification and retention. *@
+@attribute [RequirePermission(Permissions.Observability.ReadAudit)]
+@using System.Text.Json
+@inject IAuditLogService AuditLog
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Audit Log · Servora</PageTitle>
+
+<PageHeader Title="Audit log" Icon="history" Subtitle="Tamper-evident, hash-chained record of security and configuration events.">
+    <Actions>
+        @if (_canManageSettings)
+        {
+            <button class="btn btn-secondary" @onclick="() => _retentionOpen = true"><Icon Name="settings" Size="16" /> Retention</button>
+        }
+        <a class="btn btn-secondary" href="@ExportUrl" download><Icon Name="download" Size="16" /> Export CSV</a>
+        <button class="btn btn-primary" @onclick="VerifyAsync" disabled="@_verifying">
+            @if (_verifying)
+            {
+                <span class="spinner"></span>
+                <span>Verifying…</span>
+            }
+            else
+            {
+                <Icon Name="shield-check" Size="16" />
+                <span>Verify integrity</span>
+            }
+        </button>
+    </Actions>
+</PageHeader>
+
+<div class="integrity card mb-6 @IntegrityClass">
+    <div class="integrity-icon">
+        <Icon Name="@(_verification is null ? "shield" : _verification.IsIntact ? "shield-check" : "alert-octagon")" Size="26" />
+    </div>
+    <div class="flex-1" style="min-width:0">
+        @if (_verification is null)
+        {
+            <div class="integrity-title">Integrity not verified yet</div>
+            <div class="small muted">Every event stores the SHA-256 hash of its content and of its predecessor. Run a verification to prove that no event was modified, inserted or deleted.</div>
+        }
+        else if (_verification.IsIntact)
+        {
+            <div class="integrity-title">Hash chain intact</div>
+            <div class="small muted">
+                @_verification.CheckedCount.ToString("N0") events verified (sequence @_verification.FirstSequence – @_verification.LastSequence) in @_verification.DurationMs ms
+                by @_verification.VerifiedBy · <RelativeTime Value="_verification.VerifiedAt" />
+            </div>
+        }
+        else
+        {
+            <div class="integrity-title">Integrity violation detected</div>
+            <div class="small">
+                @_verification.IssueCount.ToString("N0") problem(s) in @_verification.CheckedCount.ToString("N0") events · verified by @_verification.VerifiedBy <RelativeTime Value="_verification.VerifiedAt" />
+            </div>
+        }
+        @if (_verification?.HeadHash is { } head)
+        {
+            <div class="head-hash">
+                <span class="faint">Chain head</span>
+                <code>@head</code>
+                <button class="icon-btn" title="Copy head hash (record it externally to detect truncation)" @onclick="() => CopyAsync(head)"><Icon Name="copy" Size="14" /></button>
+            </div>
+        }
+    </div>
+</div>
+
+@if (_verification is { IsIntact: false } broken)
+{
+    <div class="card mb-6">
+        <div class="card-header"><h3 class="text-danger"><Icon Name="alert-triangle" Size="16" /> Integrity problems</h3><span class="small muted">first @broken.Issues.Count of @broken.IssueCount</span></div>
+        <div class="table-wrap" style="max-height:300px">
+            <table class="table compact">
+                <thead><tr><th>Sequence</th><th>Kind</th><th>Time</th><th>Explanation</th></tr></thead>
+                <tbody>
+                    @foreach (var issue in broken.Issues)
+                    {
+                        <tr class="clickable" @onclick="() => OpenAsync(issue.EventId)">
+                            <td class="mono">#@issue.Sequence</td>
+                            <td><span class="pill pill-danger no-dot">@issue.Kind</span></td>
+                            <td><RelativeTime Value="issue.OccurredAt" /></td>
+                            <td>@issue.Message</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@if (_stats is { } stats)
+{
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Retained events" Value="@stats.Total.ToString("N0")" Icon="history" Caption="@(stats.RetentionDays == 0 ? "kept forever" : $"{stats.RetentionDays} days retention")" />
+        <StatCard Label="Last 24 hours" Value="@stats.Last24Hours.ToString("N0")" Icon="activity" Tone="accent" Caption="audited operations"
+                  Trend="@(stats.PerDay.Select(d => (double)(d.Success + d.Failure + d.Denied)).ToList())" />
+        <StatCard Label="Failures (24 h)" Value="@stats.Failures24Hours.ToString("N0")" Icon="alert-triangle" Tone="@(stats.Failures24Hours > 0 ? "warning" : "success")" Caption="failed operations" OnClick="() => FilterOutcomeAsync(AuditOutcome.Failure)" />
+        <StatCard Label="Denied (24 h)" Value="@stats.Denied24Hours.ToString("N0")" Icon="lock" Tone="@(stats.Denied24Hours > 0 ? "danger" : "success")" Caption="authorization / lockouts" OnClick="() => FilterOutcomeAsync(AuditOutcome.Denied)" />
+    </div>
+
+    <div class="audit-charts mb-6">
+        <ChartCard Title="Activity" Subtitle="Audited events per day (14 days)" Icon="bar-chart">
+            <BarChart Labels="@(stats.PerDay.Select(d => d.Day.ToString("dd MMM")).ToList())" Height="200" ValueFormat="0"
+                      Series="@([new ChartSeries("Successful", stats.PerDay.Select(d => (double)d.Success).ToList(), "#7c6cff"), new ChartSeries("Failed", stats.PerDay.Select(d => (double)d.Failure).ToList(), "#f59e0b"), new ChartSeries("Denied", stats.PerDay.Select(d => (double)d.Denied).ToList(), "#f43f5e")])" />
+        </ChartCard>
+        <ChartCard Title="By category" Subtitle="Last 14 days" Icon="pie-chart">
+            @if (stats.ByCategory.Count == 0)
+            {
+                <AnalyticsState Message="No events in the last 14 days." />
+            }
+            else
+            {
+                <DonutChart Slices="stats.ByCategory.Take(8).Select(c => new ChartSlice(c.Name, c.Count)).ToList()" CenterLabel="events" Size="150" />
+            }
+        </ChartCard>
+    </div>
+}
+
+<DataTable TItem="AuditEvent" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPage" OnSortChanged="SortAsync" OnSearch="SearchAsync"
+           SearchPlaceholder="Search action, actor, message, target, IP…" OnRowClick="e => Open(e)" Compact="true"
+           EmptyIcon="history" EmptyTitle="No audit events" EmptyText="No events match the current filter.">
+    <Toolbar>
+        <select class="select" style="width:150px" value="@(_query.Category ?? string.Empty)" @onchange="e => SetAsync(q => q with { Category = NullIfEmpty(e.Value) })">
+            <option value="">All categories</option>
+            @foreach (var category in _facets?.Categories ?? [])
+            {
+                <option value="@category">@category</option>
+            }
+        </select>
+        <input class="input" style="width:170px" list="audit-actions" placeholder="Action (prefix)" value="@_query.Action" @onchange="e => SetAsync(q => q with { Action = NullIfEmpty(e.Value) })" />
+        <input class="input" style="width:150px" placeholder="Actor" value="@_query.Actor" @onchange="e => SetAsync(q => q with { Actor = NullIfEmpty(e.Value) })" />
+        <div class="segmented">
+            <button class="@(_query.Outcome is null ? "active" : null)" @onclick="() => SetAsync(q => q with { Outcome = null })">All</button>
+            <button class="@(_query.Outcome == AuditOutcome.Success ? "active" : null)" @onclick="() => SetAsync(q => q with { Outcome = AuditOutcome.Success })">Success</button>
+            <button class="@(_query.Outcome == AuditOutcome.Failure ? "active" : null)" @onclick="() => SetAsync(q => q with { Outcome = AuditOutcome.Failure })">Failure</button>
+            <button class="@(_query.Outcome == AuditOutcome.Denied ? "active" : null)" @onclick="() => SetAsync(q => q with { Outcome = AuditOutcome.Denied })">Denied</button>
+        </div>
+        <input class="input" type="date" style="width:150px" title="From (UTC)" value="@_query.From?.UtcDateTime.ToString("yyyy-MM-dd")" @onchange="e => SetAsync(q => q with { From = ParseDate(e.Value) })" />
+        <input class="input" type="date" style="width:150px" title="To (UTC, inclusive)" value="@_query.To?.UtcDateTime.AddDays(-1).ToString("yyyy-MM-dd")" @onchange="e => SetAsync(q => q with { To = ParseDate(e.Value)?.AddDays(1) })" />
+        @if (HasFilter)
+        {
+            <button class="btn btn-ghost btn-sm" @onclick="ClearAsync"><Icon Name="x" Size="14" /> Clear</button>
+        }
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="AuditEvent" Title="#" SortKey="Sequence" Width="70px">
+            <Template><span class="mono faint">@context.Sequence</span></Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="Time" SortKey="OccurredAt" Width="120px">
+            <Template><RelativeTime Value="context.OccurredAt" /></Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="Category" SortKey="Category">
+            <Template><span class="tag">@context.Category</span></Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="Action" SortKey="Action">
+            <Template><span class="mono small cell-primary">@context.Action</span></Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="Outcome" SortKey="Outcome">
+            <Template><StatusPill Text="@context.Outcome.ToString()" Tone="@OutcomeTone(context.Outcome)" /></Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="Actor" SortKey="ActorName">
+            <Template>
+                <span class="person"><Avatar Name="@context.ActorName" Size="sm" /> <span>@context.ActorName</span> <span class="tiny faint">@context.ActorType</span></span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="Target">
+            <Template><span class="small truncate" style="max-width:220px;display:inline-block">@(context.TargetName ?? context.TargetType ?? "—")</span></Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="Message">
+            <Template><span class="small muted truncate" style="max-width:320px;display:inline-block" title="@context.Message">@context.Message</span></Template>
+        </DataColumn>
+        <DataColumn TItem="AuditEvent" Title="IP" Width="120px">
+            <Template><span class="mono small faint">@context.IpAddress</span></Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<datalist id="audit-actions">
+    @foreach (var action in _facets?.Actions ?? [])
+    {
+        <option value="@action"></option>
+    }
+</datalist>
+
+<Drawer @bind-Open="_drawerOpen" Title="@(_selected?.Action ?? "Audit event")" Subtitle="@(_selected is null ? null : $"#{_selected.Sequence} · {_selected.OccurredAt.ToLocalTime():G}")" Size="lg">
+    @if (_selected is { } e)
+    {
+        var hashValid = !string.IsNullOrEmpty(e.Hash) && AuditHasher.ComputeHash(e) == e.Hash;
+        <div class="stack" style="gap:18px">
+            <div class="flex items-center gap-2 flex-wrap">
+                <StatusPill Text="@e.Outcome.ToString()" Tone="@OutcomeTone(e.Outcome)" />
+                <span class="tag">@e.Category</span>
+                <span class="pill @(hashValid ? "pill-success" : "pill-danger") no-dot"><Icon Name="@(hashValid ? "shield-check" : "alert-octagon")" Size="12" /> @(hashValid ? "Content hash valid" : "Content hash MISMATCH")</span>
+            </div>
+            <dl class="kv">
+                <dt>Occurred (UTC)</dt>
+                <dd class="mono">@e.OccurredAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff")</dd>
+                <dt>Actor</dt>
+                <dd><span class="person"><Avatar Name="@e.ActorName" Size="sm" /> @e.ActorName</span> <span class="faint small">(@e.ActorType@(e.ActorId is null ? null : " · " + e.ActorId))</span></dd>
+                <dt>Target</dt>
+                <dd>@(e.TargetName ?? "—") <span class="faint small">@e.TargetType @(e.TargetId is null ? null : "· " + e.TargetId)</span></dd>
+                <dt>Message</dt>
+                <dd>@(e.Message ?? "—")</dd>
+                <dt>Client IP</dt>
+                <dd class="mono">@(e.IpAddress ?? "—")</dd>
+                <dt>Correlation id</dt>
+                <dd>
+                    @if (e.CorrelationId is { } correlation)
+                    {
+                        <span class="mono">@correlation</span>
+                        <PermissionView Permission="@Permissions.Observability.ReadLogs">
+                            <a class="btn btn-ghost btn-sm" style="margin-left:6px" href="@($"/admin/logs?correlationId={Uri.EscapeDataString(correlation)}")"><Icon Name="terminal" Size="13" /> Related logs</a>
+                        </PermissionView>
+                    }
+                    else
+                    {
+                        <span class="faint">—</span>
+                    }
+                </dd>
+            </dl>
+            @if (!string.IsNullOrEmpty(e.DetailsJson))
+            {
+                <div>
+                    <div class="eyebrow mb-2">Details</div>
+                    <pre class="details">@PrettyJson(e.DetailsJson)</pre>
+                </div>
+            }
+            <div>
+                <div class="eyebrow mb-2">Hash chain</div>
+                <dl class="kv">
+                    <dt>Hash</dt>
+                    <dd class="mono small">@e.Hash</dd>
+                    <dt>Previous hash</dt>
+                    <dd class="mono small">@(e.PreviousHash ?? "— (chain start)")</dd>
+                </dl>
+            </div>
+        </div>
+    }
+</Drawer>
+
+<Modal @bind-Open="_retentionOpen" Title="Audit retention" Icon="history" Subtitle="Older events are deleted daily in bounded batches; the chain anchor keeps verification valid.">
+    <ChildContent>
+        <FormField Label="Keep audit events" Help="Compliance often requires one year or more. Deleting events is itself audited.">
+            <select class="select" @bind="_retentionDays">
+                <option value="0">Forever</option>
+                <option value="90">90 days</option>
+                <option value="180">180 days</option>
+                <option value="365">1 year</option>
+                <option value="730">2 years</option>
+                <option value="1825">5 years</option>
+                <option value="3650">10 years</option>
+            </select>
+        </FormField>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _retentionOpen = false">Cancel</button>
+        <button class="btn btn-primary" @onclick="SaveRetentionAsync"><Icon Name="save" Size="16" /> Save</button>
+    </Footer>
+</Modal>
+
+@code {
+    private static readonly JsonSerializerOptions s_pretty = new() { WriteIndented = true };
+    private PagedResult<AuditEvent> _page = PagedResult<AuditEvent>.Empty();
+    private AuditQuery _query = new();
+    private AuditStatistics? _stats;
+    private AuditFacets? _facets;
+    private AuditChainVerification? _verification;
+    private AuditEvent? _selected;
+    private string? _search;
+    private string? _sort = "Sequence";
+    private bool _desc = true;
+    private int _pageNumber = 1;
+    private int _retentionDays;
+    private bool _loading = true;
+    private bool _verifying;
+    private bool _drawerOpen;
+    private bool _retentionOpen;
+    private bool _canManageSettings;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private bool HasFilter => _query != new AuditQuery();
+
+    private string IntegrityClass => _verification is null ? "unknown" : _verification.IsIntact ? "intact" : "broken";
+
+    private string ExportUrl => Nav.GetUriWithQueryParameters("/observability/audit/export", new Dictionary<string, object?>
+    {
+        ["category"] = _query.Category,
+        ["action"] = _query.Action,
+        ["actor"] = _query.Actor,
+        ["outcome"] = _query.Outcome?.ToString(),
+        ["from"] = _query.From?.UtcDateTime.ToString("O"),
+        ["to"] = _query.To?.UtcDateTime.ToString("O"),
+        ["search"] = _search,
+    });
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canManageSettings = await CurrentUser.HasPermissionAsync(Permissions.Configuration.ManageSettings);
+        var facets = await AuditLog.GetFacetsAsync();
+        _facets = facets.Value;
+        var last = await AuditLog.GetLastVerificationAsync();
+        _verification = last.Value;
+        await LoadStatsAsync();
+        await LoadAsync();
+    }
+
+    private static string OutcomeTone(AuditOutcome outcome) => outcome switch
+    {
+        AuditOutcome.Success => "success",
+        AuditOutcome.Failure => "warning",
+        _ => "danger",
+    };
+
+    private static string? NullIfEmpty(object? value) => string.IsNullOrWhiteSpace(value?.ToString()) ? null : value.ToString()!.Trim();
+
+    private static DateTimeOffset? ParseDate(object? value) =>
+        DateTime.TryParse(value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var date)
+            ? new DateTimeOffset(date, TimeSpan.Zero)
+            : null;
+
+    private static string PrettyJson(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(document.RootElement, s_pretty);
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        var stats = await AuditLog.GetStatisticsAsync(14);
+        _stats = stats.Value;
+        _retentionDays = _stats?.RetentionDays ?? 0;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await AuditLog.QueryAsync(_query, new PageRequest { Page = _pageNumber, PageSize = 50, Search = _search, SortBy = _sort, SortDescending = _desc });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Audit log unavailable", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task SetAsync(Func<AuditQuery, AuditQuery> change)
+    {
+        _query = change(_query);
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private Task FilterOutcomeAsync(AuditOutcome outcome) => SetAsync(q => q with { Outcome = outcome, From = DateTimeOffset.UtcNow.AddDays(-1) });
+
+    private async Task ClearAsync()
+    {
+        _query = new AuditQuery();
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task GoToPage(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string text)
+    {
+        _search = string.IsNullOrWhiteSpace(text) ? null : text;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private void Open(AuditEvent auditEvent)
+    {
+        _selected = auditEvent;
+        _drawerOpen = true;
+    }
+
+    private async Task OpenAsync(Guid id)
+    {
+        var result = await AuditLog.GetAsync(id);
+        if (result.Succeeded)
+        {
+            Open(result.Value!);
+        }
+        else
+        {
+            Toasts.Error("Event unavailable", result.Error);
+        }
+    }
+
+    private async Task VerifyAsync()
+    {
+        _verifying = true;
+        try
+        {
+            var result = await AuditLog.VerifyChainAsync();
+            if (!result.Succeeded)
+            {
+                Toasts.Error("Verification failed", result.Error);
+                return;
+            }
+
+            _verification = result.Value;
+            if (_verification!.IsIntact)
+            {
+                Toasts.Success("Audit log intact", $"{_verification.CheckedCount:N0} events verified.");
+            }
+            else
+            {
+                Toasts.Error("Integrity violation", $"{_verification.IssueCount:N0} problem(s) found.");
+            }
+
+            await LoadStatsAsync();
+            await LoadAsync();
+        }
+        finally
+        {
+            _verifying = false;
+        }
+    }
+
+    private async Task SaveRetentionAsync()
+    {
+        if (Toasts.FromResult(await AuditLog.SetRetentionDaysAsync(_retentionDays), "Audit retention saved"))
+        {
+            _retentionOpen = false;
+            await LoadStatsAsync();
+        }
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        if (await JS.InvokeAsync<bool>("servora.copy", text))
+        {
+            Toasts.Success("Copied to clipboard");
+        }
+    }
+}

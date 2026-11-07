@@ -8,6 +8,12 @@ namespace Servora.Domain.Observability;
 /// </summary>
 public class AuditEvent : Entity
 {
+    /// <summary>
+    /// Gets or sets the 1-based position of the event in the hash chain. Assigned while the chain write lock is held, so
+    /// it reflects the exact chain order (timestamps can tie or interleave under concurrency).
+    /// </summary>
+    public long Sequence { get; set; }
+
     /// <summary>Gets or sets the UTC time of the event.</summary>
     public DateTimeOffset OccurredAt { get; set; }
 

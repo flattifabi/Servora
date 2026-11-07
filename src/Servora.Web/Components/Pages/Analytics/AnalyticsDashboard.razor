@@ -1,0 +1,274 @@
+@page "/analytics"
+@* Executive analytics dashboard: KPIs and charts computed from the modules installed at runtime, plus the user's pinned reports. *@
+@attribute [RequirePermission(Permissions.Analytics.Read)]
+@inject IAnalyticsService Analytics
+@inject IReportService Reports
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Analytics · Servora</PageTitle>
+
+<div class="analytics-hero">
+    <PageHeader Title="Executive dashboard" Icon="pie-chart"
+                Subtitle="Service performance, automation and platform health at a glance — computed live from your data.">
+        <Actions>
+            <div class="segmented">
+                @foreach (var days in s_periods)
+                {
+                    <button class="@(days == _period ? "active" : null)" @onclick="() => ChangePeriod(days)">@PeriodLabel(days)</button>
+                }
+            </div>
+            <button class="btn btn-secondary" @onclick="LoadAsync" disabled="@_loading" title="Refresh">
+                @if (_loading)
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="refresh" Size="16" />
+                }
+                Refresh
+            </button>
+            <a class="btn btn-primary" href="/analytics/reports"><Icon Name="bar-chart" Size="16" /> Report builder</a>
+        </Actions>
+    </PageHeader>
+
+    @if (_dashboard is { } meta)
+    {
+        <div class="hero-meta">
+            <span class="live-dot"></span>
+            <span>Updated <RelativeTime Value="meta.GeneratedAt" /> · computed in @meta.DurationMs ms</span>
+            <span class="divider-v"></span>
+            <span class="muted">Data sources:</span>
+            @if (meta.InstalledModules.Count == 0)
+            {
+                <span class="tag">Platform core</span>
+            }
+            else
+            {
+                <span class="tag"><Icon Name="check" Size="12" /> Platform core</span>
+                @foreach (var module in meta.InstalledModules)
+                {
+                    <span class="tag"><Icon Name="check" Size="12" /> @module</span>
+                }
+            }
+        </div>
+    }
+</div>
+
+@if (_dashboard is null)
+{
+    <div class="grid grid-4 mb-6">
+        @for (var i = 0; i < 8; i++)
+        {
+            <div class="card card-body"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    </div>
+    <div class="grid grid-2">
+        <div class="card card-body"><Skeleton Lines="8" Height="18px" /></div>
+        <div class="card card-body"><Skeleton Lines="8" Height="18px" /></div>
+    </div>
+}
+else
+{
+    var d = _dashboard;
+    <div class="grid grid-4 mb-6">
+        @foreach (var kpi in d.Kpis)
+        {
+            <div class="kpi-wrap @(kpi.Availability is AnalyticsAvailability.ModuleMissing or AnalyticsAvailability.Restricted ? "kpi-muted" : null)" title="@kpi.Caption">
+                <StatCard Label="@kpi.Label" Value="@kpi.Value" Icon="@kpi.Icon" Tone="@kpi.Tone" Delta="kpi.Delta" InvertDelta="kpi.InvertDelta"
+                          Caption="@kpi.Caption" Trend="@(kpi.Trend is { Count: > 1 } t && t.Any(v => v > 0) ? t : null)" />
+            </div>
+        }
+    </div>
+
+    <div class="dash-row wide-left mb-6">
+        <ChartCard Title="Incidents opened vs resolved" Subtitle="@($"Daily intake and throughput · {PeriodLabel(_period)}")" Icon="activity" Chart="d.Chart(AnalyticsChartKeys.IncidentTrend)">
+            <LineChart Labels="d.Chart(AnalyticsChartKeys.IncidentTrend).Labels" Series="ChartAdapters.ToSeries(d.Chart(AnalyticsChartKeys.IncidentTrend).Series)" Height="260" ValueFormat="0" />
+        </ChartCard>
+        <ChartCard Title="Open backlog by priority" Subtitle="Active incidents right now" Icon="flame" Chart="d.Chart(AnalyticsChartKeys.IncidentBacklog)">
+            <DonutChart Slices="ChartAdapters.ToSlices(d.Chart(AnalyticsChartKeys.IncidentBacklog).Slices)" CenterLabel="open" />
+        </ChartCard>
+    </div>
+
+    <div class="grid grid-3 mb-6">
+        <ChartCard Title="Mean time to resolve" Subtitle="Average hours from open to resolved" Icon="timer" Chart="d.Chart(AnalyticsChartKeys.Mttr)">
+            @{ var mttr = d.Chart(AnalyticsChartKeys.Mttr); }
+            <div class="headline"><span class="gradient-text">@(mttr.Headline?.ToString("0.0") ?? "—")</span><small>@mttr.Caption</small></div>
+            <LineChart Labels="mttr.Labels" Series="ChartAdapters.ToSeries(mttr.Series)" Height="170" ShowLegend="false" ValueFormat="0.#" />
+        </ChartCard>
+        <ChartCard Title="SLA compliance" Subtitle="Timers met within target" Icon="target" Chart="d.Chart(AnalyticsChartKeys.SlaCompliance)">
+            @{ var sla = d.Chart(AnalyticsChartKeys.SlaCompliance); }
+            <div class="flex items-center gap-6 flex-wrap justify-center">
+                <GaugeRing Value="sla.Headline ?? 0" Caption="@sla.Caption" />
+                <div class="stack" style="gap:10px;min-width:120px">
+                    @foreach (var slice in sla.Slices)
+                    {
+                        <div class="flex items-center gap-2 small"><span class="legend-dot" style="background:@slice.Color"></span><span class="muted flex-1">@slice.Label</span><b>@slice.Value.ToString("N0")</b></div>
+                    }
+                </div>
+            </div>
+        </ChartCard>
+        <ChartCard Title="Changes by state" Subtitle="All change requests" Icon="git-pull-request" Chart="d.Chart(AnalyticsChartKeys.ChangesByState)">
+            @{ var changes = d.Chart(AnalyticsChartKeys.ChangesByState); }
+            <BarChart Labels="changes.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Changes", changes.Slices.Select(s => s.Value).ToList(), "#a855f7")])" Height="230" ValueFormat="0" />
+        </ChartCard>
+    </div>
+
+    <div class="grid grid-3 mb-6">
+        <ChartCard Title="Requests by catalog item" Subtitle="Most requested items" Icon="shopping-cart" Chart="d.Chart(AnalyticsChartKeys.RequestsByItem)">
+            @{ var requests = d.Chart(AnalyticsChartKeys.RequestsByItem); }
+            <BarChart Labels="requests.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Requests", requests.Slices.Select(s => s.Value).ToList(), "#22d3ee")])" Horizontal="true" ValueFormat="0" />
+        </ChartCard>
+        <ChartCard Title="Top incident categories" Subtitle="@($"Incidents opened · {PeriodLabel(_period)}")" Icon="tag" Chart="d.Chart(AnalyticsChartKeys.TopCategories)">
+            @{ var categories = d.Chart(AnalyticsChartKeys.TopCategories); }
+            <BarChart Labels="categories.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Incidents", categories.Slices.Select(s => s.Value).ToList(), "#7c6cff")])" Horizontal="true" ValueFormat="0" />
+        </ChartCard>
+        <ChartCard Title="Automation outcomes" Subtitle="@($"Flow runs · {PeriodLabel(_period)}")" Icon="workflow" Chart="d.Chart(AnalyticsChartKeys.AutomationSuccess)">
+            @{ var automation = d.Chart(AnalyticsChartKeys.AutomationSuccess); }
+            <DonutChart Slices="ChartAdapters.ToSlices(automation.Slices)" CenterLabel="runs" />
+        </ChartCard>
+    </div>
+
+    <div class="dash-row wide-left mb-6">
+        <ChartCard Title="Audited activity" Subtitle="Successful, failed and denied operations per day" Icon="shield" Chart="d.Chart(AnalyticsChartKeys.AuditActivity)">
+            @{ var audit = d.Chart(AnalyticsChartKeys.AuditActivity); }
+            <LineChart Labels="audit.Labels" Series="ChartAdapters.ToSeries(audit.Series)" Height="240" ValueFormat="0" />
+        </ChartCard>
+        <ChartCard Title="Sign-ins" Subtitle="Successful interactive sign-ins" Icon="log-in" Chart="d.Chart(AnalyticsChartKeys.SignIns)">
+            @{ var signIns = d.Chart(AnalyticsChartKeys.SignIns); }
+            <BarChart Labels="signIns.Labels" Series="ChartAdapters.ToSeries(signIns.Series)" Height="240" ValueFormat="0" />
+        </ChartCard>
+    </div>
+
+    <div class="grid grid-2 mb-6">
+        <ChartCard Title="Configuration items by class" Subtitle="CMDB composition" Icon="server" Chart="d.Chart(AnalyticsChartKeys.CisByClass)">
+            <DonutChart Slices="ChartAdapters.ToSlices(d.Chart(AnalyticsChartKeys.CisByClass).Slices)" CenterLabel="CIs" />
+        </ChartCard>
+        <ChartCard Title="Users by source" Subtitle="Local, directory and Windows accounts" Icon="users" Chart="d.Chart(AnalyticsChartKeys.UsersBySource)">
+            <DonutChart Slices="ChartAdapters.ToSlices(d.Chart(AnalyticsChartKeys.UsersBySource).Slices)" CenterLabel="users" />
+        </ChartCard>
+    </div>
+
+    <div class="section-head">
+        <div>
+            <div class="eyebrow">Personal</div>
+            <h2>My dashboard</h2>
+            <div class="small muted">Reports you pinned from the report builder.</div>
+        </div>
+        <a class="btn btn-secondary btn-sm" href="/analytics/reports"><Icon Name="plus" Size="14" /> Pin a report</a>
+    </div>
+
+    @if (_pinned is null)
+    {
+        <div class="grid grid-2"><div class="card card-body"><Skeleton Lines="6" /></div><div class="card card-body"><Skeleton Lines="6" /></div></div>
+    }
+    else if (_pinned.Count == 0)
+    {
+        <div class="card">
+            <EmptyState Icon="pie-chart" Title="Your dashboard is empty"
+                        Text="Build a report — for example incidents by assignment group or CIs by class — and pin it here to keep an eye on what matters to you.">
+                <a class="btn btn-primary" href="/analytics/reports/new"><Icon Name="plus" Size="16" /> Create a report</a>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="pinned-grid">
+            @foreach (var pin in _pinned)
+            {
+                <div class="@(pin.Wide ? "pin-wide" : null)">
+                    <ChartCard Title="@pin.Report.Name" Subtitle="@($"{pin.Report.TableLabel}{(pin.Report.GroupBy is null ? null : " · by " + pin.Report.GroupBy)}")" Icon="@ChartAdapters.IconOf(pin.Report.ChartType)">
+                        <Actions>
+                            <div class="flex gap-1">
+                                <a class="icon-btn" href="@($"/analytics/reports/{pin.Report.Id}")" title="Open in report builder"><Icon Name="external-link" Size="15" /></a>
+                                <button class="icon-btn" title="@(pin.Wide ? "Normal width" : "Full width")" @onclick="() => ToggleWide(pin)"><Icon Name="maximize" Size="15" /></button>
+                                <button class="icon-btn" title="Unpin" @onclick="() => Unpin(pin)"><Icon Name="x" Size="15" /></button>
+                            </div>
+                        </Actions>
+                        <ChildContent>
+                            @if (pin.Result is not null)
+                            {
+                                <ReportChart Result="pin.Result" Height="240" />
+                            }
+                            else
+                            {
+                                <AnalyticsState Availability="AnalyticsAvailability.ModuleMissing" Message="@pin.Error" MinHeight="240" />
+                            }
+                        </ChildContent>
+                    </ChartCard>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private static readonly int[] s_periods = [7, 30, 90, 365];
+    private ExecutiveDashboard? _dashboard;
+    private IReadOnlyList<PinnedReport>? _pinned;
+    private int _period = 30;
+    private bool _loading;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private static string PeriodLabel(int days) => days switch
+    {
+        7 => "7 days",
+        30 => "30 days",
+        90 => "90 days",
+        _ => "12 months",
+    };
+
+    private async Task ChangePeriod(int days)
+    {
+        _period = days;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var dashboard = await Analytics.GetExecutiveDashboardAsync(_period);
+            if (dashboard.Succeeded)
+            {
+                _dashboard = dashboard.Value;
+            }
+            else
+            {
+                Toasts.Error("Dashboard unavailable", dashboard.Error);
+            }
+
+            var pinned = await Reports.GetPinnedAsync();
+            _pinned = pinned.Succeeded ? pinned.Value : [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Unpin(PinnedReport pin)
+    {
+        if (Toasts.FromResult(await Reports.UnpinAsync(pin.Report.Id), "Report unpinned"))
+        {
+            _pinned = _pinned?.Where(p => p.Report.Id != pin.Report.Id).ToList();
+        }
+    }
+
+    private async Task ToggleWide(PinnedReport pin)
+    {
+        var result = await Reports.PinAsync(pin.Report.Id, !pin.Wide);
+        if (result.Succeeded)
+        {
+            _pinned = _pinned?.Select(p => p.Report.Id == pin.Report.Id ? p with { Wide = !p.Wide } : p).ToList();
+        }
+        else
+        {
+            Toasts.FromResult(result, string.Empty);
+        }
+    }
+}

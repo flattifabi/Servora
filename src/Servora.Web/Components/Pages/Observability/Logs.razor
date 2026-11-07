@@ -1,0 +1,558 @@
+@page "/admin/logs"
+@* Log viewer: live tail of the in-memory log buffer with filters and detail drawer, runtime debug switch, log files and retention. *@
+@attribute [RequirePermission(Permissions.Observability.ReadLogs)]
+@implements IDisposable
+@inject ILoggingAdminService Logging
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Logs · Servora</PageTitle>
+
+<PageHeader Title="Logs" Icon="terminal" Subtitle="Live application log with secret redaction, correlation ids and a runtime debug switch — no restart needed.">
+    <Actions>
+        <button class="btn btn-secondary" @onclick="ToggleLive">
+            @if (_live)
+            {
+                <span class="live-dot"></span>
+                <span>Live</span>
+            }
+            else
+            {
+                <Icon Name="play" Size="16" />
+                <span>Resume</span>
+            }
+        </button>
+        <a class="btn btn-secondary" href="@ExportUrl" download><Icon Name="download" Size="16" /> Download filtered</a>
+        <button class="btn btn-secondary" @onclick="() => _filesOpen = true"><Icon Name="folder" Size="16" /> Log files</button>
+    </Actions>
+</PageHeader>
+
+@if (_overview is { } overview)
+{
+    <div class="debug-panel card highlight mb-6 @(overview.Levels.IsVerbose ? "verbose" : null)">
+        <div class="debug-head">
+            <div class="debug-title">
+                <div class="debug-icon"><Icon Name="@(overview.Levels.IsVerbose ? "zap" : "sliders")" Size="20" /></div>
+                <div>
+                    <div class="eyebrow">Debug switch</div>
+                    <h2>
+                        @if (overview.Levels.GlobalLevel is { } global)
+                        {
+                            <span>Global level: @global</span>
+                        }
+                        else
+                        {
+                            <span>Configuration default (@overview.ConfiguredDefault)</span>
+                        }
+                    </h2>
+                    <div class="small muted mt-1">
+                        @if (overview.Levels.Overrides.Count > 0)
+                        {
+                            <span>@overview.Levels.Overrides.Count category override(s) active · </span>
+                        }
+                        @if (overview.Levels.RevertAt is { } revertAt)
+                        {
+                            <span class="text-warning"><Icon Name="timer" Size="12" /> Reverts automatically <RelativeTime Value="revertAt" /> (@revertAt.ToLocalTime().ToString("t"))</span>
+                        }
+                        else if (overview.Levels.HasOverrides)
+                        {
+                            <span>Persistent until changed.</span>
+                        }
+                        else
+                        {
+                            <span>No runtime overrides — levels come from appsettings.json.</span>
+                        }
+                    </div>
+                </div>
+            </div>
+            @if (_canManage)
+            {
+                <div class="flex gap-2 flex-wrap">
+                    <button class="btn btn-secondary btn-sm" @onclick="() => QuickDebugAsync(30)" disabled="@_saving"><Icon Name="zap" Size="14" /> Debug for 30 min</button>
+                    @if (overview.Levels.HasOverrides)
+                    {
+                        <button class="btn btn-secondary btn-sm" @onclick="ResetAsync" disabled="@_saving"><Icon Name="refresh" Size="14" /> Reset to defaults</button>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (_canManage)
+        {
+            <div class="debug-body">
+                <div class="field">
+                    <label>Global minimum level</label>
+                    <div class="segmented">
+                        <button class="@(_global is null ? "active" : null)" @onclick="() => _global = null">Default</button>
+                        @foreach (var level in s_levels)
+                        {
+                            <button class="@(_global == level ? "active" : null)" @onclick="() => _global = level">@level</button>
+                        }
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Category overrides <span class="faint">(prefix match, e.g. Servora.Infrastructure or Microsoft.EntityFrameworkCore.Database.Command)</span></label>
+                    <div class="stack" style="gap:8px">
+                        @foreach (var row in _overrides)
+                        {
+                            <div class="override-row" @key="row">
+                                <input class="input mono" placeholder="Category prefix" list="log-categories" @bind="row.Prefix" />
+                                <select class="select" @bind="row.Level">
+                                    @foreach (var level in s_allLevels)
+                                    {
+                                        <option value="@level">@level</option>
+                                    }
+                                </select>
+                                <button class="icon-btn" title="Remove" @onclick="() => _overrides.Remove(row)"><Icon Name="x" Size="15" /></button>
+                            </div>
+                        }
+                        <div><button class="btn btn-ghost btn-sm" @onclick="() => _overrides.Add(new LogOverrideRow())"><Icon Name="plus" Size="14" /> Add override</button></div>
+                    </div>
+                </div>
+                <div class="flex items-end gap-3 flex-wrap">
+                    <div class="field">
+                        <label>Auto-revert</label>
+                        <select class="select" style="width:180px" @bind="_revertMinutes">
+                            <option value="0">Never (persistent)</option>
+                            <option value="15">after 15 minutes</option>
+                            <option value="30">after 30 minutes</option>
+                            <option value="60">after 1 hour</option>
+                            <option value="240">after 4 hours</option>
+                            <option value="1440">after 24 hours</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" @onclick="ApplyAsync" disabled="@_saving">
+                        @if (_saving)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="check" Size="16" />
+                        }
+                        Apply now
+                    </button>
+                    <span class="small faint">Applied instantly to every logger; persisted and audited.</span>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Buffered entries" Value="@overview.Statistics.Count.ToString("N0")" Icon="layers" Caption="@($"of {overview.Statistics.Capacity:N0} · {overview.Statistics.TotalWritten:N0} since start")" />
+        <StatCard Label="Errors" Value="@overview.Statistics.Errors.ToString("N0")" Icon="alert-octagon" Tone="@(overview.Statistics.Errors > 0 ? "danger" : "success")" Caption="error / critical in buffer" />
+        <StatCard Label="Warnings" Value="@overview.Statistics.Warnings.ToString("N0")" Icon="alert-triangle" Tone="warning" Caption="in buffer" />
+        <StatCard Label="Log files" Value="@overview.Files.Count.ToString("N0")" Icon="hard-drive" Tone="info" Caption="@($"{ChartAdapters.FormatBytes(overview.Files.Sum(f => f.SizeBytes))} · {overview.Retention.RetentionDays} days retention")" />
+    </div>
+}
+
+<datalist id="log-categories">
+    @foreach (var category in _overview?.Categories ?? [])
+    {
+        <option value="@category"></option>
+    }
+</datalist>
+
+<div class="log-table">
+    <DataTable TItem="LogEntry" Items="_entries" TotalCount="_entries.Count" ShowPager="false" Compact="true" MaxHeight="640px" Loading="_loading"
+               OnSearch="SearchAsync" SearchPlaceholder="Search message, exception, category…" OnRowClick="Open"
+               RowClass="RowClass" EmptyIcon="terminal" EmptyTitle="No log entries" EmptyText="No buffered entries match the filter. New entries appear here automatically while live tail is on.">
+        <Toolbar>
+            <select class="select" style="width:150px" value="@(_minLevel?.ToString() ?? string.Empty)" @onchange="e => SetLevelAsync(e.Value?.ToString())">
+                <option value="">All levels</option>
+                @foreach (var level in s_allLevels.Where(l => l != LogLevel.None))
+                {
+                    <option value="@level">≥ @level</option>
+                }
+            </select>
+            <input class="input" style="width:220px" placeholder="Category contains…" list="log-categories" value="@_category" @onchange="e => SetCategoryAsync(e.Value?.ToString())" />
+            <input class="input mono" style="width:200px" placeholder="Correlation id" value="@_correlationId" @onchange="e => SetCorrelationAsync(e.Value?.ToString())" />
+        </Toolbar>
+        <ToolbarEnd>
+            <span class="small faint">@_entries.Count.ToString("N0") shown@(_live ? " · live" : " · paused")</span>
+        </ToolbarEnd>
+        <Columns>
+            <DataColumn TItem="LogEntry" Title="Time" Width="120px">
+                <Template><span class="mono faint" title="@context.Timestamp.ToLocalTime().ToString("O")">@context.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff")</span></Template>
+            </DataColumn>
+            <DataColumn TItem="LogEntry" Title="Level" Width="64px">
+                <Template><LogLevelBadge Level="context.Level" /></Template>
+            </DataColumn>
+            <DataColumn TItem="LogEntry" Title="Category" Width="230px">
+                <Template><span class="mono small truncate category" title="@context.Category">@ShortCategory(context.Category)</span></Template>
+            </DataColumn>
+            <DataColumn TItem="LogEntry" Title="Message">
+                <Template>
+                    <span class="message">@context.Message</span>
+                    @if (context.Exception is not null)
+                    {
+                        <span class="pill pill-danger no-dot" style="margin-left:6px">exception</span>
+                    }
+                </Template>
+            </DataColumn>
+            <DataColumn TItem="LogEntry" Title="Correlation" Width="110px">
+                <Template>
+                    @if (context.CorrelationId is { } correlation)
+                    {
+                        <span class="mono small faint" title="@correlation">@correlation[..Math.Min(8, correlation.Length)]</span>
+                    }
+                </Template>
+            </DataColumn>
+        </Columns>
+    </DataTable>
+</div>
+
+<Drawer @bind-Open="_drawerOpen" Title="Log entry" Subtitle="@(_selected is null ? null : $"#{_selected.Sequence} · {_selected.Timestamp.ToLocalTime():G}")" Size="lg">
+    @if (_selected is { } entry)
+    {
+        <div class="stack" style="gap:18px">
+            <div class="flex items-center gap-2 flex-wrap">
+                <LogLevelBadge Level="entry.Level" />
+                <span class="mono small">@entry.Category</span>
+            </div>
+            <dl class="kv">
+                <dt>Timestamp (UTC)</dt>
+                <dd class="mono">@entry.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff")</dd>
+                <dt>Event</dt>
+                <dd>@(entry.EventId == 0 ? "—" : $"{entry.EventId}{(entry.EventName is null ? null : " · " + entry.EventName)}")</dd>
+                <dt>Correlation id</dt>
+                <dd>
+                    @if (entry.CorrelationId is { } correlation)
+                    {
+                        <span class="mono">@correlation</span>
+                        <button class="btn btn-ghost btn-sm" style="margin-left:6px" @onclick="() => FilterCorrelationAsync(correlation)"><Icon Name="filter" Size="13" /> Show request</button>
+                    }
+                    else
+                    {
+                        <span class="faint">—</span>
+                    }
+                </dd>
+            </dl>
+            <div>
+                <div class="eyebrow mb-2">Message</div>
+                <pre class="wrap">@entry.Message</pre>
+            </div>
+            @if (entry.Exception is not null)
+            {
+                <div>
+                    <div class="eyebrow mb-2">Exception</div>
+                    <pre class="wrap exception">@entry.Exception</pre>
+                </div>
+            }
+            @if (entry.Properties.Count > 0)
+            {
+                <div>
+                    <div class="eyebrow mb-2">Properties</div>
+                    <dl class="kv">
+                        @foreach (var (key, value) in entry.Properties)
+                        {
+                            <dt class="mono small">@key</dt>
+                            <dd class="mono small">@value</dd>
+                        }
+                    </dl>
+                </div>
+            }
+            <div class="alert alert-info"><Icon Name="shield-check" Size="16" /><div>Passwords, tokens, API keys and connection string secrets are redacted before entries are stored.</div></div>
+        </div>
+    }
+</Drawer>
+
+<Drawer @bind-Open="_filesOpen" Title="Log files" Subtitle="@_overview?.LogDirectory">
+    @if (_overview is { } o)
+    {
+        <div class="stack" style="gap:18px">
+            @if (o.Files.Count == 0)
+            {
+                <EmptyState Icon="folder" Title="No log files yet" Text="Files are written as JSON lines, one per day." />
+            }
+            else
+            {
+                <div class="stack" style="gap:8px">
+                    @foreach (var file in o.Files)
+                    {
+                        <div class="file-row">
+                            <Icon Name="file-text" Size="16" />
+                            <div class="flex-1" style="min-width:0">
+                                <div class="mono small truncate">@file.Name</div>
+                                <div class="tiny faint">@ChartAdapters.FormatBytes(file.SizeBytes) · <RelativeTime Value="file.LastWriteUtc" /></div>
+                            </div>
+                            <a class="btn btn-ghost btn-sm" href="@($"/observability/logs/files/{Uri.EscapeDataString(file.Name)}")" download><Icon Name="download" Size="14" /></a>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_canManage)
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="history" Size="16" /> Retention</h3></div>
+                    <div class="card-body">
+                        <div class="form-grid">
+                            <FormField Label="Keep files (days)" Help="1 – 365">
+                                <input class="input" type="number" min="1" max="365" @bind="_retentionDays" />
+                            </FormField>
+                            <FormField Label="Max file size (MB)" Help="Rolls over to a new file">
+                                <input class="input" type="number" min="1" max="1024" @bind="_maxFileSizeMb" />
+                            </FormField>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveRetentionAsync" disabled="@_saving"><Icon Name="save" Size="14" /> Save retention</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</Drawer>
+
+@code {
+    private static readonly LogLevel[] s_levels = [LogLevel.Warning, LogLevel.Information, LogLevel.Debug, LogLevel.Trace];
+    private static readonly LogLevel[] s_allLevels = [LogLevel.Trace, LogLevel.Debug, LogLevel.Information, LogLevel.Warning, LogLevel.Error, LogLevel.Critical, LogLevel.None];
+    private const int MaxShown = 500;
+
+    private readonly CancellationTokenSource _cts = new();
+    private List<LogEntry> _entries = [];
+    private LoggingOverview? _overview;
+    private LogEntry? _selected;
+    private List<LogOverrideRow> _overrides = [];
+    private LogLevel? _global;
+    private LogLevel? _minLevel;
+    private string? _category;
+    private string? _search;
+    private string? _correlationId;
+    private long _lastSequence;
+    private int _revertMinutes = 30;
+    private int _retentionDays = 14;
+    private int _maxFileSizeMb = 20;
+    private bool _live = true;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _canManage;
+    private bool _drawerOpen;
+    private bool _filesOpen;
+
+    /// <summary>Gets or sets a correlation id filter from the query string (links from the audit log).</summary>
+    [SupplyParameterFromQuery(Name = "correlationId")] public string? CorrelationIdQuery { get; set; }
+
+    private string ExportUrl
+    {
+        get
+        {
+            var query = new Dictionary<string, object?>
+            {
+                ["level"] = _minLevel?.ToString(),
+                ["category"] = _category,
+                ["search"] = _search,
+                ["correlationId"] = _correlationId,
+            };
+            return Nav.GetUriWithQueryParameters("/observability/logs/export", query);
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Observability.ManageLogs);
+        _correlationId = CorrelationIdQuery;
+        await LoadOverviewAsync(resetEditor: true);
+        await ReloadAsync();
+        _ = TailAsync(_cts.Token);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    private static string ShortCategory(string category)
+    {
+        var parts = category.Split('.');
+        return parts.Length <= 2 ? category : string.Join('.', parts[^2..]);
+    }
+
+    private static string? RowClass(LogEntry entry) => entry.Level switch
+    {
+        >= LogLevel.Error and < LogLevel.None => "row-error",
+        LogLevel.Warning => "row-warn",
+        <= LogLevel.Debug => "row-debug",
+        _ => null,
+    };
+
+    private LogQuery BuildQuery(long? after = null, int take = 300) => new()
+    {
+        MinLevel = _minLevel,
+        Category = _category,
+        Search = _search,
+        CorrelationId = _correlationId,
+        AfterSequence = after,
+        Take = take,
+    };
+
+    private async Task LoadOverviewAsync(bool resetEditor)
+    {
+        var result = await Logging.GetOverviewAsync();
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Logs unavailable", result.Error);
+            return;
+        }
+
+        _overview = result.Value!;
+        if (resetEditor)
+        {
+            _global = _overview.Levels.GlobalLevel;
+            _overrides = _overview.Levels.Overrides.Select(o => new LogOverrideRow { Prefix = o.Prefix, Level = o.Level }).ToList();
+            _retentionDays = _overview.Retention.RetentionDays;
+            _maxFileSizeMb = _overview.Retention.MaxFileSizeMb;
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        var result = await Logging.QueryAsync(BuildQuery());
+        _entries = result.Succeeded ? result.Value!.ToList() : [];
+        _lastSequence = Math.Max(_entries.Count == 0 ? 0 : _entries[0].Sequence, _overview?.Statistics.LastSequence ?? 0);
+        _loading = false;
+    }
+
+    private async Task TailAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        var ticks = 0;
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (!_live || _loading)
+                {
+                    continue;
+                }
+
+                var result = await Logging.QueryAsync(BuildQuery(_lastSequence, MaxShown));
+                if (result.Succeeded && result.Value!.Count > 0)
+                {
+                    _lastSequence = result.Value[0].Sequence;
+                    _entries = result.Value.Concat(_entries).Take(MaxShown).ToList();
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                if (++ticks % 5 == 0)
+                {
+                    await LoadOverviewAsync(resetEditor: false);
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Page closed.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Circuit disposed.
+        }
+    }
+
+    private void ToggleLive() => _live = !_live;
+
+    private async Task SetLevelAsync(string? value)
+    {
+        _minLevel = Enum.TryParse<LogLevel>(value, out var level) ? level : null;
+        await ReloadAsync();
+    }
+
+    private async Task SetCategoryAsync(string? value)
+    {
+        _category = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        await ReloadAsync();
+    }
+
+    private async Task SetCorrelationAsync(string? value)
+    {
+        _correlationId = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        await ReloadAsync();
+    }
+
+    private async Task SearchAsync(string value)
+    {
+        _search = string.IsNullOrWhiteSpace(value) ? null : value;
+        await ReloadAsync();
+    }
+
+    private async Task FilterCorrelationAsync(string correlationId)
+    {
+        _drawerOpen = false;
+        _correlationId = correlationId;
+        _minLevel = null;
+        await ReloadAsync();
+    }
+
+    private void Open(LogEntry entry)
+    {
+        _selected = entry;
+        _drawerOpen = true;
+    }
+
+    private async Task ApplyAsync()
+    {
+        _saving = true;
+        try
+        {
+            var update = new LogLevelUpdate(
+                _global,
+                _overrides.Where(o => !string.IsNullOrWhiteSpace(o.Prefix)).Select(o => new LogCategoryOverride(o.Prefix.Trim(), o.Level)).ToList(),
+                _revertMinutes > 0 ? _revertMinutes : null);
+            if (Toasts.FromResult(await Logging.UpdateLevelsAsync(update), "Log levels applied"))
+            {
+                await LoadOverviewAsync(resetEditor: true);
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task QuickDebugAsync(int minutes)
+    {
+        _global = LogLevel.Debug;
+        _revertMinutes = minutes;
+        await ApplyAsync();
+    }
+
+    private async Task ResetAsync()
+    {
+        _saving = true;
+        try
+        {
+            if (Toasts.FromResult(await Logging.ResetLevelsAsync(), "Log levels reset to configuration defaults"))
+            {
+                await LoadOverviewAsync(resetEditor: true);
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task SaveRetentionAsync()
+    {
+        _saving = true;
+        try
+        {
+            if (Toasts.FromResult(await Logging.UpdateRetentionAsync(new LogRetentionSettings(_retentionDays, _maxFileSizeMb)), "Retention saved"))
+            {
+                await LoadOverviewAsync(resetEditor: false);
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

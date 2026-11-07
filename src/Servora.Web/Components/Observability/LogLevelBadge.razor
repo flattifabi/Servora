@@ -1,0 +1,18 @@
+@* Fixed-width badge for a log level (TRC, DBG, INF, WRN, ERR, CRT) with a level-specific color. *@
+<span class="lvl lvl-@Level.ToString().ToLowerInvariant()" title="@Level">@Short</span>
+
+@code {
+    /// <summary>Gets or sets the level.</summary>
+    [Parameter] public LogLevel Level { get; set; }
+
+    private string Short => Level switch
+    {
+        LogLevel.Trace => "TRC",
+        LogLevel.Debug => "DBG",
+        LogLevel.Information => "INF",
+        LogLevel.Warning => "WRN",
+        LogLevel.Error => "ERR",
+        LogLevel.Critical => "CRT",
+        _ => "---",
+    };
+}

@@ -1,0 +1,14 @@
+.report-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    background: var(--gradient-soft);
+    color: var(--primary);
+    border: 1px solid var(--border);
+}
+
+.pinned { color: var(--warning) !important; }
+.pinned ::deep svg { fill: currentColor; }
