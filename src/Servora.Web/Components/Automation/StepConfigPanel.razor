@@ -1,0 +1,275 @@
+@* Configuration of one flow step (drawer body): general settings, type-specific fields with data pills, error handling, outputs. *@
+
+<div class="scp">
+    <div class="scp-head" style="--tone:@FlowUi.ToneColor(Descriptor?.Tone);--tone-soft:@FlowUi.ToneSoft(Descriptor?.Tone)">
+        <span class="scp-icon"><Icon Name="@(Descriptor?.Icon ?? "alert-triangle")" Size="20" /></span>
+        <div class="min-w-0">
+            <div class="scp-type">@(Descriptor?.Name ?? Step.Type)</div>
+            <div class="small muted">@(Descriptor?.Description ?? "This step type is not available. Remove the step or install the module providing it.")</div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">General</div>
+        <div class="form-grid">
+            <FormField Label="Name" Required="true">
+                <input class="input" value="@Step.Name" disabled="@ReadOnly" @onchange="e => SetAsync(() => Step.Name = e.Value?.ToString() ?? string.Empty)" />
+            </FormField>
+            <FormField Label="Data pill key" Help="@($"Later steps use {{{{steps.{Step.Key}.…}}}}")" Error="@(FlowDefinitionValidator.IsValidKey(Step.Key) ? null : "Letters, digits and underscore; starts with a letter.")">
+                <input class="input mono" value="@Step.Key" disabled="@ReadOnly" @onchange="e => SetAsync(() => Step.Key = e.Value?.ToString()?.Trim() ?? string.Empty)" />
+            </FormField>
+        </div>
+    </div>
+
+    @if (Descriptor is not null && Descriptor.Fields.Count > 0)
+    {
+        <div class="form-section">
+            <div class="form-section-title">Configuration</div>
+            <div class="stack">
+                @foreach (var field in Descriptor.Fields)
+                {
+                    var value = Step.GetConfig(field.Key);
+                    <FormField Label="@field.Label" Required="field.Required" Help="@field.Help" @key="field.Key">
+                        @switch (field.Kind)
+                        {
+                            case FlowActionFieldKind.Multiline:
+                                <PillInput Value="@value" ValueChanged="v => SetConfigAsync(field.Key, v)" Pills="Pills" Multiline="true" Rows="5" Placeholder="@field.Placeholder" Disabled="ReadOnly" ShowPicker="field.SupportsPills" />
+                                break;
+                            case FlowActionFieldKind.Text:
+                            case FlowActionFieldKind.Number:
+                                <PillInput Value="@value" ValueChanged="v => SetConfigAsync(field.Key, v)" Pills="Pills" Placeholder="@(field.Placeholder ?? field.DefaultValue)" Disabled="ReadOnly" ShowPicker="field.SupportsPills" />
+                                break;
+                            case FlowActionFieldKind.Select:
+                                <select class="select" value="@(value ?? field.DefaultValue)" disabled="@ReadOnly" @onchange="e => SetConfigAsync(field.Key, e.Value?.ToString())">
+                                    @foreach (var option in field.Options)
+                                    {
+                                        <option value="@option.Value">@option.Label</option>
+                                    }
+                                </select>
+                                break;
+                            case FlowActionFieldKind.Table:
+                                <select class="select" value="@value" disabled="@ReadOnly" @onchange="e => SetConfigAsync(field.Key, e.Value?.ToString())">
+                                    <option value="">— Select a table —</option>
+                                    @foreach (var table in Tables.OrderBy(t => t.Label))
+                                    {
+                                        <option value="@table.Name">@table.Label (@table.Name)</option>
+                                    }
+                                </select>
+                                break;
+                            case FlowActionFieldKind.RecordValues:
+                                <FieldValuesEditor Value="@value" ValueChanged="v => SetConfigAsync(field.Key, v)" Fields="FieldsOf(field.TableFieldKey)" Pills="Pills" />
+                                break;
+                            case FlowActionFieldKind.Condition:
+                                <FlowConditionEditor Value="@value" ValueChanged="v => SetConfigAsync(field.Key, v)" Pills="Pills" />
+                                break;
+                            case FlowActionFieldKind.RecordCondition:
+                                var fields = FieldsOf(field.TableFieldKey);
+                                if (fields.Count == 0)
+                                {
+                                    <div class="small faint">Choose a table first to build the filter.</div>
+                                }
+                                else
+                                {
+                                    <ConditionBuilder Condition="GetConditionGroup(field.Key, value)" ConditionChanged="g => SetConditionAsync(field.Key, g)" Fields="fields" />
+                                    <div class="tiny faint mt-1">Type data pills such as <span class="mono">{{trigger.record.CallerId}}</span> into values.</div>
+                                }
+
+                                break;
+                            case FlowActionFieldKind.DataSource:
+                                <select class="select" value="@value" disabled="@ReadOnly" @onchange="e => SetConfigAsync(field.Key, e.Value?.ToString())">
+                                    <option value="">— Select a data source —</option>
+                                    @foreach (var source in DataSources.OrderBy(s => s.Name))
+                                    {
+                                        <option value="@source.Id">@source.Name</option>
+                                    }
+                                </select>
+                                @if (DataSources.Count == 0)
+                                {
+                                    <div class="tiny faint mt-1">No enabled data sources. <a href="/integration/datasources">Configure one</a>.</div>
+                                }
+
+                                break;
+                            case FlowActionFieldKind.DataSourceEndpoint:
+                                var dataSource = DataSourceOf(field.TableFieldKey);
+                                <select class="select" value="@value" disabled="@(ReadOnly || dataSource is null)" @onchange="e => SetConfigAsync(field.Key, e.Value?.ToString())">
+                                    <option value="">@(dataSource is null ? "Choose a data source first" : "— Select an endpoint —")</option>
+                                    @if (dataSource is not null)
+                                    {
+                                        @foreach (var endpoint in dataSource.Endpoints)
+                                        {
+                                            <option value="@endpoint.Key">@endpoint.Method @endpoint.Name (@endpoint.Key)</option>
+                                        }
+                                    }
+                                </select>
+                                break;
+                            case FlowActionFieldKind.KeyValues:
+                                <KeyValueEditor Value="@value" ValueChanged="v => SetConfigAsync(field.Key, v)" Pills="Pills" SuggestedNames="SuggestedNames()" />
+                                break;
+                            case FlowActionFieldKind.Flow:
+                                <select class="select" value="@value" disabled="@ReadOnly" @onchange="e => SetConfigAsync(field.Key, e.Value?.ToString())">
+                                    <option value="">— Select a flow —</option>
+                                    @foreach (var flow in Flows.Where(f => f.Id != CurrentFlowId).OrderBy(f => f.Name))
+                                    {
+                                        <option value="@flow.Id">@(flow.IsActive ? flow.Name : flow.Name + " (inactive)")</option>
+                                    }
+                                </select>
+                                break;
+                        }
+                    </FormField>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="form-section">
+        <div class="form-section-title">Error handling</div>
+        <div class="form-grid">
+            <FormField Label="Retries" Help="For transient failures (timeouts, HTTP 5xx). 0 – 5.">
+                <input class="input" type="number" min="0" max="5" value="@Step.RetryCount" disabled="@ReadOnly" @onchange="e => SetAsync(() => Step.RetryCount = ParseInt(e.Value, 0, 5))" />
+            </FormField>
+            <FormField Label="Retry delay (seconds)" Help="Doubles with every attempt (exponential backoff).">
+                <input class="input" type="number" min="0" max="300" value="@Step.RetryDelaySeconds" disabled="@ReadOnly" @onchange="e => SetAsync(() => Step.RetryDelaySeconds = ParseInt(e.Value, 0, 300))" />
+            </FormField>
+        </div>
+        <div class="flex flex-wrap gap-6 mt-3">
+            <Switch Value="Step.ContinueOnError" ValueChanged="v => SetAsync(() => Step.ContinueOnError = v)" Label="Continue when this step fails" Disabled="ReadOnly" />
+            <Switch Value="Step.Disabled" ValueChanged="v => SetAsync(() => Step.Disabled = v)" Label="Skip this step" Disabled="ReadOnly" />
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">Notes</div>
+        <textarea class="textarea" rows="2" placeholder="Why does this step exist?" disabled="@ReadOnly" @onchange="e => SetAsync(() => Step.Notes = e.Value?.ToString())">@Step.Notes</textarea>
+    </div>
+
+    @if (Descriptor is { Outputs.Count: > 0 })
+    {
+        <div class="form-section">
+            <div class="form-section-title">Outputs (data pills for later steps)</div>
+            <div class="scp-outputs">
+                @foreach (var output in Descriptor.Outputs)
+                {
+                    <div class="scp-output">
+                        <span class="scp-pill">@output.Label</span>
+                        <span class="mono tiny faint">{{steps.@(Step.Key).@(output.Key)}}</span>
+                    </div>
+                }
+                @if (Step.ContinueOnError)
+                {
+                    <div class="scp-output">
+                        <span class="scp-pill">Error message</span>
+                        <span class="mono tiny faint">{{steps.@(Step.Key).error}}</span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly Dictionary<string, ConditionGroup> _groups = [];
+    private string? _stepId;
+
+    /// <summary>Gets or sets the step being configured (edited in place).</summary>
+    [Parameter, EditorRequired] public FlowStepDefinition Step { get; set; } = default!;
+
+    /// <summary>Gets or sets the step type descriptor.</summary>
+    [Parameter] public FlowActionDescriptor? Descriptor { get; set; }
+
+    /// <summary>Gets or sets the data pills available to this step.</summary>
+    [Parameter] public IReadOnlyList<FlowDataPill> Pills { get; set; } = [];
+
+    /// <summary>Gets or sets the tables of the instance.</summary>
+    [Parameter] public IReadOnlyList<TableDefinition> Tables { get; set; } = [];
+
+    /// <summary>Gets or sets the data sources the designer may use.</summary>
+    [Parameter] public IReadOnlyList<DataSourceSummary> DataSources { get; set; } = [];
+
+    /// <summary>Gets or sets the flows available as sub-flows.</summary>
+    [Parameter] public IReadOnlyList<FlowSummary> Flows { get; set; } = [];
+
+    /// <summary>Gets or sets the flow being designed (excluded from the sub-flow picker).</summary>
+    [Parameter] public Guid CurrentFlowId { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether editing is disabled.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Raised after the step changed.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (_stepId != Step.Id)
+        {
+            _stepId = Step.Id;
+            _groups.Clear();
+        }
+    }
+
+    private IReadOnlyList<FieldDefinition> FieldsOf(string? tableFieldKey)
+    {
+        var tableName = tableFieldKey is null ? null : Step.GetConfig(tableFieldKey);
+        return string.IsNullOrWhiteSpace(tableName)
+            ? []
+            : Tables.FirstOrDefault(t => string.Equals(t.Name, tableName, StringComparison.OrdinalIgnoreCase))?.Fields ?? [];
+    }
+
+    private DataSourceSummary? DataSourceOf(string? fieldKey)
+    {
+        var raw = fieldKey is null ? null : Step.GetConfig(fieldKey);
+        return Guid.TryParse(raw, out var id) ? DataSources.FirstOrDefault(s => s.Id == id) : null;
+    }
+
+    private IReadOnlyList<string> SuggestedNames()
+    {
+        var endpointField = Descriptor?.Fields.FirstOrDefault(f => f.Kind == FlowActionFieldKind.DataSourceEndpoint);
+        if (endpointField is null)
+        {
+            return [];
+        }
+
+        var key = Step.GetConfig(endpointField.Key);
+        return DataSourceOf(endpointField.TableFieldKey)?.Endpoints.FirstOrDefault(e => e.Key == key)?.Parameters ?? [];
+    }
+
+    private ConditionGroup GetConditionGroup(string key, string? json)
+    {
+        if (!_groups.TryGetValue(key, out var group))
+        {
+            group = ConditionSerializer.Deserialize(json);
+            _groups[key] = group;
+        }
+
+        return group;
+    }
+
+    private Task SetConditionAsync(string key, ConditionGroup group)
+    {
+        _groups[key] = group;
+        return SetConfigAsync(key, group.IsEmpty ? null : ConditionSerializer.Serialize(group));
+    }
+
+    private Task SetConfigAsync(string key, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            Step.Config.Remove(key);
+        }
+        else
+        {
+            Step.Config[key] = value;
+        }
+
+        return OnChanged.InvokeAsync();
+    }
+
+    private Task SetAsync(Action change)
+    {
+        change();
+        return OnChanged.InvokeAsync();
+    }
+
+    private static int ParseInt(object? value, int min, int max) =>
+        int.TryParse(value?.ToString(), out var parsed) ? Math.Clamp(parsed, min, max) : min;
+}

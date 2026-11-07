@@ -1,0 +1,3 @@
+.sched-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--primary); background: var(--primary-soft); }
+.sched-datasourcepoll { color: var(--info); background: var(--info-soft); }
+.sched-import { color: var(--accent); background: var(--accent-soft); }

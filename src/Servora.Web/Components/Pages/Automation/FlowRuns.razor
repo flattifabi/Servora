@@ -1,0 +1,247 @@
+@page "/automation/runs"
+@* Execution history: KPIs, status / flow filters, live auto-refresh and a paged run table with status pills and durations. *@
+@attribute [RequirePermission(Permissions.Automation.Read)]
+@implements IDisposable
+@inject IFlowRunService RunService
+@inject IFlowService FlowService
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Executions · Servora</PageTitle>
+
+<PageHeader Title="Executions" Subtitle="Every flow run with its trigger, status, duration and step history." Icon="activity">
+    <Actions>
+        <button class="btn @(_live ? "btn-primary" : "btn-secondary")" @onclick="ToggleLive">
+            @if (_live) { <span class="live-dot"></span> } else { <Icon Name="play" Size="16" /> }
+            @(_live ? "Live" : "Auto-refresh")
+        </button>
+        <button class="btn btn-secondary" disabled="@_loading" @onclick="RefreshAsync"><Icon Name="refresh" Size="16" /> Refresh</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_overview is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Runs (24 h)" Value="@_overview.Runs24h.ToString("N0")" Icon="activity" Tone="primary" Trend="_overview.HourlyRuns" OnClick="() => SetStatusAsync(null)" />
+        <StatCard Label="In progress" Value="@_overview.Running.ToString("N0")" Icon="loader" Tone="info" Caption="queued or running" OnClick="() => SetStatusAsync(FlowRunStatus.Running)" />
+        <StatCard Label="Waiting" Value="@_overview.Waiting.ToString("N0")" Icon="pause" Tone="warning" Caption="timers, approvals, sub-flows" OnClick="() => SetStatusAsync(FlowRunStatus.Waiting)" />
+        <StatCard Label="Failed (24 h)" Value="@_overview.Failed24h.ToString("N0")" Icon="alert-octagon" Tone="@(_overview.Failed24h > 0 ? "danger" : "success")"
+                  Caption="@($"{_overview.SuccessRate:0.#} % success")" OnClick="() => SetStatusAsync(FlowRunStatus.Failed)" />
+    }
+</div>
+
+<DataTable TItem="FlowRunListItem" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize"
+           Loading="_loading && _page.Items.Count == 0" SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync"
+           OnRowClick="@(r => Nav.NavigateTo($"/automation/runs/{r.Id}"))" SearchPlaceholder="Search flow, trigger or error…"
+           EmptyIcon="activity" EmptyTitle="No executions" EmptyText="Runs appear here as soon as a flow is triggered or tested.">
+    <Toolbar>
+        <div class="segmented" style="flex-wrap:wrap">
+            <button class="@(_status is null ? "active" : null)" @onclick="() => SetStatusAsync(null)">All</button>
+            @foreach (var status in Enum.GetValues<FlowRunStatus>())
+            {
+                <button class="@(_status == status ? "active" : null)" @onclick="() => SetStatusAsync(status)">@status</button>
+            }
+        </div>
+        <select class="select" style="width:auto;max-width:260px" value="@(_flowId?.ToString() ?? string.Empty)" @onchange="SetFlowAsync">
+            <option value="">All flows</option>
+            @foreach (var flow in _flows)
+            {
+                <option value="@flow.Id">@flow.Name</option>
+            }
+        </select>
+        <label class="checkbox small"><input type="checkbox" checked="@_includeTests" @onchange="ToggleTestsAsync" /> Include test runs</label>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="FlowRunListItem" Title="Status" SortKey="Status" Width="130px">
+            <Template><StatusPill Text="@context.Status.ToString()" Tone="@FlowUi.RunTone(context.Status)" /></Template>
+        </DataColumn>
+        <DataColumn TItem="FlowRunListItem" Title="Flow" SortKey="Flow">
+            <Template>
+                <span class="cell-primary flex items-center gap-2">
+                    @context.FlowName
+                    @if (context.IsTest)
+                    {
+                        <span class="pill pill-purple no-dot">Test</span>
+                    }
+                </span>
+                <span class="cell-sub truncate" style="display:block;max-width:min(460px, 30vw)" title="@(context.Error ?? context.WaitReason ?? context.TriggerSummary)">
+                    @if (context.Error is not null)
+                    {
+                        <span class="text-danger">@context.Error</span>
+                    }
+                    else if (context.Status == FlowRunStatus.Waiting && context.WaitReason is not null)
+                    {
+                        <span class="text-warning">@context.WaitReason</span>
+                    }
+                    else
+                    {
+                        @(context.TriggerSummary ?? FlowUi.TriggerLabel(context.TriggerType))
+                    }
+                </span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="FlowRunListItem" Title="Trigger" Width="170px">
+            <Template><span class="small flex items-center gap-2"><Icon Name="@FlowUi.TriggerIcon(context.TriggerType)" Size="14" Class="faint" /> @FlowUi.TriggerLabel(context.TriggerType)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="FlowRunListItem" Title="Steps" Width="80px" Align="right">
+            <Template><span class="mono small">@context.StepCount</span></Template>
+        </DataColumn>
+        <DataColumn TItem="FlowRunListItem" Title="Duration" Width="110px" Align="right">
+            <Template><span class="mono small muted">@FlowUi.Duration(context.DurationMs)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="FlowRunListItem" Title="Queued" SortKey="QueuedAt" Width="130px">
+            <Template><RelativeTime Value="context.QueuedAt" Class="small muted" /></Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private PagedResult<FlowRunListItem> _page = PagedResult<FlowRunListItem>.Empty();
+    private FlowOverview? _overview;
+    private IReadOnlyList<FlowSummary> _flows = [];
+    private FlowRunStatus? _status;
+    private Guid? _flowId;
+    private bool _includeTests = true;
+    private string _sort = "QueuedAt";
+    private bool _desc = true;
+    private string? _search;
+    private int _pageNumber = 1;
+    private bool _loading = true;
+    private bool _live;
+    private CancellationTokenSource? _liveCts;
+
+    /// <summary>Gets or sets the flow filter from the query string.</summary>
+    [SupplyParameterFromQuery(Name = "flow")] public Guid? FlowParameter { get; set; }
+
+    /// <summary>Gets or sets the status filter from the query string.</summary>
+    [SupplyParameterFromQuery(Name = "status")] public string? StatusParameter { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _flowId = FlowParameter;
+        _status = Enum.TryParse<FlowRunStatus>(StatusParameter, true, out var status) ? status : null;
+        _flows = await FlowService.ListAllAsync();
+        await RefreshAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await RunService.ListAsync(new FlowRunQuery
+        {
+            Page = new PageRequest { Page = _pageNumber, PageSize = 25, SortBy = _sort, SortDescending = _desc, Search = _search },
+            Status = _status,
+            FlowId = _flowId,
+            IncludeTests = _includeTests,
+        });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Could not load executions", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadAsync();
+        var overview = await FlowService.GetOverviewAsync();
+        if (overview.Succeeded)
+        {
+            _overview = overview.Value;
+        }
+    }
+
+    private async Task SetStatusAsync(FlowRunStatus? status)
+    {
+        _status = status;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SetFlowAsync(ChangeEventArgs e)
+    {
+        _flowId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task ToggleTestsAsync(ChangeEventArgs e)
+    {
+        _includeTests = e.Value is true;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private void ToggleLive()
+    {
+        _live = !_live;
+        _liveCts?.Cancel();
+        _liveCts?.Dispose();
+        _liveCts = null;
+        if (_live)
+        {
+            _liveCts = new CancellationTokenSource();
+            _ = LiveLoopAsync(_liveCts.Token);
+        }
+    }
+
+    private async Task LiveLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Live mode switched off or page left.
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _liveCts?.Cancel();
+        _liveCts?.Dispose();
+    }
+}

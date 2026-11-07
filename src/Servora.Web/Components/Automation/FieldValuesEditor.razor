@@ -1,0 +1,86 @@
+@* Editor for "Field = value" assignments of create / update record steps (stored as JSON array of FlowFieldValue). *@
+<div class="kv-editor">
+    @foreach (var row in _rows)
+    {
+        <div class="kv-row" @key="row">
+            <select class="select" value="@row.Field" @onchange="e => SetField(row, e.Value?.ToString())">
+                <option value="">— Field —</option>
+                @foreach (var field in WritableFields)
+                {
+                    <option value="@field.Name">@field.Label</option>
+                }
+                @if (!string.IsNullOrEmpty(row.Field) && WritableFields.All(f => !string.Equals(f.Name, row.Field, StringComparison.OrdinalIgnoreCase)))
+                {
+                    <option value="@row.Field">@row.Field</option>
+                }
+            </select>
+            <PillInput Value="@row.Value" ValueChanged="v => SetValue(row, v)" Pills="Pills" Placeholder="Value or {{data pill}}" />
+            <button type="button" class="icon-btn" title="Remove" @onclick="() => Remove(row)"><Icon Name="x" Size="15" /></button>
+        </div>
+    }
+    <button type="button" class="btn btn-ghost btn-sm" @onclick="Add"><Icon Name="plus" Size="14" /> Add field</button>
+    @if (Fields.Count == 0)
+    {
+        <div class="small faint">Choose a table first to pick fields.</div>
+    }
+</div>
+
+@code {
+    private List<FlowFieldValue> _rows = [];
+    private string? _lastJson;
+
+    /// <summary>Gets or sets the JSON value.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Raised when the value changes.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets the fields of the target table.</summary>
+    [Parameter] public IReadOnlyList<FieldDefinition> Fields { get; set; } = [];
+
+    /// <summary>Gets or sets the available data pills.</summary>
+    [Parameter] public IReadOnlyList<FlowDataPill> Pills { get; set; } = [];
+
+    private IEnumerable<FieldDefinition> WritableFields => Fields.Where(f => !f.IsReadOnly).OrderBy(f => f.Label);
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Value != _lastJson)
+        {
+            _rows = FlowJson.TryDeserialize<List<FlowFieldValue>>(Value) ?? [];
+            _lastJson = Value;
+        }
+    }
+
+    private Task Add()
+    {
+        _rows.Add(new FlowFieldValue());
+        return NotifyAsync();
+    }
+
+    private Task Remove(FlowFieldValue row)
+    {
+        _rows.Remove(row);
+        return NotifyAsync();
+    }
+
+    private Task SetField(FlowFieldValue row, string? field)
+    {
+        row.Field = field ?? string.Empty;
+        return NotifyAsync();
+    }
+
+    private Task SetValue(FlowFieldValue row, string? value)
+    {
+        row.Value = value;
+        return NotifyAsync();
+    }
+
+    private async Task NotifyAsync()
+    {
+        _lastJson = FlowJson.Serialize(_rows);
+        Value = _lastJson;
+        await ValueChanged.InvokeAsync(_lastJson);
+    }
+}

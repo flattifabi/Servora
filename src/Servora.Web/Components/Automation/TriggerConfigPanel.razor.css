@@ -1,0 +1,6 @@
+.tcp { display: flex; flex-direction: column; gap: 4px; }
+.tcp-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.tcp-type { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: var(--r); cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; text-align: left; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); transition: all var(--speed) var(--ease); }
+.tcp-type:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.tcp-type.active { color: var(--text); border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px var(--primary-soft); }
+.tcp-type.active ::deep svg { color: var(--primary); }

@@ -1,0 +1,590 @@
+@page "/integration/datasources/new"
+@page "/integration/datasources/{Id:guid}"
+@* Data source record: connection and limits form, write-only credential card, endpoints with editor drawer, endpoint tester and execution log. *@
+@attribute [RequirePermission(Permissions.Integration.ReadDataSources)]
+@inject IDataSourceAdminService DataSourceService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(IsNew ? "New data source" : _model?.Name ?? "Data source") · Servora</PageTitle>
+
+@if (_notFound)
+{
+    <div class="card">
+        <EmptyState Icon="plug" Title="Data source not found" Text="The data source does not exist or was deleted.">
+            <a class="btn btn-primary" href="/integration/datasources"><Icon Name="arrow-left" Size="16" /> Back to data sources</a>
+        </EmptyState>
+    </div>
+}
+else if (_model is null)
+{
+    <div class="stack">
+        <Skeleton Lines="2" Height="28px" Width="40%" />
+        <div class="grid grid-sidebar">
+            <div class="card card-body"><Skeleton Lines="8" Height="38px" /></div>
+            <div class="card card-body"><Skeleton Lines="6" Height="18px" /></div>
+        </div>
+    </div>
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New data source" : _model.Name)" Icon="plug">
+        <Breadcrumbs>
+            <a href="/integration/datasources">Data Sources</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New" : _model.Name)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (IsNew)
+            {
+                <div class="subtitle">Connect a REST API. Only endpoints you approve below can ever be called.</div>
+            }
+            else
+            {
+                <div class="flex items-center gap-2 flex-wrap mt-1">
+                    <StatusPill Text="@(_model.IsEnabled ? "Enabled" : "Disabled")" Tone="@(_model.IsEnabled ? "success" : "neutral")" />
+                    <span class="tag"><Icon Name="lock" Size="12" /> @FlowUi.AuthLabel(_model.AuthType)</span>
+                    <span class="tag mono">@_model.BaseUrl</span>
+                    <span class="small faint">updated <RelativeTime Value="_model.UpdatedAt" /> by @(_model.UpdatedBy ?? "system")</span>
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (_canManage)
+            {
+                @if (!IsNew)
+                {
+                    <button class="btn btn-ghost" @onclick="() => _deleteOpen = true"><Icon Name="trash" Size="16" /> Delete</button>
+                }
+                <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                    @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                    @(IsNew ? "Create data source" : "Save")
+                </button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <div class="grid grid-sidebar">
+        <div class="card">
+            <div class="card-body">
+                <div class="form-section">
+                    <div class="form-section-title">Connection</div>
+                    <div class="form-grid">
+                        <FormField Label="Name" Required="true">
+                            <input class="input" @bind="_model.Name" disabled="@(!_canManage)" placeholder="GitHub API" />
+                        </FormField>
+                        <FormField Label="Base URL" Required="true" Help="HTTPS required unless plain HTTP is allowed below.">
+                            <input class="input mono" @bind="_model.BaseUrl" disabled="@(!_canManage)" placeholder="https://api.example.com" />
+                        </FormField>
+                        <FormField Label="Description" Class="span-all">
+                            <input class="input" @bind="_model.Description" disabled="@(!_canManage)" />
+                        </FormField>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Authentication</div>
+                    <div class="auth-types">
+                        @foreach (var type in Enum.GetValues<DataSourceAuthType>())
+                        {
+                            <button type="button" class="auth-type @(_model.AuthType == type ? "active" : null)" disabled="@(!_canManage)" @onclick="() => _model.AuthType = type">
+                                <Icon Name="@AuthIcon(type)" Size="16" /> @FlowUi.AuthLabel(type)
+                            </button>
+                        }
+                    </div>
+                    <div class="form-grid mt-4">
+                        @switch (_model.AuthType)
+                        {
+                            case DataSourceAuthType.ApiKeyHeader:
+                                <FormField Label="Header name" Required="true">
+                                    <input class="input mono" @bind="_model.ApiKeyHeaderName" disabled="@(!_canManage)" placeholder="X-API-Key" />
+                                </FormField>
+                                break;
+                            case DataSourceAuthType.Basic:
+                                <FormField Label="User name" Required="true">
+                                    <input class="input" @bind="_model.BasicUserName" disabled="@(!_canManage)" />
+                                </FormField>
+                                break;
+                            case DataSourceAuthType.OAuth2ClientCredentials:
+                                <FormField Label="Token URL" Required="true" Help="Also protected by the SSRF guard.">
+                                    <input class="input mono" @bind="_model.OAuthTokenUrl" disabled="@(!_canManage)" placeholder="https://login.example.com/oauth2/token" />
+                                </FormField>
+                                <FormField Label="Client id" Required="true">
+                                    <input class="input mono" @bind="_model.OAuthClientId" disabled="@(!_canManage)" />
+                                </FormField>
+                                <FormField Label="Scope">
+                                    <input class="input mono" @bind="_model.OAuthScope" disabled="@(!_canManage)" />
+                                </FormField>
+                                break;
+                        }
+                    </div>
+                    @if (_model.AuthType != DataSourceAuthType.None)
+                    {
+                        <div class="small faint mt-2">The @CredentialLabel.ToLowerInvariant() is stored encrypted in the secret store – use the credential card.</div>
+                    }
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Default headers</div>
+                    <KeyValueEditor Value="@HeadersJson" ValueChanged="SetHeaders" ShowPills="false" SuggestedNames="s_headerSuggestions" />
+                    <div class="tiny faint mt-2">Authorization, Cookie, Host and hop-by-hop headers are not allowed here.</div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Limits &amp; safety</div>
+                    <div class="form-grid cols-3">
+                        <FormField Label="Timeout (seconds)" Help="1 – 120">
+                            <input class="input" type="number" min="1" max="120" @bind="_model.TimeoutSeconds" disabled="@(!_canManage)" />
+                        </FormField>
+                        <FormField Label="Retries" Help="On timeouts, 429 and 5xx (0 – 5)">
+                            <input class="input" type="number" min="0" max="5" @bind="_model.MaxRetries" disabled="@(!_canManage)" />
+                        </FormField>
+                        <FormField Label="Rate limit (calls / min)" Help="1 – 10 000">
+                            <input class="input" type="number" min="1" max="10000" @bind="_model.RateLimitPerMinute" disabled="@(!_canManage)" />
+                        </FormField>
+                        <FormField Label="Max response size (bytes)" Help="@($"Currently {FlowUi.Bytes(_model.MaxResponseBytes)} (max. 10 MB)")">
+                            <input class="input" type="number" min="1024" max="10485760" @bind="_model.MaxResponseBytes" disabled="@(!_canManage)" />
+                        </FormField>
+                    </div>
+                    <div class="flex flex-wrap gap-6 mt-3">
+                        <Switch @bind-Value="_model.IsEnabled" Label="Enabled" Disabled="!_canManage" />
+                        <Switch @bind-Value="_model.AllowHttp" Label="Allow plain HTTP (not recommended)" Disabled="!_canManage" />
+                    </div>
+                    @if (_model.AllowHttp)
+                    {
+                        <div class="alert alert-warning mt-3"><Icon Name="alert-triangle" Size="16" /><div>Credentials and data travel unencrypted. Basic authentication is refused over HTTP.</div></div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="sticky-top stack">
+            <div class="card">
+                <div class="card-header"><h3>Credential</h3></div>
+                <div class="card-body stack">
+                    @if (_model.AuthType == DataSourceAuthType.None)
+                    {
+                        <div class="small muted">No authentication – no credential needed.</div>
+                    }
+                    else if (IsNew)
+                    {
+                        <div class="small muted">Create the data source first, then store the @CredentialLabel.ToLowerInvariant().</div>
+                    }
+                    else
+                    {
+                        <div class="cred-status @(_model.CredentialConfigured ? "ok" : null)">
+                            <Icon Name="@(_model.CredentialConfigured ? "shield-check" : "alert-triangle")" Size="18" />
+                            <div>
+                                <div class="cred-title">@(_model.CredentialConfigured ? $"{CredentialLabel} stored" : $"No {CredentialLabel.ToLowerInvariant()} stored")</div>
+                                <div class="tiny faint">Encrypted with Data Protection · never shown again</div>
+                            </div>
+                        </div>
+                        @if (_canManage)
+                        {
+                            <FormField Label="@($"New {CredentialLabel.ToLowerInvariant()}")">
+                                <input class="input mono" type="password" autocomplete="new-password" @bind="_credential" />
+                            </FormField>
+                            <div class="flex gap-2">
+                                <button class="btn btn-secondary btn-sm" disabled="@(_busy || string.IsNullOrEmpty(_credential))" @onclick="SetCredentialAsync"><Icon Name="key" Size="14" /> Store</button>
+                                @if (_model.CredentialConfigured)
+                                {
+                                    <button class="btn btn-ghost btn-sm" disabled="@_busy" @onclick="() => _clearOpen = true"><Icon Name="trash" Size="14" /> Clear</button>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+            @if (!IsNew)
+            {
+                <div class="card">
+                    <div class="card-header"><h3>Key facts</h3></div>
+                    <div class="card-body">
+                        <dl class="kv">
+                            <dt>Endpoints</dt><dd>@_endpoints.Count (@_endpoints.Count(e => e.IsEnabled) enabled)</dd>
+                            <dt>Transport</dt><dd>@(_model.AllowHttp ? "HTTP or HTTPS" : "HTTPS only")</dd>
+                            <dt>TLS validation</dt><dd>Always on</dd>
+                            <dt>Id</dt><dd class="mono small">@_model.Id</dd>
+                        </dl>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (!IsNew)
+    {
+        <div class="card mt-6">
+            <div class="card-header" style="padding-bottom:0">
+                <Tabs Items="Tabs()" ActiveKey="@_tab" ActiveKeyChanged="SetTabAsync" />
+            </div>
+            <div class="card-body">
+                @switch (_tab)
+                {
+                    case "test":
+                        @if (_endpoints.Count == 0)
+                        {
+                            <EmptyState Icon="send" Title="No endpoints to test" Text="Add an endpoint first." />
+                        }
+                        else
+                        {
+                            <div class="grid grid-sidebar" style="grid-template-columns: 260px minmax(0, 1fr)">
+                                <div class="endpoint-list">
+                                    @foreach (var endpoint in _endpoints)
+                                    {
+                                        <button type="button" class="endpoint-pick @(_testEndpoint?.Id == endpoint.Id ? "active" : null)" @onclick="() => _testEndpoint = endpoint">
+                                            <span class="method method-@endpoint.Method.ToLowerInvariant()">@endpoint.Method</span>
+                                            <span class="truncate">@endpoint.Name</span>
+                                        </button>
+                                    }
+                                </div>
+                                <div>
+                                    @if (_testEndpoint is not null)
+                                    {
+                                        <EndpointTester @key="_testEndpoint.Id" DataSourceId="_model.Id" BaseUrl="@_model.BaseUrl" Endpoint="_testEndpoint" CanExecute="_canExecute" />
+                                    }
+                                    else
+                                    {
+                                        <EmptyState Icon="send" Title="Pick an endpoint" Text="Choose an endpoint on the left to send a test request." />
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        break;
+                    case "log":
+                        <DataTable TItem="DataSourceLogItem" Items="_logs.Items" TotalCount="_logs.TotalCount" PageNumber="_logs.Page" PageSize="_logs.PageSize"
+                                   OnPageChanged="LogPageAsync" ShowSearch="false" Compact="true" EmptyIcon="activity" EmptyTitle="No calls yet">
+                            <Columns>
+                                <DataColumn TItem="DataSourceLogItem" Title="Result" Width="120px">
+                                    <Template><span class="pill @(context.Succeeded ? "pill-success" : "pill-danger")">@(context.StatusCode == 0 ? "No response" : $"HTTP {context.StatusCode}")</span></Template>
+                                </DataColumn>
+                                <DataColumn TItem="DataSourceLogItem" Title="Endpoint">
+                                    <Template>
+                                        <span class="cell-primary"><span class="mono small">@context.Method</span> @context.EndpointKey</span>
+                                        @if (context.Error is not null)
+                                        {
+                                            <span class="cell-sub text-danger">@context.Error</span>
+                                        }
+                                    </Template>
+                                </DataColumn>
+                                <DataColumn TItem="DataSourceLogItem" Title="Actor" Width="180px">
+                                    <Template><span class="small">@(context.ActorName ?? "system")@(context.IsTest ? " · test" : null)</span></Template>
+                                </DataColumn>
+                                <DataColumn TItem="DataSourceLogItem" Title="Attempts" Width="90px" Align="right">
+                                    <Template><span class="mono small">@context.Attempts</span></Template>
+                                </DataColumn>
+                                <DataColumn TItem="DataSourceLogItem" Title="Duration" Width="100px" Align="right">
+                                    <Template><span class="mono small muted">@FlowUi.Duration(context.DurationMs)</span></Template>
+                                </DataColumn>
+                                <DataColumn TItem="DataSourceLogItem" Title="When" Width="120px">
+                                    <Template><RelativeTime Value="context.StartedAt" Class="small muted" /></Template>
+                                </DataColumn>
+                            </Columns>
+                        </DataTable>
+                        break;
+                    default:
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="small muted">Approved operations. Nothing else on this host can be called.</span>
+                            @if (_canManage)
+                            {
+                                <button class="btn btn-primary btn-sm" @onclick="NewEndpoint"><Icon Name="plus" Size="14" /> Add endpoint</button>
+                            }
+                        </div>
+                        @if (_endpoints.Count == 0)
+                        {
+                            <EmptyState Icon="link" Title="No endpoints yet" Text="Define the operations flows and imports may call, with validated parameters." />
+                        }
+                        else
+                        {
+                            <div class="table-wrap">
+                                <table class="table">
+                                    <thead><tr><th style="width:90px">Method</th><th>Endpoint</th><th>Path</th><th style="width:110px">Parameters</th><th style="width:110px">State</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var endpoint in _endpoints)
+                                        {
+                                            <tr @key="endpoint.Id" style="cursor:pointer" @onclick="() => EditEndpoint(endpoint)">
+                                                <td><span class="method method-@endpoint.Method.ToLowerInvariant()">@endpoint.Method</span></td>
+                                                <td><span class="cell-primary">@endpoint.Name</span><span class="cell-sub mono">@endpoint.Key</span></td>
+                                                <td class="mono small">@endpoint.PathTemplate</td>
+                                                <td class="mono small">@endpoint.Parameters.Count</td>
+                                                <td><StatusPill Text="@(endpoint.IsEnabled ? "Enabled" : "Disabled")" Tone="@(endpoint.IsEnabled ? "success" : "neutral")" /></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+
+                        break;
+                }
+            </div>
+        </div>
+    }
+
+    <Drawer Open="_endpointOpen" OpenChanged="v => _endpointOpen = v" Size="lg" Title="@(_editEndpoint?.Id == Guid.Empty ? "New endpoint" : _editEndpoint?.Name ?? "Endpoint")" Subtitle="@_model.BaseUrl">
+        <ChildContent>
+            @if (_editEndpoint is not null)
+            {
+                <EndpointEditor Model="_editEndpoint" ReadOnly="!_canManage" />
+            }
+        </ChildContent>
+        <Footer>
+            @if (_canManage && _editEndpoint is { } current)
+            {
+                @if (current.Id != Guid.Empty)
+                {
+                    <button class="btn btn-outline-danger" @onclick="() => _deleteEndpointOpen = true"><Icon Name="trash" Size="16" /> Delete</button>
+                }
+                <button class="btn btn-secondary" style="margin-left:auto" @onclick="() => _endpointOpen = false">Cancel</button>
+                <button class="btn btn-primary" disabled="@_busy" @onclick="SaveEndpointAsync"><Icon Name="save" Size="16" /> Save endpoint</button>
+            }
+            else
+            {
+                <button class="btn btn-primary" style="margin-left:auto" @onclick="() => _endpointOpen = false">Close</button>
+            }
+        </Footer>
+    </Drawer>
+
+    <ConfirmDialog @bind-Open="_deleteOpen" Title="Delete data source?" Danger="true" ConfirmText="Delete" OnConfirm="DeleteAsync"
+                   Message="@($"'{_model.Name}', its endpoints and stored credentials are deleted. Flows and imports using it will fail.")" />
+    <ConfirmDialog @bind-Open="_deleteEndpointOpen" Title="Delete endpoint?" Danger="true" ConfirmText="Delete" OnConfirm="DeleteEndpointAsync"
+                   Message="Flows, polls and imports calling this endpoint will fail." />
+    <ConfirmDialog @bind-Open="_clearOpen" Title="Clear credentials?" Danger="true" ConfirmText="Clear" OnConfirm="ClearCredentialsAsync"
+                   Message="All stored secrets of this data source are removed. Calls requiring authentication fail until a new credential is stored." />
+}
+
+@code {
+    private static readonly IReadOnlyList<string> s_headerSuggestions = ["Accept", "User-Agent", "Accept-Language"];
+
+    private DataSourceModel? _model;
+    private IReadOnlyList<DataSourceEndpointModel> _endpoints = [];
+    private PagedResult<DataSourceLogItem> _logs = PagedResult<DataSourceLogItem>.Empty();
+    private DataSourceEndpointModel? _editEndpoint;
+    private DataSourceEndpointModel? _testEndpoint;
+    private string _tab = "endpoints";
+    private string? _credential;
+    private int _logPage = 1;
+    private bool _notFound;
+    private bool _canManage;
+    private bool _canExecute;
+    private bool _saving;
+    private bool _busy;
+    private bool _endpointOpen;
+    private bool _deleteOpen;
+    private bool _deleteEndpointOpen;
+    private bool _clearOpen;
+
+    /// <summary>Gets or sets the data source identifier from the route (empty for new sources).</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    private bool IsNew => Id == Guid.Empty;
+
+    private string CredentialLabel => _model?.AuthType switch
+    {
+        DataSourceAuthType.ApiKeyHeader => "API key",
+        DataSourceAuthType.Bearer => "Token",
+        DataSourceAuthType.Basic => "Password",
+        DataSourceAuthType.OAuth2ClientCredentials => "Client secret",
+        _ => "Credential",
+    };
+
+    private string? HeadersJson => _model is null || _model.DefaultHeaders.Count == 0 ? null : JsonSerializer.Serialize(_model.DefaultHeaders);
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Integration.ManageDataSources);
+        _canExecute = await CurrentUser.HasPermissionAsync(Permissions.Integration.ExecuteDataSources);
+        if (IsNew)
+        {
+            _model = new DataSourceModel();
+            _endpoints = [];
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private static string AuthIcon(DataSourceAuthType type) => type switch
+    {
+        DataSourceAuthType.ApiKeyHeader => "key",
+        DataSourceAuthType.Bearer => "id-card",
+        DataSourceAuthType.Basic => "user",
+        DataSourceAuthType.OAuth2ClientCredentials => "shield-check",
+        _ => "unlock",
+    };
+
+    private IReadOnlyList<TabItem> Tabs() =>
+        [new("endpoints", "Endpoints", "link", _endpoints.Count), new("test", "Test endpoint", "send"), new("log", "Execution log", "activity")];
+
+    private async Task LoadAsync()
+    {
+        var result = await DataSourceService.GetAsync(Id);
+        if (!result.Succeeded)
+        {
+            _notFound = result.ErrorKind == ResultErrorKind.NotFound;
+            if (!_notFound)
+            {
+                Toasts.Error("Could not load the data source", result.Error);
+            }
+
+            return;
+        }
+
+        _model = result.Value;
+        await LoadEndpointsAsync();
+    }
+
+    private async Task LoadEndpointsAsync()
+    {
+        var endpoints = await DataSourceService.ListEndpointsAsync(Id);
+        _endpoints = endpoints.Succeeded ? endpoints.Value! : [];
+        if (_testEndpoint is not null)
+        {
+            _testEndpoint = _endpoints.FirstOrDefault(e => e.Id == _testEndpoint.Id);
+        }
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        var result = await DataSourceService.ListLogsAsync(new PageRequest { Page = _logPage, PageSize = 20 }, Id, false);
+        if (result.Succeeded)
+        {
+            _logs = result.Value!;
+        }
+    }
+
+    private async Task SetTabAsync(string tab)
+    {
+        _tab = tab;
+        if (tab == "log")
+        {
+            await LoadLogsAsync();
+        }
+        else if (tab == "test" && _testEndpoint is null)
+        {
+            _testEndpoint = _endpoints.FirstOrDefault(e => e.IsEnabled);
+        }
+    }
+
+    private async Task LogPageAsync(int page)
+    {
+        _logPage = page;
+        await LoadLogsAsync();
+    }
+
+    private void SetHeaders(string? json)
+    {
+        var parsed = FlowJson.TryDeserialize<Dictionary<string, string?>>(json) ?? [];
+        _model!.DefaultHeaders = parsed.Where(p => p.Value is not null).ToDictionary(p => p.Key, p => p.Value!, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        _saving = true;
+        var result = await DataSourceService.SaveAsync(_model);
+        _saving = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Could not save", result.Error);
+            return;
+        }
+
+        if (IsNew)
+        {
+            Toasts.Success("Data source created", "Store the credential and add endpoints next.");
+            Nav.NavigateTo($"/integration/datasources/{result.Value}");
+        }
+        else
+        {
+            Toasts.Success("Data source saved");
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await DataSourceService.DeleteAsync(Id);
+        if (Toasts.FromResult(result, "Data source deleted"))
+        {
+            Nav.NavigateTo("/integration/datasources");
+        }
+    }
+
+    private async Task SetCredentialAsync()
+    {
+        if (string.IsNullOrEmpty(_credential))
+        {
+            return;
+        }
+
+        _busy = true;
+        var result = await DataSourceService.SetCredentialAsync(Id, _credential);
+        _busy = false;
+        _credential = null;
+        if (Toasts.FromResult(result, $"{CredentialLabel} stored"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task ClearCredentialsAsync()
+    {
+        var result = await DataSourceService.ClearCredentialsAsync(Id);
+        if (Toasts.FromResult(result, "Credentials cleared"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private void NewEndpoint()
+    {
+        _editEndpoint = new DataSourceEndpointModel { DataSourceId = Id };
+        _endpointOpen = true;
+    }
+
+    private void EditEndpoint(DataSourceEndpointModel endpoint)
+    {
+        // Edit a copy so cancelling leaves the list untouched.
+        _editEndpoint = FlowJson.TryDeserialize<DataSourceEndpointModel>(FlowJson.Serialize(endpoint)) ?? endpoint;
+        _endpointOpen = true;
+    }
+
+    private async Task SaveEndpointAsync()
+    {
+        if (_editEndpoint is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        var result = await DataSourceService.SaveEndpointAsync(_editEndpoint);
+        _busy = false;
+        if (Toasts.FromResult(result, "Endpoint saved"))
+        {
+            _endpointOpen = false;
+            await LoadEndpointsAsync();
+        }
+    }
+
+    private async Task DeleteEndpointAsync()
+    {
+        if (_editEndpoint is null)
+        {
+            return;
+        }
+
+        var result = await DataSourceService.DeleteEndpointAsync(_editEndpoint.Id);
+        if (Toasts.FromResult(result, "Endpoint deleted"))
+        {
+            _endpointOpen = false;
+            _editEndpoint = null;
+            await LoadEndpointsAsync();
+        }
+    }
+}

@@ -1,0 +1,360 @@
+@page "/integration/datasources"
+@* REST data sources: KPIs with hourly call trend, source table, global execution log and the SSRF network allow-list. *@
+@attribute [RequirePermission(Permissions.Integration.ReadDataSources)]
+@inject IDataSourceAdminService DataSourceService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Data Sources · Servora</PageTitle>
+
+<PageHeader Title="Data Sources" Subtitle="Approved REST endpoints with credentials in the secret store, SSRF protection, timeouts, size and rate limits." Icon="plug">
+    <Actions>
+        <PermissionView Permission="@Permissions.Integration.ManageDataSources">
+            <a class="btn btn-primary" href="/integration/datasources/new"><Icon Name="plus" Size="16" /> New data source</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_overview is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Data sources" Value="@_overview.Sources.ToString("N0")" Icon="plug" Tone="primary" Caption="@($"{_overview.Enabled} enabled")" />
+        <StatCard Label="Endpoints" Value="@_overview.Endpoints.ToString("N0")" Icon="link" Tone="accent" Caption="approved operations" />
+        <StatCard Label="Calls (24 h)" Value="@_overview.Calls24h.ToString("N0")" Icon="activity" Tone="info" Trend="_overview.HourlyCalls"
+                  Caption="@($"avg. {FlowUi.Duration(_overview.AverageDurationMs)}")" OnClick="ShowLogAsync" />
+        <StatCard Label="Error rate" Value="@($"{_overview.ErrorRate24h:0.#} %")" Icon="alert-triangle" Tone="@(_overview.ErrorRate24h > 5 ? "danger" : "success")"
+                  Caption="last 24 hours" OnClick="ShowFailuresAsync" />
+    }
+</div>
+
+<div class="mb-4"><Tabs Items="s_tabs" ActiveKey="@_tab" ActiveKeyChanged="SetTabAsync" /></div>
+
+@switch (_tab)
+{
+    case "log":
+        <DataTable TItem="DataSourceLogItem" Items="_logs.Items" TotalCount="_logs.TotalCount" PageNumber="_logs.Page" PageSize="_logs.PageSize" Loading="_logsLoading"
+                   OnPageChanged="LogPageAsync" ShowSearch="false" Compact="true" EmptyIcon="activity" EmptyTitle="No calls yet"
+                   EmptyText="Executions from flows, imports, MCP tools and tests appear here (without parameter values or credentials).">
+            <Toolbar>
+                <label class="checkbox small"><input type="checkbox" checked="@_failuresOnly" @onchange="ToggleFailuresAsync" /> Failures only</label>
+            </Toolbar>
+            <Columns>
+                <DataColumn TItem="DataSourceLogItem" Title="Result" Width="110px">
+                    <Template><span class="pill @(context.Succeeded ? "pill-success" : "pill-danger")">@(context.StatusCode == 0 ? "No response" : $"HTTP {context.StatusCode}")</span></Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceLogItem" Title="Endpoint">
+                    <Template>
+                        <span class="cell-primary"><span class="mono small">@context.Method</span> @context.DataSourceName › @context.EndpointKey</span>
+                        @if (context.Error is not null)
+                        {
+                            <span class="cell-sub text-danger truncate" style="display:block;max-width:min(520px, 35vw)" title="@context.Error">@context.Error</span>
+                        }
+                        else
+                        {
+                            <span class="cell-sub mono">@context.Host</span>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceLogItem" Title="Actor" Width="170px">
+                    <Template>
+                        <span class="small">@(context.ActorName ?? "system")</span>
+                        @if (context.IsTest)
+                        {
+                            <span class="pill pill-purple no-dot" style="margin-left:6px">Test</span>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceLogItem" Title="Duration" Width="100px" Align="right">
+                    <Template><span class="mono small muted">@FlowUi.Duration(context.DurationMs)</span></Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceLogItem" Title="Size" Width="90px" Align="right">
+                    <Template><span class="mono small muted">@FlowUi.Bytes(context.ResponseBytes)</span></Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceLogItem" Title="When" Width="120px">
+                    <Template><RelativeTime Value="context.StartedAt" Class="small muted" /></Template>
+                </DataColumn>
+            </Columns>
+        </DataTable>
+        break;
+    case "allow":
+        <div class="grid grid-sidebar">
+            <div class="card">
+                <div class="card-header"><h3>Network allow-list</h3><span class="small faint">@(_allow.Count == 1 ? "1 entry" : $"{_allow.Count} entries")</span></div>
+                @if (_allow.Count == 0)
+                {
+                    <EmptyState Icon="shield-check" Title="Nothing allow-listed" Text="All private, loopback, link-local and cloud metadata addresses are blocked. Add an entry only for trusted internal APIs." />
+                }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead><tr><th>Range</th><th>Justification</th><th>Added</th><th>Enabled</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var entry in _allow)
+                                {
+                                    <tr @key="entry.Id">
+                                        <td class="mono">@entry.Cidr</td>
+                                        <td class="small">@(entry.Description ?? "—")</td>
+                                        <td class="small muted"><RelativeTime Value="entry.CreatedAt" /> · @entry.CreatedBy</td>
+                                        <td><Switch Value="entry.IsEnabled" ValueChanged="v => SetAllowEnabledAsync(entry, v)" Disabled="!_canManage" /></td>
+                                        <td class="text-right">
+                                            @if (_canManage)
+                                            {
+                                                <button class="icon-btn" title="Delete" @onclick="() => _deleteEntry = entry"><Icon Name="trash" Size="15" /></button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+            <div class="stack">
+                @if (_canManage)
+                {
+                    <div class="card">
+                        <div class="card-header"><h3>Add entry</h3></div>
+                        <div class="card-body stack">
+                            <FormField Label="CIDR range or IP" Required="true" Help="e.g. 10.20.0.0/16 or 192.168.1.15">
+                                <input class="input mono" @bind="_cidr" placeholder="10.20.0.0/16" />
+                            </FormField>
+                            <FormField Label="Justification" Required="true">
+                                <input class="input" @bind="_cidrReason" placeholder="Internal CMDB API" />
+                            </FormField>
+                            <button class="btn btn-primary" disabled="@_busy" @onclick="AddAllowAsync"><Icon Name="plus" Size="16" /> Add to allow-list</button>
+                        </div>
+                    </div>
+                }
+                <div class="alert alert-info">
+                    <Icon Name="shield" Size="16" />
+                    <div>Every request resolves DNS and validates <em>each</em> address at connect time; redirects (max. 3) are re-checked. Cloud metadata endpoints stay blocked even when a range is allow-listed.</div>
+                </div>
+            </div>
+        </div>
+        break;
+    default:
+        <DataTable TItem="DataSourceListItem" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize" Loading="_loading"
+                   OnPageChanged="GoToPageAsync" OnSearch="SearchAsync" OnRowClick="@(r => Nav.NavigateTo($"/integration/datasources/{r.Id}"))"
+                   SearchPlaceholder="Search name or URL…" EmptyIcon="plug" EmptyTitle="No data sources yet"
+                   EmptyText="Connect a REST API once, approve its endpoints and use them in flows, imports and AI tools.">
+            <EmptyContent>
+                <PermissionView Permission="@Permissions.Integration.ManageDataSources">
+                    <a class="btn btn-primary" href="/integration/datasources/new"><Icon Name="plus" Size="16" /> Connect a REST API</a>
+                </PermissionView>
+            </EmptyContent>
+            <Columns>
+                <DataColumn TItem="DataSourceListItem" Title="Data source">
+                    <Template>
+                        <span class="flex items-center gap-3">
+                            <span class="ds-icon @(context.IsEnabled ? "on" : null)"><Icon Name="plug" Size="16" /></span>
+                            <span style="min-width:0">
+                                <span class="cell-primary">@context.Name</span>
+                                <span class="cell-sub mono truncate" style="display:block;max-width:min(420px, 28vw)">@context.BaseUrl</span>
+                            </span>
+                        </span>
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceListItem" Title="Auth" Width="190px">
+                    <Template>
+                        <span class="small">@FlowUi.AuthLabel(context.AuthType)</span>
+                        @if (context.AllowHttp)
+                        {
+                            <span class="pill pill-warning no-dot" style="margin-left:6px">HTTP</span>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceListItem" Title="Endpoints" Width="100px" Align="right">
+                    <Template><span class="mono">@context.EndpointCount</span></Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceListItem" Title="Calls 24 h" Width="140px" Align="right">
+                    <Template>
+                        <span class="mono">@context.Calls24h</span>
+                        @if (context.Errors24h > 0)
+                        {
+                            <span class="cell-sub text-danger">@context.Errors24h failed</span>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceListItem" Title="Last call" Width="120px">
+                    <Template><RelativeTime Value="context.LastCallAt" Placeholder="Never" Class="small muted" /></Template>
+                </DataColumn>
+                <DataColumn TItem="DataSourceListItem" Title="State" Width="110px">
+                    <Template><StatusPill Text="@(context.IsEnabled ? "Enabled" : "Disabled")" Tone="@(context.IsEnabled ? "success" : "neutral")" /></Template>
+                </DataColumn>
+            </Columns>
+        </DataTable>
+        break;
+}
+
+<ConfirmDialog Open="_deleteEntry is not null" OpenChanged="v => { if (!v) _deleteEntry = null; }" Title="Remove allow-list entry?" Danger="true" ConfirmText="Remove"
+               Message="@($"Requests to {_deleteEntry?.Cidr} are blocked again immediately.")" OnConfirm="DeleteAllowAsync" />
+
+@code {
+    private static readonly IReadOnlyList<TabItem> s_tabs = [new("sources", "Data sources", "plug"), new("log", "Execution log", "activity"), new("allow", "Network allow-list", "shield")];
+
+    private PagedResult<DataSourceListItem> _page = PagedResult<DataSourceListItem>.Empty();
+    private PagedResult<DataSourceLogItem> _logs = PagedResult<DataSourceLogItem>.Empty();
+    private IReadOnlyList<NetworkAllowListItem> _allow = [];
+    private DataSourceOverview? _overview;
+    private NetworkAllowListItem? _deleteEntry;
+    private string _tab = "sources";
+    private string? _search;
+    private string? _cidr;
+    private string? _cidrReason;
+    private int _pageNumber = 1;
+    private int _logPage = 1;
+    private bool _failuresOnly;
+    private bool _loading = true;
+    private bool _logsLoading;
+    private bool _canManage;
+    private bool _busy;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Integration.ManageDataSources);
+        await Task.WhenAll(LoadAsync(), LoadOverviewAsync());
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await DataSourceService.ListAsync(new PageRequest { Page = _pageNumber, PageSize = 25, Search = _search, SortBy = "Name" });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Could not load data sources", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task LoadOverviewAsync()
+    {
+        var result = await DataSourceService.GetOverviewAsync();
+        if (result.Succeeded)
+        {
+            _overview = result.Value;
+        }
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        _logsLoading = true;
+        var result = await DataSourceService.ListLogsAsync(new PageRequest { Page = _logPage, PageSize = 25 }, null, _failuresOnly);
+        if (result.Succeeded)
+        {
+            _logs = result.Value!;
+        }
+
+        _logsLoading = false;
+    }
+
+    private async Task LoadAllowAsync()
+    {
+        var result = await DataSourceService.ListAllowListAsync();
+        if (result.Succeeded)
+        {
+            _allow = result.Value!;
+        }
+    }
+
+    private async Task SetTabAsync(string tab)
+    {
+        _tab = tab;
+        if (tab == "log")
+        {
+            await LoadLogsAsync();
+        }
+        else if (tab == "allow")
+        {
+            await LoadAllowAsync();
+        }
+    }
+
+    private Task ShowLogAsync() => SetTabAsync("log");
+
+    private async Task ShowFailuresAsync()
+    {
+        _failuresOnly = true;
+        _logPage = 1;
+        await SetTabAsync("log");
+    }
+
+    private async Task ToggleFailuresAsync(ChangeEventArgs e)
+    {
+        _failuresOnly = e.Value is true;
+        _logPage = 1;
+        await LoadLogsAsync();
+    }
+
+    private async Task LogPageAsync(int page)
+    {
+        _logPage = page;
+        await LoadLogsAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task AddAllowAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_cidr) || string.IsNullOrWhiteSpace(_cidrReason))
+        {
+            Toasts.Warning("Range and justification required");
+            return;
+        }
+
+        _busy = true;
+        var result = await DataSourceService.AddAllowListEntryAsync(_cidr.Trim(), _cidrReason.Trim());
+        _busy = false;
+        if (Toasts.FromResult(result, "Range allow-listed"))
+        {
+            _cidr = null;
+            _cidrReason = null;
+            await LoadAllowAsync();
+        }
+    }
+
+    private async Task SetAllowEnabledAsync(NetworkAllowListItem entry, bool enabled)
+    {
+        var result = await DataSourceService.SetAllowListEntryEnabledAsync(entry.Id, enabled);
+        Toasts.FromResult(result, enabled ? "Entry enabled" : "Entry disabled");
+        await LoadAllowAsync();
+    }
+
+    private async Task DeleteAllowAsync()
+    {
+        if (_deleteEntry is null)
+        {
+            return;
+        }
+
+        var result = await DataSourceService.DeleteAllowListEntryAsync(_deleteEntry.Id);
+        _deleteEntry = null;
+        Toasts.FromResult(result, "Entry removed");
+        await LoadAllowAsync();
+    }
+}
