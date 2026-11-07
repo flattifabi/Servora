@@ -1,0 +1,70 @@
+.restore-summary {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-radius: var(--r);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+
+.restore-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: none;
+    border-radius: 12px;
+    background: var(--primary-soft);
+    color: var(--primary);
+}
+
+.restore-facts {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.restore-title {
+    font-weight: 650;
+    font-size: 15px;
+}
+
+.restore-sep {
+    margin: 0 4px;
+    color: var(--text-faint);
+}
+
+.restore-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+    font-size: 13.5px;
+    color: var(--text-2);
+}
+
+.restore-steps li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.step-badge {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.restore-confirm {
+    letter-spacing: .18em;
+}

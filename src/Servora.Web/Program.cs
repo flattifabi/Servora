@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Servora.Application.Common;
+using Servora.Infrastructure.Backup;
 using Servora.Infrastructure.Hosting;
 using Servora.Infrastructure.Modules;
 using Servora.Infrastructure.Persistence;
@@ -23,12 +24,34 @@ using Servora.Web.Setup;
 // ---------------------------------------------------------------------------------------------------------------
 // Servora host. Runs as console app (development) or Windows Service (production, see docs/operations).
 // ---------------------------------------------------------------------------------------------------------------
-var isWindowsService = WindowsServiceHelpers.IsWindowsService();
+// Disaster-recovery command line (`Servora backup list|create|verify|restore`, see docs/modules/backup.md). It runs
+// before the web host starts and selects the data directory: --data-dir, SERVORA_DATA_DIR or the service data directory.
+var backupCommand = BackupCommandLine.IsBackupCommand(args) ? BackupCommandLine.Parse(args) : null;
+if (backupCommand is not null)
+{
+    var serviceDataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Servora");
+    if (!string.IsNullOrWhiteSpace(backupCommand.DataDirectory))
+    {
+        Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, Path.GetFullPath(backupCommand.DataDirectory));
+    }
+    else if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable)) &&
+             File.Exists(Path.Combine(serviceDataDirectory, "database.json")) &&
+             !Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), "App_Data")))
+    {
+        Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, serviceDataDirectory);
+    }
+}
+
+var isWindowsService = backupCommand is null && WindowsServiceHelpers.IsWindowsService();
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
-    Args = args,
+    Args = backupCommand is null ? args : [],
     ContentRootPath = isWindowsService ? AppContext.BaseDirectory : null,
 });
+if (backupCommand is not null)
+{
+    builder.Logging.SetMinimumLevel(LogLevel.Warning);
+}
 
 builder.Host.UseWindowsService(options => options.ServiceName = "Servora");
 
@@ -132,8 +155,22 @@ builder.Services.AddHealthChecks();
 
 // Module host registrations (authentication schemes, logging providers, OpenAPI, ...).
 builder.AddServoraWebModules();
+builder.AddBackupWeb();
 
 var app = builder.Build();
+
+if (backupCommand is not null)
+{
+    try
+    {
+        return await BackupCommandLine.RunAsync(app.Services, backupCommand, Console.In, Console.Out);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"error: {ex.Message}");
+        return BackupCommandLine.ExitFailure;
+    }
+}
 
 if (!app.Environment.IsDevelopment())
 {
@@ -157,6 +194,8 @@ app.MapHealthChecks("/health").AllowAnonymous();
 var databaseSettings = app.Services.GetRequiredService<DatabaseSettingsStore>();
 if (databaseSettings.IsConfigured)
 {
+    // A restore requested in the UI or on the command line runs first, before migrations (ADR-015).
+    await app.Services.GetRequiredService<PendingRestoreProcessor>().RunAsync();
     await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync();
 }
 else
@@ -165,6 +204,9 @@ else
 }
 
 await app.RunAsync();
+
+// Non-zero after a restore request so the Windows service recovery restarts Servora (see BackupWebModule).
+return Environment.ExitCode;
 
 /// <summary>Entry point type (exposed for integration tests).</summary>
 public partial class Program;

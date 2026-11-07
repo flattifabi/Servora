@@ -1,0 +1,583 @@
+@page "/admin/backups"
+@* Backup & Restore: KPIs, backup catalog with verify / download / restore / delete, upload, schedule and schema state. *@
+@attribute [RequirePermission(Permissions.Backup.Read)]
+@implements IDisposable
+@inject IBackupService BackupService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Backup &amp; Restore · Servora</PageTitle>
+
+<PageHeader Title="Backup & Restore" Subtitle="Scheduled, verifiable backups of the database, key ring and attachments – restore or roll back the whole instance in minutes." Icon="hard-drive">
+    <Actions>
+        <button class="btn btn-secondary" @onclick="RefreshAsync" disabled="@_loading"><Icon Name="refresh" Size="16" /> Refresh</button>
+        @if (_canManage)
+        {
+            <label class="btn btn-secondary @(_uploading ? "disabled" : null)" title="Upload a .svbak archive (max. @BackupDisplay.Size(_settings?.MaxUploadBytes ?? 0))">
+                @if (_uploading)
+                {
+                    <span class="spinner"></span> <span>Uploading…</span>
+                }
+                else
+                {
+                    <Icon Name="upload" Size="16" /> <span>Upload</span>
+                }
+                <InputFile OnChange="UploadAsync" accept=".svbak" disabled="@_uploading" class="hidden" />
+            </label>
+            <button class="btn btn-primary" @onclick="CreateBackupAsync" disabled="@(_creating || _overview?.BusyOperation is not null)">
+                @if (_creating)
+                {
+                    <span class="spinner"></span> <span>Backing up…</span>
+                }
+                else
+                {
+                    <Icon Name="save" Size="16" /> <span>Back up now</span>
+                }
+            </button>
+        }
+    </Actions>
+</PageHeader>
+
+@if (_overview is not null)
+{
+    <div class="stack backup-alerts">
+        @if (_overview.BusyOperation is { } busy)
+        {
+            <div class="alert alert-info"><span class="spinner"></span> <span><strong>@busy</strong> – the list refreshes automatically.</span></div>
+        }
+        @if (_overview.LastRestore is { } restore && restore.At > DateTimeOffset.UtcNow.AddDays(-7))
+        {
+            <div class="alert @(restore.Succeeded ? "alert-success" : "alert-danger")">
+                <Icon Name="@(restore.Succeeded ? "check-circle" : "alert-octagon")" Size="16" />
+                <span><strong>@(restore.Succeeded ? "Restore completed" : "Restore failed")</strong> <RelativeTime Value="restore.At" /> – @restore.Message</span>
+            </div>
+        }
+        @if (_overview.LastFailureAt is { } failedAt)
+        {
+            <div class="alert alert-danger">
+                <Icon Name="alert-triangle" Size="16" />
+                <span><strong>The last backup failed</strong> <RelativeTime Value="failedAt" /> – @_overview.LastFailureMessage</span>
+            </div>
+        }
+        @if (!_overview.ScheduleEnabled)
+        {
+            <div class="alert alert-warning">
+                <Icon Name="calendar-clock" Size="16" />
+                <span class="flex-1">Scheduled backups are disabled. Only manual and automatic safety backups (before migrations and restores) are created.</span>
+                @if (_canManage)
+                {
+                    <button class="btn btn-sm btn-secondary" @onclick="() => _scheduleOpen = true">Set up schedule</button>
+                }
+            </div>
+        }
+    </div>
+}
+
+<div class="grid grid-4 mb-6">
+    @if (_overview is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Last successful backup" Value="@(_overview.LastSuccessfulBackupAt is { } last ? Ago(last) : "Never")" Icon="shield-check"
+                  Tone="@(LastBackupTone)" Caption="@(_overview.LastSuccessfulBackupKind is { } kind ? $"{BackupDisplay.KindLabel(kind)} · {_overview.LastSuccessfulBackupAt!.Value.ToLocalTime():g}" : "Create your first backup")" />
+        <StatCard Label="Next scheduled run" Value="@(_overview.NextRunAt is { } next ? next.ToLocalTime().ToString("ddd HH:mm") : "Off")" Icon="calendar-clock"
+                  Tone="@(_overview.NextRunAt is null ? "warning" : "primary")" Caption="@(_overview.NextRunAt is { } n ? In(n) : "Schedule disabled")"
+                  OnClick="OpenScheduleAsync" />
+        <StatCard Label="Backups" Value="@_overview.BackupCount.ToString("N0")" Icon="layers" Tone="info"
+                  Caption="@($"{_all.Count(b => b.Kind is BackupKind.PreMigration or BackupKind.PreRestore)} safety backups")" />
+        <StatCard Label="Total size" Value="@BackupDisplay.Size(_overview.TotalSizeBytes)" Icon="hard-drive" Tone="accent" Caption="@_overview.Destination" />
+    }
+</div>
+
+<div class="grid grid-sidebar">
+    <div class="stack" style="min-width:0">
+        <DataTable TItem="BackupInfo" Items="_page" TotalCount="_filtered.Count" PageNumber="_pageNumber" PageSize="PageSize" Loading="_loading"
+                   SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPage" OnSortChanged="Sort" OnSearch="Search"
+                   SearchPlaceholder="Search file, kind, version, migration…" EmptyIcon="hard-drive"
+                   EmptyTitle="@(_all.Count == 0 ? "No backups yet" : "No matching backups")"
+                   EmptyText="@(_all.Count == 0 ? "Create a backup now or set up a schedule. Backups contain the database, the key ring and attachments." : "No backups match the current filter and search.")">
+            <Toolbar>
+                <div class="segmented" style="flex-wrap:wrap">
+                    @foreach (var (filter, label) in s_filters)
+                    {
+                        <button class="@(_filter == filter ? "active" : null)" @onclick="() => SetFilter(filter)">@label</button>
+                    }
+                </div>
+            </Toolbar>
+            <EmptyContent>
+                @if (_canManage && _all.Count == 0)
+                {
+                    <button class="btn btn-primary" @onclick="CreateBackupAsync" disabled="@_creating"><Icon Name="save" Size="16" /> Back up now</button>
+                }
+            </EmptyContent>
+            <Columns>
+                <DataColumn TItem="BackupInfo" Title="Created" SortKey="CreatedAt" Width="210px">
+                    <Template>
+                        <span class="cell-primary">@context.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                        <span class="cell-sub truncate" style="display:block;max-width:200px" title="@context.Id">@context.CreatedBy</span>
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="BackupInfo" Title="Kind" SortKey="Kind" Width="140px">
+                    <Template><BackupKindPill Kind="context.Kind" OriginalKind="context.OriginalKind" /></Template>
+                </DataColumn>
+                <DataColumn TItem="BackupInfo" Title="Version" SortKey="Version" Width="90px">
+                    <Template><span class="mono">@context.AppVersion</span></Template>
+                </DataColumn>
+                <DataColumn TItem="BackupInfo" Title="Migration">
+                    <Template>
+                        @if (context.Migration is null)
+                        {
+                            <span class="faint">—</span>
+                        }
+                        else
+                        {
+                            <span class="mono truncate" style="display:block;max-width:min(220px, 16vw)" title="@context.Migration">@context.Migration</span>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="BackupInfo" Title="Size" SortKey="Size" Align="right" Width="96px">
+                    <Template>@BackupDisplay.Size(context.SizeBytes)</Template>
+                </DataColumn>
+                <DataColumn TItem="BackupInfo" Title="Status" Width="150px">
+                    <Template>
+                        @{ var (label, tone) = BackupDisplay.Integrity(context.Integrity); }
+                        <span class="flex items-center gap-1">
+                            <StatusPill Text="@label" Tone="@tone" />
+                            @if (context.IsEncrypted)
+                            {
+                                <span class="encrypted" title="Encrypted (AES-256-GCM)"><Icon Name="lock" Size="13" /></span>
+                            }
+                        </span>
+                        @if (context.Message is not null)
+                        {
+                            <span class="cell-sub truncate" style="display:block;max-width:150px" title="@context.Message">@context.Message</span>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="BackupInfo" Title="" Width="176px" Align="right">
+                    <Template>
+                        <div class="row-actions" @onclick:stopPropagation="true">
+                            <button class="icon-btn" title="Verify hashes" disabled="@(_verifying == context.Id)" @onclick="() => VerifyAsync(context)">
+                                @if (_verifying == context.Id)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                else
+                                {
+                                    <Icon Name="shield-check" Size="16" />
+                                }
+                            </button>
+                            @if (_canManage)
+                            {
+                                <a class="icon-btn" title="Download" href="@($"/admin/backups/{Uri.EscapeDataString(context.Id)}/download")" download><Icon Name="download" Size="16" /></a>
+                            }
+                            @if (_canRestore)
+                            {
+                                <button class="icon-btn restore" title="Restore this backup" @onclick="() => OpenRestoreAsync(context)"><Icon Name="history" Size="16" /></button>
+                            }
+                            @if (_canManage)
+                            {
+                                <button class="icon-btn danger" title="Delete" @onclick="() => _deleteTarget = context"><Icon Name="trash" Size="16" /></button>
+                            }
+                        </div>
+                    </Template>
+                </DataColumn>
+            </Columns>
+        </DataTable>
+
+        <div class="card backup-info">
+            <div class="card-body flex items-start gap-3">
+                <div class="info-icon"><Icon Name="info" Size="18" /></div>
+                <div class="small muted">
+                    <strong class="text">How restores work.</strong>
+                    A restore first creates a pre-restore safety backup, then Servora restarts and replaces all data before migrations run:
+                    the database is set to the backup's migration, all rows are replaced, keys and attachments are restored, and the schema is
+                    migrated to the current version. Only backups of the same database provider and of this or an older version can be restored.
+                    Without a working UI use <span class="mono">Servora backup restore &lt;file&gt;</span> (see the operations guide).
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="stack sticky-top">
+        <BackupScheduleCard Settings="_settings" NextRunAt="_overview?.NextRunAt" CanManage="_canManage" OnEdit="OpenScheduleAsync" />
+        <DatabaseSchemaCard Status="_schema" />
+    </div>
+</div>
+
+<BackupScheduleDrawer @bind-Open="_scheduleOpen" Settings="_settings" Save="SaveScheduleAsync" />
+<RestoreBackupDialog @bind-Open="_restoreOpen" Check="_restoreCheck" Confirm="RestoreAsync" />
+<ConfirmDialog Open="_deleteTarget is not null" OpenChanged="v => { if (!v) { _deleteTarget = null; } }" Danger="true" Title="Delete backup?"
+               ConfirmText="Delete backup" OnConfirm="DeleteAsync"
+               Message="@($"The archive {_deleteTarget?.Id} ({BackupDisplay.Size(_deleteTarget?.SizeBytes ?? 0)}) is deleted permanently. It cannot be restored afterwards.")" />
+
+@code {
+    private const int PageSize = 15;
+
+    private static readonly (string Filter, string Label)[] s_filters =
+    [
+        ("all", "All"),
+        ("scheduled", "Scheduled"),
+        ("manual", "Manual"),
+        ("safety", "Safety"),
+        ("uploaded", "Uploaded"),
+    ];
+
+    private readonly CancellationTokenSource _disposed = new();
+    private BackupOverview? _overview;
+    private BackupSettingsView? _settings;
+    private DatabaseSchemaStatus? _schema;
+    private List<BackupInfo> _all = [];
+    private List<BackupInfo> _filtered = [];
+    private List<BackupInfo> _page = [];
+    private string _filter = "all";
+    private string? _search;
+    private string _sort = "CreatedAt";
+    private bool _desc = true;
+    private int _pageNumber = 1;
+    private bool _loading = true;
+    private bool _canManage;
+    private bool _canRestore;
+    private bool _creating;
+    private bool _uploading;
+    private string? _verifying;
+    private bool _scheduleOpen;
+    private bool _restoreOpen;
+    private BackupRestoreCheck? _restoreCheck;
+    private BackupInfo? _deleteTarget;
+
+    private string LastBackupTone => _overview?.LastSuccessfulBackupAt switch
+    {
+        null => "danger",
+        { } at when at < DateTimeOffset.UtcNow.AddDays(-8) => "warning",
+        _ => "success",
+    };
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Backup.Manage);
+        _canRestore = await CurrentUser.HasPermissionAsync(Permissions.Backup.Restore);
+        await RefreshAsync();
+        _ = AutoRefreshAsync(_disposed.Token);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _disposed.Cancel();
+        _disposed.Dispose();
+    }
+
+    private static string Ago(DateTimeOffset value)
+    {
+        var span = DateTimeOffset.UtcNow - value;
+        return span.TotalMinutes < 1 ? "Just now"
+            : span.TotalHours < 1 ? $"{(int)span.TotalMinutes} min ago"
+            : span.TotalDays < 1 ? $"{(int)span.TotalHours} h ago"
+            : $"{(int)span.TotalDays} d ago";
+    }
+
+    private static string In(DateTimeOffset value)
+    {
+        var span = value - DateTimeOffset.UtcNow;
+        return span.TotalMinutes < 1 ? "in less than a minute"
+            : span.TotalHours < 1 ? $"in {(int)Math.Ceiling(span.TotalMinutes)} min"
+            : span.TotalDays < 1 ? $"in {(int)span.TotalHours} h {span.Minutes} min"
+            : $"in {(int)span.TotalDays} d {span.Hours} h";
+    }
+
+    private async Task AutoRefreshAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadAsync(showToastOnError: false);
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Page closed.
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        await LoadAsync(showToastOnError: true);
+        _loading = false;
+    }
+
+    private async Task LoadAsync(bool showToastOnError)
+    {
+        var overview = await BackupService.GetOverviewAsync();
+        var list = await BackupService.ListAsync();
+        var settings = await BackupService.GetSettingsAsync();
+        if (overview.Succeeded)
+        {
+            _overview = overview.Value;
+        }
+
+        if (settings.Succeeded)
+        {
+            _settings = settings.Value;
+        }
+
+        if (list.Succeeded)
+        {
+            _all = list.Value!.ToList();
+            ApplyView();
+        }
+        else if (showToastOnError)
+        {
+            Toasts.FromResult(list, string.Empty);
+        }
+
+        try
+        {
+            var schema = await BackupService.GetSchemaStatusAsync();
+            if (schema.Succeeded)
+            {
+                _schema = schema.Value;
+            }
+        }
+        catch (Exception) when (!showToastOnError)
+        {
+            // The schema card keeps its last state when the database is briefly unavailable.
+        }
+    }
+
+    private void ApplyView()
+    {
+        IEnumerable<BackupInfo> query = _all;
+        query = _filter switch
+        {
+            "scheduled" => query.Where(b => b.Kind == BackupKind.Scheduled),
+            "manual" => query.Where(b => b.Kind == BackupKind.Manual),
+            "safety" => query.Where(b => b.Kind is BackupKind.PreMigration or BackupKind.PreRestore),
+            "uploaded" => query.Where(b => b.Kind == BackupKind.Uploaded),
+            _ => query,
+        };
+
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var term = _search.Trim();
+            query = query.Where(b =>
+                b.Id.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                b.CreatedBy.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                b.AppVersion.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                BackupDisplay.KindLabel(b.Kind).Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (b.Migration?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        query = (_sort, _desc) switch
+        {
+            ("Kind", false) => query.OrderBy(b => BackupDisplay.KindLabel(b.Kind)),
+            ("Kind", true) => query.OrderByDescending(b => BackupDisplay.KindLabel(b.Kind)),
+            ("Version", false) => query.OrderBy(b => b.AppVersion),
+            ("Version", true) => query.OrderByDescending(b => b.AppVersion),
+            ("Size", false) => query.OrderBy(b => b.SizeBytes),
+            ("Size", true) => query.OrderByDescending(b => b.SizeBytes),
+            (_, false) => query.OrderBy(b => b.CreatedAt),
+            _ => query.OrderByDescending(b => b.CreatedAt),
+        };
+
+        _filtered = query.ToList();
+        var pages = Math.Max(1, (int)Math.Ceiling(_filtered.Count / (double)PageSize));
+        _pageNumber = Math.Clamp(_pageNumber, 1, pages);
+        _page = _filtered.Skip((_pageNumber - 1) * PageSize).Take(PageSize).ToList();
+    }
+
+    private void SetFilter(string filter)
+    {
+        _filter = filter;
+        _pageNumber = 1;
+        ApplyView();
+    }
+
+    private void Search(string text)
+    {
+        _search = text;
+        _pageNumber = 1;
+        ApplyView();
+    }
+
+    private void Sort((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        ApplyView();
+    }
+
+    private void GoToPage(int page)
+    {
+        _pageNumber = page;
+        ApplyView();
+    }
+
+    private async Task CreateBackupAsync()
+    {
+        _creating = true;
+        try
+        {
+            var result = await BackupService.CreateBackupAsync();
+            if (Toasts.FromResult(result, "Backup created"))
+            {
+                await LoadAsync(showToastOnError: false);
+            }
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        if (e.File.Size > _settings.MaxUploadBytes)
+        {
+            Toasts.Error("File too large", $"Backups up to {BackupDisplay.Size(_settings.MaxUploadBytes)} can be uploaded.");
+            return;
+        }
+
+        _uploading = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(_settings.MaxUploadBytes);
+            var result = await BackupService.ImportAsync(stream, e.File.Name);
+            if (Toasts.FromResult(result, "Backup uploaded and verified"))
+            {
+                await LoadAsync(showToastOnError: false);
+            }
+        }
+        catch (IOException ex)
+        {
+            Toasts.Error("Upload failed", ex.Message);
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task VerifyAsync(BackupInfo backup)
+    {
+        _verifying = backup.Id;
+        try
+        {
+            var result = await BackupService.VerifyAsync(backup.Id);
+            if (!result.Succeeded)
+            {
+                Toasts.FromResult(result, string.Empty);
+                return;
+            }
+
+            var verification = result.Value!;
+            if (verification.IsValid)
+            {
+                Toasts.Success("Backup verified", $"{verification.EntriesChecked} entries ({BackupDisplay.Size(verification.BytesChecked)}) match their SHA-256 hashes{(verification.SignatureChecked ? "; signature valid" : string.Empty)}.");
+            }
+            else
+            {
+                Toasts.Error("Backup is damaged", string.Join(" ", verification.Problems.Take(3)));
+            }
+
+            await LoadAsync(showToastOnError: false);
+        }
+        finally
+        {
+            _verifying = null;
+        }
+    }
+
+    private async Task OpenRestoreAsync(BackupInfo backup)
+    {
+        _restoreCheck = null;
+        _restoreOpen = true;
+        var result = await BackupService.CheckRestoreAsync(backup.Id);
+        if (result.Succeeded)
+        {
+            _restoreCheck = result.Value;
+        }
+        else
+        {
+            _restoreOpen = false;
+            Toasts.FromResult(result, string.Empty);
+        }
+    }
+
+    private async Task<Result> RestoreAsync(string confirmation, string? password)
+    {
+        if (_restoreCheck is null)
+        {
+            return Result.Invalid("Select a backup first.");
+        }
+
+        var result = await BackupService.RequestRestoreAsync(new BackupRestoreRequestInput(_restoreCheck.Backup.Id, confirmation, password));
+        if (result.Succeeded)
+        {
+            Nav.NavigateTo($"/admin/backups/restoring?auto={(_restoreCheck.RestartsAutomatically ? 1 : 0)}", forceLoad: true);
+        }
+
+        return result;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleteTarget is null)
+        {
+            return;
+        }
+
+        var result = await BackupService.DeleteAsync(_deleteTarget.Id);
+        if (Toasts.FromResult(result, "Backup deleted"))
+        {
+            await LoadAsync(showToastOnError: false);
+        }
+
+        _deleteTarget = null;
+    }
+
+    private async Task OpenScheduleAsync()
+    {
+        if (!_canManage)
+        {
+            return;
+        }
+
+        var settings = await BackupService.GetSettingsAsync();
+        if (settings.Succeeded)
+        {
+            _settings = settings.Value;
+            _scheduleOpen = true;
+        }
+    }
+
+    private async Task<Result> SaveScheduleAsync(BackupSettingsUpdate update)
+    {
+        var result = await BackupService.SaveSettingsAsync(update);
+        if (result.Succeeded)
+        {
+            Toasts.Success("Schedule saved", update.Schedule.Enabled ? BackupDisplay.DescribeSchedule(update.Schedule) : "Scheduled backups are disabled.");
+            await LoadAsync(showToastOnError: false);
+        }
+
+        return result;
+    }
+}

@@ -1,0 +1,309 @@
+@* Side panel to edit the backup schedule, destination, encryption and retention, with a live preview of the next runs. *@
+<Drawer Open="Open" OpenChanged="OpenChanged" Title="Backup schedule" Subtitle="When backups run, where they are stored and how long they are kept" Size="lg">
+    <ChildContent>
+        @if (_draft is not null && Settings is not null)
+        {
+            <div class="form-section">
+                <div class="form-section-title"><Icon Name="calendar-clock" Size="16" /> Schedule</div>
+                <div class="schedule-toggle">
+                    <Switch @bind-Value="_draft.Enabled" Label="Run scheduled backups" />
+                    <span class="small muted">@(_draft.Enabled ? BackupDisplay.DescribeSchedule(_draft) : "Only manual and automatic safety backups are created.")</span>
+                </div>
+
+                <div class="form-grid mt-4">
+                    <FormField Label="Frequency" Class="span-all">
+                        <div class="segmented">
+                            @foreach (var frequency in Enum.GetValues<BackupFrequency>())
+                            {
+                                <button type="button" class="@(_draft.Frequency == frequency ? "active" : null)" @onclick="() => _draft.Frequency = frequency">@frequency</button>
+                            }
+                        </div>
+                    </FormField>
+
+                    @if (_draft.Frequency == BackupFrequency.Weekly)
+                    {
+                        <FormField Label="Weekdays" Class="span-all" Error="@(_draft.Weekdays.Count == 0 ? "Select at least one weekday." : null)">
+                            <div class="weekday-picker">
+                                @foreach (var day in s_week)
+                                {
+                                    <button type="button" class="weekday @(_draft.Weekdays.Contains(day) ? "selected" : null)" @onclick="() => ToggleDay(day)"
+                                            aria-pressed="@_draft.Weekdays.Contains(day)">
+                                        @System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(day)
+                                    </button>
+                                }
+                            </div>
+                        </FormField>
+                    }
+                    else if (_draft.Frequency == BackupFrequency.Monthly)
+                    {
+                        <FormField Label="Day of month" Help="Days 29–31 run on the last day of shorter months.">
+                            <select class="select" @bind="_draft.DayOfMonth">
+                                @for (var day = 1; day <= 31; day++)
+                                {
+                                    <option value="@day">@day</option>
+                                }
+                            </select>
+                        </FormField>
+                    }
+
+                    <FormField Label="Time of day">
+                        <input type="time" class="input" @bind="_draft.TimeOfDay" />
+                    </FormField>
+                    <FormField Label="Time zone" Class="@(_draft.Frequency == BackupFrequency.Monthly ? "span-all" : null)" Help="Daylight saving time is handled automatically.">
+                        <select class="select" @bind="TimeZoneValue">
+                            <option value="">Server time zone (@TimeZoneInfo.Local.DisplayName)</option>
+                            @foreach (var zone in s_zones)
+                            {
+                                <option value="@zone.Id">@zone.DisplayName</option>
+                            }
+                        </select>
+                    </FormField>
+                </div>
+
+                @if (_draft.Enabled && _preview.Count > 0)
+                {
+                    <div class="next-runs mt-4">
+                        <div class="eyebrow">Next runs</div>
+                        @foreach (var run in _preview)
+                        {
+                            <div class="next-run"><Icon Name="clock" Size="13" /> @BackupDisplay.InZone(run, _zone)</div>
+                        }
+                    </div>
+                }
+
+                <div class="stack mt-4" style="gap:10px">
+                    <Switch @bind-Value="_draft.CatchUpMissedRuns" Label="Catch up a missed run when Servora starts again" />
+                    <Switch @bind-Value="_draft.PreMigrationBackupEnabled" Label="Back up automatically before database migrations (recommended)" />
+                </div>
+            </div>
+
+            <div class="form-section">
+                <div class="form-section-title"><Icon Name="folder" Size="16" /> Destination &amp; content</div>
+                <div class="form-grid cols-1">
+                    <FormField Label="Destination folder" Help="@($"Leave empty for {Settings.DefaultDestination}. UNC paths (\\\\server\\share\\servora) are supported; the service account needs write access.")">
+                        <input class="input mono" maxlength="400" placeholder="@Settings.DefaultDestination" @bind="_draft.DestinationFolder" />
+                    </FormField>
+                </div>
+                <div class="stack mt-4" style="gap:10px">
+                    <Switch @bind-Value="_draft.IncludeAttachments" Label="Include attachment files" />
+                    <Switch @bind-Value="_draft.IncludeInstanceSettings" Label="Include the instance appsettings.json (ports, certificates)" />
+                </div>
+            </div>
+
+            <div class="form-section">
+                <div class="form-section-title"><Icon Name="lock" Size="16" /> Encryption</div>
+                <Switch @bind-Value="_draft.EncryptionEnabled" Label="Encrypt archives with a password (AES-256-GCM)" />
+                <p class="small muted" style="margin:8px 0 0">
+                    Backups always contain the Data Protection key ring and password hashes. Encrypt them when they leave this server.
+                    Keep the password safe – encrypted backups cannot be restored without it.
+                </p>
+                <div class="form-grid mt-4">
+                    <FormField Label="@(Settings.PasswordConfigured && !_clearPassword ? "New password" : "Password")" Error="@PasswordError"
+                               Help="@(Settings.PasswordConfigured && !_clearPassword ? "A password is configured. Leave empty to keep it." : $"At least {BackupConstants.MinPasswordLength} characters.")">
+                        <input type="password" class="input" autocomplete="new-password" maxlength="256" @bind="_password" @bind:event="oninput" />
+                    </FormField>
+                    <FormField Label="Confirm password">
+                        <input type="password" class="input" autocomplete="new-password" maxlength="256" @bind="_confirm" @bind:event="oninput" />
+                    </FormField>
+                </div>
+                @if (Settings.PasswordConfigured)
+                {
+                    <label class="checkbox mt-3">
+                        <input type="checkbox" @bind="_clearPassword" /> Remove the stored password (turns encryption off)
+                    </label>
+                }
+            </div>
+
+            <div class="form-section">
+                <div class="form-section-title"><Icon Name="history" Size="16" /> Retention</div>
+                <div class="form-grid cols-3">
+                    <FormField Label="Keep scheduled" Help="Newest N (0 = all)">
+                        <input type="number" class="input" min="0" max="@BackupSchedule.MaxKeep" @bind="_draft.KeepLastScheduled" />
+                    </FormField>
+                    <FormField Label="Max. age (days)" Help="0 = unlimited">
+                        <input type="number" class="input" min="0" max="@BackupSchedule.MaxAgeLimitDays" @bind="_draft.MaxAgeDays" />
+                    </FormField>
+                    <FormField Label="Keep safety backups" Help="Per kind (0 = all)">
+                        <input type="number" class="input" min="0" max="@BackupSchedule.MaxKeep" @bind="_draft.KeepLastSafety" />
+                    </FormField>
+                </div>
+                <p class="small muted" style="margin:10px 0 0">Manual and uploaded backups are never deleted automatically. The newest scheduled backup is always kept.</p>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger"><Icon Name="alert-circle" Size="16" /> <span>@_error</span></div>
+            }
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="CloseAsync" disabled="@_busy">Cancel</button>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(_busy || PasswordError is not null)">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <Icon Name="save" Size="16" />
+            }
+            Save schedule
+        </button>
+    </Footer>
+</Drawer>
+
+@code {
+    private static readonly DayOfWeek[] s_week = [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
+    private static readonly IReadOnlyList<TimeZoneInfo> s_zones = TimeZoneInfo.GetSystemTimeZones();
+
+    private BackupSchedule? _draft;
+    private TimeZoneInfo _zone = TimeZoneInfo.Local;
+    private List<DateTimeOffset> _preview = [];
+    private string? _password;
+    private string? _confirm;
+    private bool _clearPassword;
+    private string? _error;
+    private bool _busy;
+    private bool _wasOpen;
+
+    /// <summary>Gets or sets a value indicating whether the drawer is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the current settings.</summary>
+    [Parameter] public BackupSettingsView? Settings { get; set; }
+
+    /// <summary>Gets or sets the save handler; returns the service result (errors are shown inline).</summary>
+    [Parameter] public Func<BackupSettingsUpdate, Task<Result>>? Save { get; set; }
+
+    private string TimeZoneValue
+    {
+        get => _draft?.TimeZoneId ?? string.Empty;
+        set
+        {
+            if (_draft is not null)
+            {
+                _draft.TimeZoneId = string.IsNullOrEmpty(value) ? null : value;
+            }
+        }
+    }
+
+    private string? PasswordError
+    {
+        get
+        {
+            if (_clearPassword || (string.IsNullOrEmpty(_password) && string.IsNullOrEmpty(_confirm)))
+            {
+                return _draft is { EncryptionEnabled: true } && Settings?.PasswordConfigured != true ? "Enter a password to enable encryption." : null;
+            }
+
+            if ((_password?.Length ?? 0) < BackupConstants.MinPasswordLength)
+            {
+                return $"Use at least {BackupConstants.MinPasswordLength} characters.";
+            }
+
+            return _password != _confirm ? "The passwords do not match." : null;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Open && !_wasOpen && Settings is not null)
+        {
+            _draft = Settings.Schedule.Clone();
+            _password = null;
+            _confirm = null;
+            _clearPassword = false;
+            _error = null;
+        }
+
+        _wasOpen = Open;
+    }
+
+    /// <inheritdoc />
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (_draft is null)
+        {
+            return;
+        }
+
+        // Keep the "next runs" preview in sync with the draft (cheap: at most a few hundred date computations).
+        var zone = _draft.ResolveTimeZone(TimeZoneInfo.Local);
+        var preview = new List<DateTimeOffset>();
+        var cursor = DateTimeOffset.UtcNow;
+        for (var i = 0; i < 3 && _draft.Validate().Count == 0; i++)
+        {
+            if (BackupScheduleCalculator.GetNextOccurrence(_draft, zone, cursor) is not { } next)
+            {
+                break;
+            }
+
+            preview.Add(next);
+            cursor = next;
+        }
+
+        if (!preview.SequenceEqual(_preview) || zone.Id != _zone.Id)
+        {
+            _preview = preview;
+            _zone = zone;
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleDay(DayOfWeek day)
+    {
+        if (_draft is null)
+        {
+            return;
+        }
+
+        if (!_draft.Weekdays.Remove(day))
+        {
+            _draft.Weekdays.Add(day);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_draft is null || Save is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            if (_clearPassword)
+            {
+                _draft.EncryptionEnabled = false;
+            }
+
+            var newPassword = _clearPassword || string.IsNullOrEmpty(_password) ? null : _password;
+            var result = await Save(new BackupSettingsUpdate(_draft, newPassword, _clearPassword));
+            if (result.Succeeded)
+            {
+                await CloseAsync();
+            }
+            else
+            {
+                _error = result.Error;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        _password = null;
+        _confirm = null;
+        await OpenChanged.InvokeAsync(false);
+    }
+}

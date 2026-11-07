@@ -1,0 +1,74 @@
+@* Database schema state: provider, current migration, applied and pending migrations. *@
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h3><Icon Name="database" Size="16" /> Database schema</h3>
+            <div class="card-subtitle">Migrations are applied automatically at startup</div>
+        </div>
+        @if (Status is not null)
+        {
+            @if (Status.Problem is not null)
+            {
+                <StatusPill Text="Attention" Tone="danger" />
+            }
+            else if (Status.Pending.Count > 0)
+            {
+                <StatusPill Text="@($"{Status.Pending.Count} pending")" Tone="warning" />
+            }
+            else
+            {
+                <StatusPill Text="Up to date" Tone="success" />
+            }
+        }
+    </div>
+    <div class="card-body">
+        @if (Status is null)
+        {
+            <Skeleton Lines="4" />
+        }
+        else
+        {
+            <dl class="kv schema-kv">
+                <dt>Provider</dt>
+                <dd>@Status.Provider</dd>
+                <dt>Mode</dt>
+                <dd>@(Status.UsesMigrations ? "Migrations" : "Schema created by model (development build)")</dd>
+                <dt>Current migration</dt>
+                <dd>
+                    @if (Status.CurrentMigration is null)
+                    {
+                        <span class="faint">—</span>
+                    }
+                    else
+                    {
+                        <span class="mono" title="@Status.CurrentMigration">@Status.CurrentMigration</span>
+                    }
+                </dd>
+                <dt>Applied</dt>
+                <dd>@Status.Applied.Count of @Status.KnownMigrations</dd>
+            </dl>
+
+            @if (Status.Problem is not null)
+            {
+                <div class="alert alert-danger mt-4"><Icon Name="alert-octagon" Size="16" /> <span>@Status.Problem</span></div>
+            }
+
+            @if (Status.Pending.Count > 0)
+            {
+                <div class="eyebrow mt-4" style="margin-bottom:8px">Pending migrations</div>
+                <ul class="migration-list">
+                    @foreach (var migration in Status.Pending)
+                    {
+                        <li><Icon Name="clock" Size="12" /> <span class="mono truncate" title="@migration">@migration</span></li>
+                    }
+                </ul>
+                <p class="small muted" style="margin:10px 0 0">A pre-migration backup is created automatically before they are applied at the next start.</p>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>Gets or sets the schema status (<see langword="null"/> while loading).</summary>
+    [Parameter] public DatabaseSchemaStatus? Status { get; set; }
+}

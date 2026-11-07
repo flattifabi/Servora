@@ -1,0 +1,54 @@
+.backup-alerts {
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.backup-alerts:empty {
+    display: none;
+}
+
+.row-actions {
+    display: inline-flex;
+    gap: 2px;
+    justify-content: flex-end;
+}
+
+.row-actions .icon-btn {
+    width: 34px;
+    height: 34px;
+}
+
+.row-actions .icon-btn.restore:hover {
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.row-actions .icon-btn.danger:hover {
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+
+.encrypted {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.backup-info .info-icon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 10px;
+    background: var(--info-soft);
+    color: var(--info);
+}
+
+.backup-info .text {
+    color: var(--text);
+}
