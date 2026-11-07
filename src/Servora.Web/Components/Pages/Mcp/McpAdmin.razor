@@ -1,0 +1,318 @@
+@page "/admin/mcp"
+@attribute [RequirePermission(Permissions.Mcp.Manage)]
+@* MCP server administration: enable switch, KPIs, tool catalog with per-tool switches, client configuration and recent invocations. *@
+@inject IMcpSettingsService Mcp
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ToastService Toasts
+
+<PageTitle>MCP Server · Servora</PageTitle>
+
+<PageHeader Title="MCP Server" Icon="bot" Subtitle="Expose Servora to AI clients through the Model Context Protocol – scoped per API key and per tool, every call audited.">
+    <Breadcrumbs><span>Administration</span> <Icon Name="chevron-right" Size="12" /> <span>MCP Server</span></Breadcrumbs>
+    <Actions>
+        @if (_overview is not null)
+        {
+            <div class="server-switch @(_overview.ServerEnabled ? "on" : "off")">
+                <span class="live-dot @(_overview.ServerEnabled ? null : "off")"></span>
+                <Switch Value="_overview.ServerEnabled" ValueChanged="SetServerEnabledAsync" Label="@(_overview.ServerEnabled ? "Server online" : "Server disabled")" />
+            </div>
+        }
+        <a class="btn btn-secondary" href="/admin/api-keys"><Icon Name="key" Size="16" /> API keys</a>
+    </Actions>
+</PageHeader>
+
+@if (_overview is null)
+{
+    <div class="grid grid-4 mb-6">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="card card-body"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    </div>
+}
+else
+{
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Tool calls (24 h)" Value="@_overview.Calls24h.ToString("N0")" Icon="zap" Tone="primary" Trend="_overview.Hourly" Caption="hourly trend" />
+        <StatCard Label="Success rate" Value="@SuccessRate" Icon="check-circle" Tone="success" Caption="@($"{_overview.Failed24h:N0} failed")" />
+        <StatCard Label="Denied calls" Value="@_overview.Denied24h.ToString("N0")" Icon="shield" Tone="@(_overview.Denied24h > 0 ? "warning" : "info")" Caption="missing scope or permission" OnClick="@(() => ShowInvocations(McpInvocationOutcome.Denied))" />
+        <StatCard Label="Active clients" Value="@_overview.Clients24h.ToString("N0")" Icon="plug" Tone="accent" Caption="distinct API keys (24 h)" />
+    </div>
+
+    @if (!_overview.ServerEnabled)
+    {
+        <div class="alert alert-warning mb-6"><Icon Name="alert-triangle" Size="18" /><div>The MCP server is disabled. Clients receive an error for every request until you switch it on.</div></div>
+    }
+
+    <div class="card">
+        <Tabs Items="Tabs" ActiveKey="@_tab" ActiveKeyChanged="TabChangedAsync" />
+        <div class="card-body">
+            @switch (_tab)
+            {
+                case "tools":
+                    <div class="grid tool-grid">
+                        @foreach (var tool in _overview.Tools)
+                        {
+                            <div class="tool-card @(tool.IsEnabled ? null : "disabled")">
+                                <div class="tool-head">
+                                    <div class="tool-icon @(tool.IsConsequential ? "danger" : null)"><Icon Name="@(tool.IsConsequential ? "zap" : "eye")" Size="16" /></div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="tool-title">@tool.Title</div>
+                                        <div class="tiny mono faint">@tool.Name</div>
+                                    </div>
+                                    <Switch Value="tool.IsEnabled" ValueChanged="v => SetToolEnabledAsync(tool, v)" />
+                                </div>
+                                <p class="small muted tool-desc">@tool.Description</p>
+                                <div class="flex flex-wrap gap-2">
+                                    <span class="tag mono" title="Required API key scope"><Icon Name="key" Size="11" /> @tool.Scope</span>
+                                    @if (tool.RequiredPermission is not null)
+                                    {
+                                        <span class="tag mono" title="Underlying permission (key scope and key owner)"><Icon Name="shield" Size="11" /> @tool.RequiredPermission</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="tag" title="Enforced by the record service per table"><Icon Name="shield" Size="11" /> table permissions</span>
+                                    }
+                                    <span class="pill @(tool.IsConsequential ? "pill-warning" : "pill-success") no-dot">@(tool.IsConsequential ? "Consequential" : "Read-only")</span>
+                                </div>
+                                <div class="tool-foot">
+                                    <span class="tiny faint">@tool.Calls24h.ToString("N0") calls in 24 h</span>
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleSchema(tool.Name)"><Icon Name="braces" Size="14" /> @(_openSchemas.Contains(tool.Name) ? "Hide schema" : "Input schema")</button>
+                                </div>
+                                @if (_openSchemas.Contains(tool.Name))
+                                {
+                                    <pre class="mt-2 schema">@tool.InputSchemaJson</pre>
+                                }
+                            </div>
+                        }
+                    </div>
+                    break;
+
+                case "connect":
+                    <div class="grid grid-2">
+                        <div class="stack">
+                            <div>
+                                <div class="eyebrow mb-2">Endpoint (Streamable HTTP)</div>
+                                <div class="secret-reveal endpoint">
+                                    <span class="flex-1">@EndpointUrl</span>
+                                    <button class="btn btn-secondary btn-sm" @onclick="() => CopyAsync(EndpointUrl)"><Icon Name="copy" Size="14" /> Copy</button>
+                                </div>
+                            </div>
+                            <dl class="kv">
+                                <dt>Transport</dt><dd>JSON-RPC 2.0 over HTTP POST, JSON responses (no SSE stream, stateless)</dd>
+                                <dt>Protocol versions</dt><dd>@foreach (var v in McpProtocol.SupportedVersions) { <code style="margin-right:6px">@v</code> }</dd>
+                                <dt>Authentication</dt><dd><code>Authorization: Bearer srv_…</code> or <code>X-Api-Key</code></dd>
+                                <dt>Required scopes</dt><dd><code>mcp.access</code> plus <code>mcp.tool.&lt;name&gt;</code> (or <code>mcp.tool.*</code>) and each tool's permission</dd>
+                                <dt>Methods</dt><dd>initialize, ping, tools/list, tools/call, resources/list, resources/templates/list, resources/read</dd>
+                            </dl>
+                            <div class="alert alert-info"><Icon Name="info" Size="16" /><div>Create a key with the <b>MCP client</b> preset on the API keys page. The key's owner must also hold the permissions of the tools you want to use.</div></div>
+                        </div>
+                        <div class="stack">
+                            <div>
+                                <div class="eyebrow mb-2">Generic MCP client (JSON)</div>
+                                <div class="code-block"><button class="btn btn-secondary btn-sm copy" @onclick="() => CopyAsync(GenericSnippet)"><Icon Name="copy" Size="14" /></button><pre>@GenericSnippet</pre></div>
+                            </div>
+                            <div>
+                                <div class="eyebrow mb-2">Claude Desktop (claude_desktop_config.json via mcp-remote)</div>
+                                <div class="code-block"><button class="btn btn-secondary btn-sm copy" @onclick="() => CopyAsync(ClaudeSnippet)"><Icon Name="copy" Size="14" /></button><pre>@ClaudeSnippet</pre></div>
+                            </div>
+                            <div>
+                                <div class="eyebrow mb-2">Smoke test with curl</div>
+                                <div class="code-block"><button class="btn btn-secondary btn-sm copy" @onclick="() => CopyAsync(CurlSnippet)"><Icon Name="copy" Size="14" /></button><pre>@CurlSnippet</pre></div>
+                            </div>
+                        </div>
+                    </div>
+                    break;
+
+                default:
+                    <DataTable TItem="McpInvocationRow" Items="_invocations?.Items" TotalCount="_invocations?.TotalCount ?? 0" PageNumber="_invocationPage" PageSize="25"
+                               Loading="_loadingInvocations" OnPageChanged="InvocationPageAsync" OnSearch="InvocationSearchAsync" Compact="true" Class="inner-table"
+                               SearchPlaceholder="Search tool, caller, client…" EmptyIcon="activity" EmptyTitle="No invocations yet"
+                               EmptyText="Calls from MCP clients appear here with outcome and duration.">
+                        <Toolbar>
+                            <div class="segmented">
+                                <button class="@(_outcome is null ? "active" : null)" @onclick="() => ShowInvocations(null)">All</button>
+                                <button class="@(_outcome == McpInvocationOutcome.Success ? "active" : null)" @onclick="() => ShowInvocations(McpInvocationOutcome.Success)">Success</button>
+                                <button class="@(_outcome == McpInvocationOutcome.Denied ? "active" : null)" @onclick="() => ShowInvocations(McpInvocationOutcome.Denied)">Denied</button>
+                                <button class="@(_outcome == McpInvocationOutcome.ToolError ? "active" : null)" @onclick="() => ShowInvocations(McpInvocationOutcome.ToolError)">Errors</button>
+                            </div>
+                        </Toolbar>
+                        <Columns>
+                            <DataColumn TItem="McpInvocationRow" Title="Time"><Template><RelativeTime Value="context.OccurredAt" /></Template></DataColumn>
+                            <DataColumn TItem="McpInvocationRow" Title="Method"><Template><code>@context.Method</code></Template></DataColumn>
+                            <DataColumn TItem="McpInvocationRow" Title="Tool / resource" Class="cell-primary"><Template><span class="mono small">@context.Target</span></Template></DataColumn>
+                            <DataColumn TItem="McpInvocationRow" Title="Caller"><Template><span class="small">@context.ActorName</span><div class="tiny faint">@context.ClientName @context.IpAddress</div></Template></DataColumn>
+                            <DataColumn TItem="McpInvocationRow" Title="Outcome"><Template><StatusPill Text="@OutcomeText(context.Outcome)" Tone="@OutcomeTone(context.Outcome)" /></Template></DataColumn>
+                            <DataColumn TItem="McpInvocationRow" Title="Duration" Align="right"><Template>@context.DurationMs ms</Template></DataColumn>
+                            <DataColumn TItem="McpInvocationRow" Title="Message"><Template><span class="small muted truncate" title="@context.ErrorMessage">@context.ErrorMessage</span></Template></DataColumn>
+                        </Columns>
+                    </DataTable>
+                    break;
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private McpOverview? _overview;
+    private PagedResult<McpInvocationRow>? _invocations;
+    private readonly HashSet<string> _openSchemas = new(StringComparer.Ordinal);
+    private McpInvocationOutcome? _outcome;
+    private string _tab = "tools";
+    private int _invocationPage = 1;
+    private string? _invocationSearch;
+    private bool _loadingInvocations;
+
+    private IReadOnlyList<TabItem> Tabs =>
+    [
+        new("tools", "Tool catalog", "wrench", _overview?.Tools.Count),
+        new("connect", "Connect a client", "plug"),
+        new("invocations", "Recent invocations", "history"),
+    ];
+
+    private string EndpointUrl => $"{Navigation.BaseUri}mcp";
+
+    private string SuccessRate => _overview is { Calls24h: > 0 } o
+        ? $"{100.0 * (o.Calls24h - o.Failed24h - o.Denied24h) / o.Calls24h:0.#}%"
+        : "—";
+
+    private string GenericSnippet => $$"""
+        {
+          "mcpServers": {
+            "servora": {
+              "type": "http",
+              "url": "{{EndpointUrl}}",
+              "headers": { "Authorization": "Bearer ${SERVORA_API_KEY}" }
+            }
+          }
+        }
+        """;
+
+    private string ClaudeSnippet => $$"""
+        {
+          "mcpServers": {
+            "servora": {
+              "command": "npx",
+              "args": ["-y", "mcp-remote", "{{EndpointUrl}}",
+                       "--header", "Authorization: Bearer ${SERVORA_API_KEY}"],
+              "env": { "SERVORA_API_KEY": "srv_…" }
+            }
+          }
+        }
+        """;
+
+    private string CurlSnippet => $$$"""
+        curl -s {{{EndpointUrl}}} \
+          -H "Authorization: Bearer $SERVORA_API_KEY" \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json, text/event-stream" \
+          -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"{{{McpProtocol.LatestVersion}}}","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"} } }'
+
+        curl -s {{{EndpointUrl}}} -H "Authorization: Bearer $SERVORA_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+        """;
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private static string OutcomeText(McpInvocationOutcome outcome) => outcome switch
+    {
+        McpInvocationOutcome.Success => "Success",
+        McpInvocationOutcome.Denied => "Denied",
+        McpInvocationOutcome.InvalidParams => "Invalid params",
+        McpInvocationOutcome.ToolError => "Tool error",
+        _ => "Error",
+    };
+
+    private static string OutcomeTone(McpInvocationOutcome outcome) => outcome switch
+    {
+        McpInvocationOutcome.Success => "success",
+        McpInvocationOutcome.Denied => "warning",
+        _ => "danger",
+    };
+
+    private async Task LoadAsync()
+    {
+        var overview = await Mcp.GetOverviewAsync();
+        if (overview.Succeeded)
+        {
+            _overview = overview.Value;
+        }
+        else
+        {
+            Toasts.Error("Could not load the MCP configuration", overview.Error);
+        }
+    }
+
+    private async Task SetServerEnabledAsync(bool enabled)
+    {
+        if (Toasts.FromResult(await Mcp.SetServerEnabledAsync(enabled), enabled ? "MCP server enabled" : "MCP server disabled"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task SetToolEnabledAsync(McpToolInfo tool, bool enabled)
+    {
+        if (Toasts.FromResult(await Mcp.SetToolEnabledAsync(tool.Name, enabled), $"{tool.Title} {(enabled ? "enabled" : "disabled")}"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private void ToggleSchema(string name)
+    {
+        if (!_openSchemas.Remove(name))
+        {
+            _openSchemas.Add(name);
+        }
+    }
+
+    private async Task TabChangedAsync(string tab)
+    {
+        _tab = tab;
+        if (tab == "invocations")
+        {
+            await LoadInvocationsAsync();
+        }
+    }
+
+    private async Task ShowInvocations(McpInvocationOutcome? outcome)
+    {
+        _outcome = outcome;
+        _tab = "invocations";
+        _invocationPage = 1;
+        await LoadInvocationsAsync();
+    }
+
+    private Task InvocationPageAsync(int page)
+    {
+        _invocationPage = page;
+        return LoadInvocationsAsync();
+    }
+
+    private Task InvocationSearchAsync(string search)
+    {
+        _invocationSearch = search;
+        _invocationPage = 1;
+        return LoadInvocationsAsync();
+    }
+
+    private async Task LoadInvocationsAsync()
+    {
+        _loadingInvocations = true;
+        var result = await Mcp.ListInvocationsAsync(new PageRequest { Page = _invocationPage, PageSize = 25, Search = _invocationSearch }, _outcome);
+        _invocations = result.Succeeded ? result.Value : null;
+        _loadingInvocations = false;
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        if (await JS.InvokeAsync<bool>("servora.copy", text))
+        {
+            Toasts.Success("Copied to the clipboard");
+        }
+    }
+}

@@ -1,0 +1,446 @@
+@page "/assistant"
+@page "/assistant/{ConversationId:guid}"
+@attribute [RequirePermission(Permissions.Ai.UseAssistant)]
+@implements IAsyncDisposable
+@* AI assistant: conversation history, chat with orchestrated sub-agents, tool-call cards, confirmations and a guided empty state. *@
+@inject IAiAssistantService AssistantService
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ToastService Toasts
+
+<PageTitle>AI Assistant · Servora</PageTitle>
+
+<div class="assistant-shell">
+    <aside class="history">
+        <button class="btn btn-primary btn-block" @onclick="NewChat"><Icon Name="plus" Size="16" /> New conversation</button>
+        <div class="input-icon">
+            <Icon Name="search" Size="15" />
+            <input class="input" placeholder="Search conversations…" @bind="_historySearch" @bind:event="oninput" @bind:after="LoadHistoryAsync" />
+        </div>
+        <div class="history-list">
+            @if (_history is null)
+            {
+                <Skeleton Lines="6" Height="30px" />
+            }
+            else if (_history.Count == 0)
+            {
+                <div class="small faint history-empty">Your conversations appear here.</div>
+            }
+            else
+            {
+                @foreach (var group in _history.GroupBy(c => DayGroup(c.LastMessageAt)))
+                {
+                    <div class="history-group">@group.Key</div>
+                    @foreach (var conversation in group)
+                    {
+                        <div class="history-item @(conversation.Id == ConversationId ? "active" : null)" @onclick="() => Open(conversation.Id)">
+                            <Icon Name="message-square" Size="14" />
+                            <span class="truncate flex-1">@conversation.Title</span>
+                            <button class="history-delete" title="Delete" @onclick="() => _deleting = conversation" @onclick:stopPropagation="true"><Icon Name="trash" Size="13" /></button>
+                        </div>
+                    }
+                }
+            }
+        </div>
+    </aside>
+
+    <section class="chat card">
+        <header class="chat-header">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="chat-mark"><Icon Name="sparkles" Size="18" /></div>
+                <div class="min-w-0">
+                    <div class="chat-title truncate">@(_conversation?.Title ?? "Servora Assistant")</div>
+                    <div class="tiny faint">Orchestrator with @(_status?.Agents.Count ?? 0) specialist agents · actions always need your confirmation</div>
+                </div>
+            </div>
+            @if (_status is { HasProvider: true })
+            {
+                <span class="pill pill-success" title="@(_status.SupportsTools ? "Tool calling enabled" : "Keyword routing (no tool calling)")"><span>@_status.ProviderName · @_status.Model</span></span>
+            }
+        </header>
+
+        <div class="chat-scroll" @ref="_scroll">
+            @if (_status is null)
+            {
+                <div class="chat-center"><span class="spinner"></span></div>
+            }
+            else if (!_status.HasProvider)
+            {
+                <div class="chat-center">
+                    <EmptyState Icon="wand" Title="Connect an AI model to get started"
+                                Text="The assistant needs an AI provider – an OpenAI-compatible endpoint (OpenAI, local Ollama or LM Studio), Anthropic or Azure OpenAI.">
+                        @if (_status.CanConfigure)
+                        {
+                            <a class="btn btn-primary" href="/admin/ai"><Icon Name="settings" Size="16" /> Configure a provider</a>
+                        }
+                        else
+                        {
+                            <div class="small muted">Ask your administrator to configure a provider under Administration › AI &amp; Agents.</div>
+                        }
+                    </EmptyState>
+                </div>
+            }
+            else if (_conversation is null || _conversation.Messages.Count == 0)
+            {
+                <div class="welcome">
+                    <div class="welcome-mark"><Icon Name="sparkles" Size="30" /></div>
+                    <h1 class="gradient-text">How can I help, @FirstName?</h1>
+                    <p class="muted">I plan your request and delegate it to specialist agents that work with your permissions only.</p>
+                    <div class="agent-row">
+                        @foreach (var agent in _status.Agents)
+                        {
+                            <div class="agent-pill" title="@agent.Description"><Icon Name="@agent.Icon" Size="14" /> @agent.Name</div>
+                        }
+                    </div>
+                    <div class="suggestions">
+                        @foreach (var suggestion in s_suggestions)
+                        {
+                            <button class="suggestion" disabled="@_busy" @onclick="() => SendAsync(suggestion.Text)">
+                                <Icon Name="@suggestion.Icon" Size="16" />
+                                <span>@suggestion.Text</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="messages">
+                    @foreach (var message in _conversation.Messages)
+                    {
+                        <AssistantMessage @key="message.Id" Message="message" UserName="@CurrentUser.DisplayName" AgentNames="_agentNames"
+                                          Animate="message.Id == _animateId" BusyStepId="_busyStep" OnConfirm="ConfirmAsync" OnReject="RejectAsync" />
+                    }
+                    @if (_busy)
+                    {
+                        <div class="thinking">
+                            <div class="assistant-avatar-sm"><Icon Name="sparkles" Size="14" /></div>
+                            <div class="thinking-bubble">
+                                <span class="dots"><i></i><i></i><i></i></span>
+                                <span class="small muted">@_thinkingText</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (_status is { HasProvider: true })
+        {
+            <footer class="composer">
+                <div class="composer-box">
+                    <textarea @ref="_input" class="composer-input" rows="1" maxlength="4000" placeholder="Ask about incidents, knowledge, records or automations…" disabled="@_busy"></textarea>
+                    <button class="btn btn-primary composer-send" disabled="@_busy" @onclick="SendFromButtonAsync" title="Send (Enter)">
+                        @if (_busy)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="send" Size="16" />
+                        }
+                    </button>
+                </div>
+                <div class="tiny faint composer-hint">Enter to send · Shift+Enter for a new line · Answers can be wrong – verify important information.</div>
+            </footer>
+        }
+    </section>
+</div>
+
+<ConfirmDialog Open="_deleting is not null" OpenChanged="v => { if (!v) _deleting = null; }" Danger="true" Title="Delete conversation?" ConfirmText="Delete"
+               Message="@($"“{_deleting?.Title}” and its execution trace are deleted permanently.")" OnConfirm="DeleteAsync" />
+
+@code {
+    private static readonly (string Icon, string Text)[] s_suggestions =
+    [
+        ("target", "My laptop cannot connect to the VPN since this morning – how urgent is that?"),
+        ("book-open", "How do I reset my password?"),
+        ("search", "Show me the open P1 incidents"),
+        ("workflow", "Which automations can I start?"),
+    ];
+
+    private static readonly string[] s_thinking = ["Orchestrator is planning…", "Delegating to a specialist agent…", "Agents are working with your permissions…", "Composing the answer…"];
+
+    private AiAssistantStatus? _status;
+    private IReadOnlyList<AiConversationSummary>? _history;
+    private AiConversationView? _conversation;
+    private Dictionary<string, string> _agentNames = new(StringComparer.Ordinal);
+    private AiConversationSummary? _deleting;
+    private DotNetObjectReference<Assistant>? _self;
+    private IJSObjectReference? _module;
+    private ElementReference _input;
+    private ElementReference _scroll;
+    private System.Threading.Timer? _thinkingTimer;
+    private string _thinkingText = s_thinking[0];
+    private string? _historySearch;
+    private Guid? _animateId;
+    private Guid? _busyStep;
+    private Guid? _loadedId;
+    private bool _busy;
+    private bool _composerRegistered;
+    private bool _scrollPending;
+
+    /// <summary>Gets or sets the conversation shown (route parameter).</summary>
+    [Parameter] public Guid? ConversationId { get; set; }
+
+    private string FirstName => CurrentUser.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "there";
+
+    /// <summary>Sends the composer text (invoked from JavaScript on Enter).</summary>
+    /// <param name="text">The text.</param>
+    /// <returns>A task.</returns>
+    [JSInvokable]
+    public Task SubmitFromKeyboard(string text) => SendAsync(text);
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        _thinkingTimer?.Dispose();
+        _self?.Dispose();
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone.
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var status = await AssistantService.GetStatusAsync();
+        if (!status.Succeeded)
+        {
+            Toasts.Error("The assistant is not available", status.Error);
+            return;
+        }
+
+        _status = status.Value;
+        _agentNames = _status!.Agents.ToDictionary(a => a.Key, a => a.Name, StringComparer.Ordinal);
+        _agentNames["orchestrator"] = "Orchestrator";
+        await LoadHistoryAsync();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ConversationId == _loadedId)
+        {
+            return;
+        }
+
+        _loadedId = ConversationId;
+        _animateId = null;
+        if (ConversationId is { } id)
+        {
+            var conversation = await AssistantService.GetConversationAsync(id);
+            if (conversation.Succeeded)
+            {
+                _conversation = conversation.Value;
+                _scrollPending = true;
+            }
+            else
+            {
+                Toasts.Error("Conversation not found", conversation.Error);
+                Navigation.NavigateTo("/assistant");
+            }
+        }
+        else
+        {
+            _conversation = null;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_status is not { HasProvider: true })
+        {
+            return;
+        }
+
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Ai/Assistant.razor.js");
+        if (!_composerRegistered)
+        {
+            _self ??= DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("registerComposer", _input, _self);
+            _composerRegistered = true;
+        }
+
+        if (_scrollPending)
+        {
+            _scrollPending = false;
+            await _module.InvokeVoidAsync("scrollToBottom", _scroll);
+        }
+    }
+
+    private static string DayGroup(DateTimeOffset time)
+    {
+        var days = (DateTimeOffset.UtcNow.Date - time.UtcDateTime.Date).TotalDays;
+        return days switch { < 1 => "Today", < 2 => "Yesterday", < 7 => "Previous 7 days", _ => "Older" };
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        var history = await AssistantService.ListConversationsAsync(_historySearch, 60);
+        _history = history.Succeeded ? history.Value : [];
+    }
+
+    private void NewChat()
+    {
+        _conversation = null;
+        Navigation.NavigateTo("/assistant");
+    }
+
+    private void Open(Guid id) => Navigation.NavigateTo($"/assistant/{id}");
+
+    private async Task SendFromButtonAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        var text = await JS.InvokeAsync<string>("eval", "document.querySelector('.composer-input')?.value ?? ''");
+        await SendAsync(text);
+    }
+
+    private async Task SendAsync(string text)
+    {
+        text = text?.Trim() ?? string.Empty;
+        if (_busy || text.Length == 0)
+        {
+            return;
+        }
+
+        _busy = true;
+        var optimistic = new AiMessageView(Guid.NewGuid(), AiMessageRole.User, text, null, null, false, DateTimeOffset.UtcNow, null, []);
+        _conversation = _conversation is null
+            ? new AiConversationView(Guid.Empty, AiAssistantTitle(text), [optimistic])
+            : _conversation with { Messages = [.. _conversation.Messages, optimistic] };
+        StartThinking();
+        _scrollPending = true;
+        if (_module is not null)
+        {
+            await _module.InvokeVoidAsync("resetComposer", _input);
+        }
+
+        StateHasChanged();
+        try
+        {
+            var result = await AssistantService.SendAsync(ConversationId, text);
+            if (!result.Succeeded)
+            {
+                Toasts.Error("The message was not sent", result.Error);
+                return;
+            }
+
+            _conversation = result.Value;
+            _animateId = _conversation!.Messages.LastOrDefault(m => m.Role == AiMessageRole.Assistant)?.Id;
+            if (ConversationId != _conversation.Id)
+            {
+                _loadedId = _conversation.Id;
+                Navigation.NavigateTo($"/assistant/{_conversation.Id}", replace: ConversationId is null);
+            }
+
+            await LoadHistoryAsync();
+        }
+        finally
+        {
+            StopThinking();
+            _busy = false;
+            _scrollPending = true;
+        }
+    }
+
+    private async Task ConfirmAsync(AiToolCallView step)
+    {
+        _busyStep = step.Id;
+        try
+        {
+            var result = await AssistantService.ConfirmActionAsync(step.Id);
+            if (result.Succeeded)
+            {
+                _conversation = result.Value;
+                _animateId = _conversation!.Messages.LastOrDefault()?.Id;
+                _scrollPending = true;
+                Toasts.Success("Action executed");
+            }
+            else
+            {
+                Toasts.Error("The action failed", result.Error);
+            }
+        }
+        finally
+        {
+            _busyStep = null;
+        }
+    }
+
+    private async Task RejectAsync(AiToolCallView step)
+    {
+        _busyStep = step.Id;
+        try
+        {
+            var result = await AssistantService.RejectActionAsync(step.Id);
+            if (result.Succeeded)
+            {
+                _conversation = result.Value;
+                Toasts.Info("Action rejected", "Nothing was changed.");
+            }
+            else
+            {
+                Toasts.Error("Could not reject the action", result.Error);
+            }
+        }
+        finally
+        {
+            _busyStep = null;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleting is null)
+        {
+            return;
+        }
+
+        var id = _deleting.Id;
+        if (Toasts.FromResult(await AssistantService.DeleteConversationAsync(id), "Conversation deleted"))
+        {
+            _deleting = null;
+            await LoadHistoryAsync();
+            if (ConversationId == id)
+            {
+                NewChat();
+            }
+        }
+    }
+
+    private void StartThinking()
+    {
+        var index = 0;
+        _thinkingText = s_thinking[0];
+        _thinkingTimer?.Dispose();
+        _thinkingTimer = new System.Threading.Timer(_ => InvokeAsync(() =>
+        {
+            index = Math.Min(index + 1, s_thinking.Length - 1);
+            _thinkingText = s_thinking[index];
+            StateHasChanged();
+        }), null, 1800, 1800);
+    }
+
+    private void StopThinking()
+    {
+        _thinkingTimer?.Dispose();
+        _thinkingTimer = null;
+    }
+
+    private static string AiAssistantTitle(string text) => text.Length <= 80 ? text : text[..77] + "…";
+}

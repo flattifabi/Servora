@@ -1,0 +1,14 @@
+.section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.section-head h2 { margin: 0 0 4px; }
+.provider-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+.provider-card, .agent-card { display: flex; flex-direction: column; }
+.provider-card .card-footer { justify-content: flex-start; margin-top: auto; }
+.provider-icon, .agent-icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--gradient-soft); color: var(--primary); border: 1px solid var(--border); }
+.agent-icon { color: var(--accent); }
+.provider-name { font-weight: 650; font-size: 15px; color: var(--text); }
+.compact-kv { grid-template-columns: 110px 1fr; gap: 6px 12px; }
+.test-line { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-muted); min-width: 0; }
+.test-line.ok { background: var(--success-soft); color: var(--success); }
+.test-line.fail { background: var(--danger-soft); color: var(--danger); }
+.agent-card.disabled { opacity: .55; }
+.min-w-0 { min-width: 0; }

@@ -1,0 +1,9 @@
+.ai-text { display: flex; flex-direction: column; gap: 10px; line-height: 1.62; color: var(--text); overflow-wrap: anywhere; }
+.ai-text p { margin: 0; }
+.ai-text ul, .ai-text ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+.ai-text blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--primary); background: var(--primary-soft); border-radius: 0 var(--r-sm) var(--r-sm) 0; color: var(--text-2); }
+.ai-heading { font-weight: 700; color: var(--text); }
+.ai-heading.level-1 { font-size: 17px; }
+.ai-heading.level-2 { font-size: 15.5px; }
+.ai-heading.level-3, .ai-heading.level-4 { font-size: 14px; }
+.ai-code { margin: 0; white-space: pre-wrap; }

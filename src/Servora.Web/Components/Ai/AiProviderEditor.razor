@@ -1,0 +1,243 @@
+@* Drawer form to create or edit an AI provider (presets for OpenAI, Ollama, LM Studio, Anthropic, Azure OpenAI). The API key is write-only. *@
+@inject IAiConfigurationService AiConfig
+@inject ToastService Toasts
+
+<Drawer Open="Open" OpenChanged="OpenChanged" Size="lg" Title="@(Existing is null ? "Add AI provider" : $"Edit {Existing.Name}")"
+        Subtitle="Calls use plain HTTPS to the configured endpoint. API keys are encrypted in the secret store.">
+    <ChildContent>
+        @if (Existing is null)
+        {
+            <div class="eyebrow mb-2">Start from a preset</div>
+            <div class="preset-grid mb-6">
+                @foreach (var preset in s_presets)
+                {
+                    <button type="button" class="preset @(_preset == preset.Key ? "active" : null)" @onclick="() => ApplyPreset(preset.Key)">
+                        <Icon Name="@preset.Icon" Size="18" />
+                        <span>@preset.Label</span>
+                    </button>
+                }
+            </div>
+        }
+
+        <div class="form-grid">
+            <FormField Label="Name" Required="true">
+                <input class="input" maxlength="100" @bind="_name" placeholder="OpenAI production" />
+            </FormField>
+            <FormField Label="Protocol" Required="true">
+                <select class="select" @bind="_kind">
+                    <option value="@AiProviderKind.OpenAiCompatible">OpenAI-compatible (OpenAI, Ollama, LM Studio, vLLM)</option>
+                    <option value="@AiProviderKind.Anthropic">Anthropic Messages API</option>
+                    <option value="@AiProviderKind.AzureOpenAi">Azure OpenAI</option>
+                </select>
+            </FormField>
+            <FormField Label="Base URL" Required="true" Class="span-all" Help="@BaseUrlHelp">
+                <input class="input mono" maxlength="500" @bind="_baseUrl" />
+            </FormField>
+            @if (_kind == AiProviderKind.AzureOpenAi)
+            {
+                <FormField Label="Deployment" Required="true">
+                    <input class="input" maxlength="200" @bind="_deployment" placeholder="gpt-4o-mini" />
+                </FormField>
+                <FormField Label="API version" Help="Default 2024-10-21">
+                    <input class="input" maxlength="50" @bind="_apiVersion" placeholder="2024-10-21" />
+                </FormField>
+            }
+            else
+            {
+                <FormField Label="Model" Required="true" Class="span-all" Help="The exact model id of the provider.">
+                    <input class="input mono" maxlength="200" @bind="_model" list="ai-model-suggestions" />
+                    <datalist id="ai-model-suggestions">
+                        @foreach (var model in ModelSuggestions)
+                        {
+                            <option value="@model"></option>
+                        }
+                    </datalist>
+                </FormField>
+            }
+            <FormField Label="API key" Class="span-all" Help="@KeyHelp">
+                <input class="input mono" type="password" autocomplete="new-password" @bind="_apiKey" placeholder="@(Existing?.HasApiKey == true ? "•••••••• (stored – leave empty to keep)" : "Paste the API key")" />
+            </FormField>
+            @if (Existing?.HasApiKey == true)
+            {
+                <div class="span-all"><label class="checkbox"><input type="checkbox" @bind="_clearKey" /> Remove the stored API key</label></div>
+            }
+            <FormField Label="Max output tokens" Help="16–32,000 per completion.">
+                <input class="input" type="number" min="16" max="32000" @bind="_maxTokens" />
+            </FormField>
+            <FormField Label="Temperature" Help="0 = deterministic, 1 = provider default.">
+                <input class="input" type="number" min="0" max="2" step="0.1" @bind="_temperature" />
+            </FormField>
+            <FormField Label="Timeout (seconds)" Help="5–600 seconds per request.">
+                <input class="input" type="number" min="5" max="600" @bind="_timeout" />
+            </FormField>
+            <div class="field">
+                <label>Capabilities</label>
+                <Switch @bind-Value="_supportsTools" Label="Tool calling (function calls)" />
+                <div class="help">Without tool calling the assistant routes by keywords and pre-fetches data.</div>
+            </div>
+            <div class="field">
+                <label>Status</label>
+                <Switch @bind-Value="_enabled" Label="Enabled" />
+            </div>
+            <div class="field">
+                <label>Assistant</label>
+                <Switch @bind-Value="_isDefault" Label="Default provider" />
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => OpenChanged.InvokeAsync(false)">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <Icon Name="save" Size="16" />
+            }
+            Save provider
+        </button>
+    </Footer>
+</Drawer>
+
+@code {
+    private static readonly (string Key, string Label, string Icon)[] s_presets =
+    [
+        ("openai", "OpenAI", "sparkles"),
+        ("ollama", "Ollama (local)", "cpu"),
+        ("lmstudio", "LM Studio (local)", "laptop"),
+        ("anthropic", "Anthropic", "bot"),
+        ("azure", "Azure OpenAI", "cloud"),
+    ];
+
+    private string _preset = "openai";
+    private string _name = string.Empty;
+    private AiProviderKind _kind;
+    private string _baseUrl = string.Empty;
+    private string _model = string.Empty;
+    private string? _deployment;
+    private string? _apiVersion;
+    private string? _apiKey;
+    private bool _clearKey;
+    private int _maxTokens = 1024;
+    private double _temperature = 0.2;
+    private int _timeout = 60;
+    private bool _supportsTools = true;
+    private bool _enabled = true;
+    private bool _isDefault;
+    private bool _busy;
+    private bool _wasOpen;
+
+    /// <summary>Gets or sets a value indicating whether the drawer is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the provider to edit; <see langword="null"/> creates a new one.</summary>
+    [Parameter] public AiProviderSummary? Existing { get; set; }
+
+    /// <summary>Raised after the provider was saved.</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private string BaseUrlHelp => _kind switch
+    {
+        AiProviderKind.Anthropic => "Usually https://api.anthropic.com",
+        AiProviderKind.AzureOpenAi => "https://<resource>.openai.azure.com",
+        _ => "Including the API version path, e.g. https://api.openai.com/v1 or http://localhost:11434/v1",
+    };
+
+    private string KeyHelp => _kind == AiProviderKind.OpenAiCompatible
+        ? "Optional for local servers such as Ollama or LM Studio. Never displayed again after saving."
+        : "Required. Never displayed again after saving.";
+
+    private IEnumerable<string> ModelSuggestions => _kind == AiProviderKind.Anthropic
+        ? ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"]
+        : ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "llama3.1", "qwen2.5", "mistral-nemo"];
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Open && !_wasOpen)
+        {
+            _apiKey = null;
+            _clearKey = false;
+            _busy = false;
+            if (Existing is { } p)
+            {
+                _name = p.Name;
+                _kind = p.Kind;
+                _baseUrl = p.BaseUrl;
+                _model = p.Model;
+                _deployment = p.Deployment;
+                _apiVersion = p.ApiVersion;
+                _maxTokens = p.MaxTokens;
+                _temperature = p.Temperature;
+                _timeout = p.TimeoutSeconds;
+                _supportsTools = p.SupportsTools;
+                _enabled = p.IsEnabled;
+                _isDefault = p.IsDefault;
+            }
+            else
+            {
+                ApplyPreset("openai");
+                _isDefault = false;
+                _enabled = true;
+            }
+        }
+
+        _wasOpen = Open;
+    }
+
+    private void ApplyPreset(string key)
+    {
+        _preset = key;
+        (_name, _kind, _baseUrl, _model, _deployment, _apiVersion, _supportsTools, _timeout) = key switch
+        {
+            "ollama" => ("Ollama", AiProviderKind.OpenAiCompatible, "http://localhost:11434/v1", "llama3.1", (string?)null, (string?)null, true, 120),
+            "lmstudio" => ("LM Studio", AiProviderKind.OpenAiCompatible, "http://localhost:1234/v1", "local-model", null, null, true, 120),
+            "anthropic" => ("Anthropic", AiProviderKind.Anthropic, "https://api.anthropic.com", "claude-sonnet-4-5", null, null, true, 60),
+            "azure" => ("Azure OpenAI", AiProviderKind.AzureOpenAi, "https://my-resource.openai.azure.com", string.Empty, "gpt-4o-mini", "2024-10-21", true, 60),
+            _ => ("OpenAI", AiProviderKind.OpenAiCompatible, "https://api.openai.com/v1", "gpt-4o-mini", null, null, true, 60),
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            var result = await AiConfig.SaveProviderAsync(new AiProviderSaveRequest
+            {
+                Id = Existing?.Id,
+                Name = _name,
+                Kind = _kind,
+                BaseUrl = _baseUrl,
+                Model = _model,
+                Deployment = _deployment,
+                ApiVersion = _apiVersion,
+                ApiKey = _apiKey,
+                ClearApiKey = _clearKey,
+                MaxTokens = _maxTokens,
+                Temperature = _temperature,
+                TimeoutSeconds = _timeout,
+                SupportsTools = _supportsTools,
+                IsEnabled = _enabled,
+                IsDefault = _isDefault,
+            });
+            _apiKey = null;
+            if (!Toasts.FromResult(result, "AI provider saved"))
+            {
+                return;
+            }
+
+            await OpenChanged.InvokeAsync(false);
+            await OnSaved.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

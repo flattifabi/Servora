@@ -1,0 +1,215 @@
+@* Side panel with the facts, scopes, restrictions and 30-day usage of an API key plus rotate / revoke / edit actions. *@
+@inject IApiKeyService ApiKeys
+@inject ToastService Toasts
+
+<Drawer Open="KeyId is not null" OpenChanged="OnOpenChanged" Size="lg" Title="@(_key?.Name ?? "API key")" Subtitle="@_key?.KeyPreview">
+    <ChildContent>
+        @if (_key is null)
+        {
+            <Skeleton Lines="8" Height="18px" />
+        }
+        else
+        {
+            <div class="flex items-center gap-2 mb-4 flex-wrap">
+                <StatusPill Text="@_key.Status.ToString()" Tone="@StatusTone(_key.Status)" />
+                <span class="tag"><Icon Name="@(_key.OwnerUserId is null ? "server" : "user")" Size="12" /> @_key.OwnerName</span>
+                <span class="tag"><Icon Name="gauge" Size="12" /> @_key.RateLimitPerMinute.ToString("N0") req/min</span>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header"><h3><Icon Name="bar-chart" Size="16" /> Requests – last 30 days</h3><span class="small muted">@_usage.Sum(p => p.Requests).ToString("N0") total</span></div>
+                <div class="card-body">
+                    @if (_usage.Count > 0 && _usage.Any(p => p.Requests > 0 || p.Failed > 0))
+                    {
+                        <BarChart Labels="@_usage.Select(p => p.Day.ToString("dd.MM")).ToList()"
+                                  Series="@([new ChartSeries("Requests", _usage.Select(p => (double)p.Requests).ToList()), new ChartSeries("Rejected", _usage.Select(p => (double)p.Failed).ToList(), "var(--danger)")])"
+                                  Height="180" />
+                    }
+                    else
+                    {
+                        <div class="small muted text-center" style="padding:28px 0">No requests recorded yet.</div>
+                    }
+                </div>
+            </div>
+
+            <dl class="kv mb-6">
+                <dt>Key id</dt><dd><code>@_key.KeyId</code></dd>
+                <dt>Created</dt><dd><RelativeTime Value="_key.CreatedAt" /> by @(_key.CreatedBy ?? "—")</dd>
+                <dt>Expires</dt><dd>@(_key.ExpiresAt is { } e ? e.ToString("yyyy-MM-dd HH:mm 'UTC'") : "Never")</dd>
+                <dt>Last used</dt><dd><RelativeTime Value="_key.LastUsedAt" Placeholder="Never" /> @(_key.LastUsedIp is null ? null : $"from {_key.LastUsedIp}")</dd>
+                <dt>Total requests</dt><dd>@_key.UsageCount.ToString("N0")</dd>
+                <dt>Last rotation</dt><dd><RelativeTime Value="_key.RotatedAt" Placeholder="Never rotated" /></dd>
+                <dt>Allowed IPs</dt>
+                <dd>
+                    @if (_key.AllowedIpRanges.Count == 0)
+                    {
+                        <span class="muted">Any address</span>
+                    }
+                    else
+                    {
+                        @foreach (var range in _key.AllowedIpRanges)
+                        {
+                            <span class="tag mono" style="margin:0 6px 6px 0">@range</span>
+                        }
+                    }
+                </dd>
+                @if (_key.RevokedAt is { } revoked)
+                {
+                    <dt>Revoked</dt><dd><RelativeTime Value="revoked" /> by @_key.RevokedBy@(string.IsNullOrEmpty(_key.RevocationReason) ? null : $" – {_key.RevocationReason}")</dd>
+                }
+                @if (!string.IsNullOrEmpty(_key.Description))
+                {
+                    <dt>Description</dt><dd>@_key.Description</dd>
+                }
+            </dl>
+
+            <div class="eyebrow mb-2">Scopes (@_key.Scopes.Count)</div>
+            <div class="flex flex-wrap gap-2">
+                @foreach (var scope in _key.Scopes)
+                {
+                    <code>@scope</code>
+                }
+            </div>
+        }
+    </ChildContent>
+    <Footer>
+        @if (_key is { Status: not ApiKeyStatus.Revoked })
+        {
+            <button class="btn btn-outline-danger" @onclick="() => _confirmRevoke = true"><Icon Name="x-circle" Size="16" /> Revoke</button>
+            <div class="flex-1"></div>
+            <button class="btn btn-secondary" @onclick="() => _confirmRotate = true"><Icon Name="refresh" Size="16" /> Rotate secret</button>
+            <button class="btn btn-primary" @onclick="EditAsync"><Icon Name="edit" Size="16" /> Edit</button>
+        }
+        else
+        {
+            <button class="btn btn-secondary" @onclick="() => OnOpenChanged(false)">Close</button>
+        }
+    </Footer>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_confirmRevoke" Danger="true" Title="Revoke API key?" ConfirmText="Revoke key" OnConfirm="RevokeAsync"
+               Message="All integrations using this key lose access immediately. Revocation cannot be undone.">
+    <FormField Label="Reason (optional)" Class="mt-4">
+        <input class="input" maxlength="500" @bind="_revokeReason" placeholder="Key leaked, integration retired…" />
+    </FormField>
+</ConfirmDialog>
+
+<ConfirmDialog @bind-Open="_confirmRotate" Title="Rotate secret?" ConfirmText="Rotate" OnConfirm="RotateAsync"
+               Message="A new secret is generated and shown once. The current secret stops working immediately." />
+
+@code {
+    private ApiKeyDetails? _key;
+    private IReadOnlyList<ApiKeyUsagePoint> _usage = [];
+    private Guid? _loaded;
+    private bool _confirmRevoke;
+    private bool _confirmRotate;
+    private string? _revokeReason;
+
+    /// <summary>Gets or sets the key to show; <see langword="null"/> closes the drawer.</summary>
+    [Parameter] public Guid? KeyId { get; set; }
+
+    /// <summary>Raised when the drawer requests to close.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised after the key was changed (revoked, rotated) so the list can refresh.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>Raised with a new one-time token after rotation.</summary>
+    [Parameter] public EventCallback<ApiKeySecretResult> OnSecret { get; set; }
+
+    /// <summary>Raised when the user wants to edit the key.</summary>
+    [Parameter] public EventCallback<ApiKeyDetails> OnEdit { get; set; }
+
+    /// <summary>Reloads the key (after an edit).</summary>
+    /// <returns>A task.</returns>
+    public async Task ReloadAsync()
+    {
+        _loaded = null;
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    /// <inheritdoc />
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private static string StatusTone(ApiKeyStatus status) => status switch
+    {
+        ApiKeyStatus.Active => "success",
+        ApiKeyStatus.Expired => "warning",
+        _ => "danger",
+    };
+
+    private async Task LoadAsync()
+    {
+        if (KeyId is not { } id)
+        {
+            _key = null;
+            _loaded = null;
+            return;
+        }
+
+        if (_loaded == id)
+        {
+            return;
+        }
+
+        _loaded = id;
+        _key = null;
+        var details = await ApiKeys.GetAsync(id);
+        if (!details.Succeeded)
+        {
+            Toasts.Error("Could not load the key", details.Error);
+            await OnClose.InvokeAsync();
+            return;
+        }
+
+        _key = details.Value;
+        var usage = await ApiKeys.GetUsageAsync(id, 30);
+        _usage = usage.Succeeded ? usage.Value! : [];
+    }
+
+    private async Task OnOpenChanged(bool open)
+    {
+        if (!open)
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    private async Task RevokeAsync()
+    {
+        if (_key is null)
+        {
+            return;
+        }
+
+        var result = await ApiKeys.RevokeAsync(_key.Id, _revokeReason);
+        if (Toasts.FromResult(result, "API key revoked"))
+        {
+            _revokeReason = null;
+            await ReloadAsync();
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private async Task RotateAsync()
+    {
+        if (_key is null)
+        {
+            return;
+        }
+
+        var result = await ApiKeys.RotateAsync(_key.Id);
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Rotation failed", result.Error);
+            return;
+        }
+
+        await ReloadAsync();
+        await OnChanged.InvokeAsync();
+        await OnSecret.InvokeAsync(result.Value!);
+    }
+
+    private Task EditAsync() => _key is null ? Task.CompletedTask : OnEdit.InvokeAsync(_key);
+}

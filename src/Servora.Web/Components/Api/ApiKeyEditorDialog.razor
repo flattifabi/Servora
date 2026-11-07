@@ -1,0 +1,248 @@
+@* Create / edit dialog of an API key: identity, owner, scopes (limited to the user's own permissions), expiry, IP ranges, rate limit. *@
+@inject IApiKeyService ApiKeys
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+
+<Modal Open="Open" OpenChanged="OpenChanged" Size="lg" Icon="key" CloseOnBackdrop="false"
+       Title="@(Existing is null ? "Create API key" : $"Edit {Existing.Name}")"
+       Subtitle="@(Existing is null ? "The secret is shown once after creation." : "Changes apply to the next request; the secret stays the same.")">
+    <ChildContent>
+        @if (_scopes is null)
+        {
+            <Skeleton Lines="6" Height="18px" />
+        }
+        else
+        {
+            <div class="form-section">
+                <div class="form-section-title"><Icon Name="id-card" Size="16" /> Identity</div>
+                <div class="form-grid">
+                    <FormField Label="Name" Required="true" Help="Shown in audit logs, e.g. “Monitoring integration”.">
+                        <input class="input" maxlength="100" @bind="_name" placeholder="CI pipeline" />
+                    </FormField>
+                    <FormField Label="Rate limit" Help="Requests per minute (1–10,000).">
+                        <div class="input-group">
+                            <input class="input" type="number" min="1" max="10000" @bind="_rateLimit" />
+                            <span class="btn btn-secondary" style="pointer-events:none">/ min</span>
+                        </div>
+                    </FormField>
+                    <FormField Label="Description" Class="span-all">
+                        <textarea class="textarea" rows="2" maxlength="1000" @bind="_description" placeholder="Purpose, owning team, contact…"></textarea>
+                    </FormField>
+                </div>
+            </div>
+
+            @if (Existing is null)
+            {
+                <div class="form-section">
+                    <div class="form-section-title"><Icon Name="user" Size="16" /> Acts for</div>
+                    <div class="segmented mb-4">
+                        <button type="button" class="@(_ownerMode == "me" ? "active" : null)" @onclick="@(() => _ownerMode = "me")">Me</button>
+                        <button type="button" class="@(_ownerMode == "user" ? "active" : null)" @onclick="@(() => _ownerMode = "user")">Another user</button>
+                        <button type="button" class="@(_ownerMode == "service" ? "active" : null)" @onclick="@(() => _ownerMode = "service")">Service identity</button>
+                    </div>
+                    @if (_ownerMode == "user")
+                    {
+                        <FormField Label="Owner" Required="true" Help="Requires user administration rights. The key can never exceed the owner's permissions.">
+                            <UserPicker @bind-Value="_ownerUserId" />
+                        </FormField>
+                    }
+                    else if (_ownerMode == "service")
+                    {
+                        <FormField Label="Service identity" Required="true" Help="A technical identity without user account. Permissions come from the scopes only.">
+                            <input class="input" maxlength="100" @bind="_serviceIdentity" placeholder="monitoring-system" />
+                        </FormField>
+                    }
+                    else
+                    {
+                        <div class="alert alert-info"><Icon Name="info" Size="16" /><div>The key acts as <b>@CurrentUser.DisplayName</b> and is limited to your permissions at call time.</div></div>
+                    }
+                </div>
+            }
+
+            <div class="form-section">
+                <div class="form-section-title"><Icon Name="shield-check" Size="16" /> Scopes</div>
+                <ScopePicker Scopes="_scopes" @bind-Selected="_selected" />
+            </div>
+
+            <div class="form-section">
+                <div class="form-section-title"><Icon Name="lock" Size="16" /> Restrictions</div>
+                <div class="form-grid">
+                    <FormField Label="Expires" Help="@ExpiryHelp">
+                        <select class="select" @bind="_expiryChoice">
+                            <option value="30">In 30 days</option>
+                            <option value="90">In 90 days</option>
+                            <option value="180">In 180 days</option>
+                            <option value="365">In 1 year</option>
+                            <option value="custom">On a specific date</option>
+                            <option value="never">Never</option>
+                        </select>
+                    </FormField>
+                    @if (_expiryChoice == "custom")
+                    {
+                        <FormField Label="Expiry date">
+                            <input class="input" type="date" @bind="_customExpiry" />
+                        </FormField>
+                    }
+                    <FormField Label="Allowed IP addresses" Class="span-all" Help="Optional. Comma or line separated addresses / CIDR ranges, e.g. 10.0.0.0/8, 192.168.1.20. Empty allows any address.">
+                        <textarea class="textarea mono" rows="2" @bind="_ipRanges" placeholder="10.0.0.0/8"></textarea>
+                    </FormField>
+                </div>
+            </div>
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="Cancel">Cancel</button>
+        <button class="btn btn-primary" disabled="@(_busy || _scopes is null)" @onclick="SaveAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <Icon Name="@(Existing is null ? "key" : "save")" Size="16" />
+            }
+            @(Existing is null ? "Create key" : "Save changes")
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private IReadOnlyList<GrantableScope>? _scopes;
+    private HashSet<string> _selected = new(StringComparer.Ordinal);
+    private string _name = string.Empty;
+    private string? _description;
+    private string _ownerMode = "me";
+    private Guid? _ownerUserId;
+    private string? _serviceIdentity;
+    private string _expiryChoice = "90";
+    private DateTime? _customExpiry;
+    private string? _ipRanges;
+    private int _rateLimit = ApiKeyLimits.DefaultRateLimitPerMinute;
+    private bool _busy;
+    private bool _wasOpen;
+
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the key to edit; <see langword="null"/> creates a new key.</summary>
+    [Parameter] public ApiKeyDetails? Existing { get; set; }
+
+    /// <summary>Raised after saving; carries the one-time token for new keys and <see langword="null"/> for edits.</summary>
+    [Parameter] public EventCallback<ApiKeySecretResult?> OnSaved { get; set; }
+
+    private string ExpiryHelp => _expiryChoice == "never"
+        ? "Keys without expiry are a risk; prefer rotation schedules."
+        : $"Expires on {ResolveExpiry():yyyy-MM-dd} (UTC).";
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Open && !_wasOpen)
+        {
+            Reset();
+            var scopes = await ApiKeys.GetGrantableScopesAsync();
+            _scopes = scopes.Succeeded ? scopes.Value : [];
+            if (!scopes.Succeeded)
+            {
+                Toasts.Error("Scopes unavailable", scopes.Error);
+            }
+        }
+
+        _wasOpen = Open;
+    }
+
+    private void Reset()
+    {
+        _scopes = null;
+        _busy = false;
+        if (Existing is { } key)
+        {
+            _name = key.Name;
+            _description = key.Description;
+            _selected = key.Scopes.ToHashSet(StringComparer.Ordinal);
+            _ipRanges = string.Join(", ", key.AllowedIpRanges);
+            _rateLimit = key.RateLimitPerMinute;
+            _expiryChoice = key.ExpiresAt is null ? "never" : "custom";
+            _customExpiry = key.ExpiresAt?.UtcDateTime.Date;
+        }
+        else
+        {
+            _name = string.Empty;
+            _description = null;
+            _selected = new HashSet<string>(StringComparer.Ordinal) { Permissions.Api.Access };
+            _ipRanges = null;
+            _rateLimit = ApiKeyLimits.DefaultRateLimitPerMinute;
+            _expiryChoice = "90";
+            _customExpiry = DateTime.UtcNow.Date.AddDays(90);
+            _ownerMode = "me";
+            _ownerUserId = null;
+            _serviceIdentity = null;
+        }
+    }
+
+    private DateTimeOffset? ResolveExpiry() => _expiryChoice switch
+    {
+        "never" => null,
+        "custom" => _customExpiry is { } date ? new DateTimeOffset(DateTime.SpecifyKind(date.Date.AddDays(1).AddSeconds(-1), DateTimeKind.Utc)) : null,
+        var days => new DateTimeOffset(DateTime.SpecifyKind(
+            DateTime.UtcNow.Date.AddDays(int.Parse(days, System.Globalization.CultureInfo.InvariantCulture) + 1).AddSeconds(-1), DateTimeKind.Utc)),
+    };
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (Existing is null)
+            {
+                var result = await ApiKeys.CreateAsync(new ApiKeyCreateRequest
+                {
+                    Name = _name,
+                    Description = _description,
+                    OwnerUserId = _ownerMode switch { "me" => CurrentUser.UserId, "user" => _ownerUserId, _ => null },
+                    ServiceIdentity = _ownerMode == "service" ? _serviceIdentity : null,
+                    Scopes = _selected.ToList(),
+                    ExpiresAt = ResolveExpiry(),
+                    AllowedIpRanges = _ipRanges,
+                    RateLimitPerMinute = _rateLimit,
+                });
+                if (!result.Succeeded)
+                {
+                    Toasts.Error("The key was not created", result.Error);
+                    return;
+                }
+
+                await OpenChanged.InvokeAsync(false);
+                await OnSaved.InvokeAsync(result.Value);
+            }
+            else
+            {
+                var result = await ApiKeys.UpdateAsync(Existing.Id, new ApiKeyUpdateRequest
+                {
+                    Name = _name,
+                    Description = _description,
+                    Scopes = _selected.ToList(),
+                    ExpiresAt = ResolveExpiry(),
+                    AllowedIpRanges = _ipRanges,
+                    RateLimitPerMinute = _rateLimit,
+                });
+                if (!Toasts.FromResult(result, "API key updated"))
+                {
+                    return;
+                }
+
+                await OpenChanged.InvokeAsync(false);
+                await OnSaved.InvokeAsync(null);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task Cancel() => OpenChanged.InvokeAsync(false);
+}

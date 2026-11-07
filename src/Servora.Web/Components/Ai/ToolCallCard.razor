@@ -1,0 +1,132 @@
+@* One step of the AI execution trace: delegation, tool call or a proposed action with confirm / reject buttons. *@
+
+<div class="trace-step trace-@Step.Kind status-@Step.Status.ToString().ToLowerInvariant()">
+    <div class="step-head" @onclick="() => _expanded = !_expanded">
+        <div class="step-icon"><Icon Name="@Icon" Size="14" /></div>
+        <div class="step-title">
+            @if (Step.Kind == AiTraceKinds.Delegation)
+            {
+                <span><b>Orchestrator</b> delegated to <b>@AgentName(Step.ToolName)</b></span>
+            }
+            else if (Step.Kind == AiTraceKinds.Action)
+            {
+                <span><b>@Step.AgentName</b> proposes <code>@Step.ToolName</code></span>
+            }
+            else
+            {
+                <span><b>@Step.AgentName</b> called <code>@Step.ToolName</code></span>
+            }
+        </div>
+        <StatusPill Text="@StatusText" Tone="@StatusTone" />
+        @if (Step.DurationMs > 0)
+        {
+            <span class="tiny faint nowrap">@Step.DurationMs ms</span>
+        }
+        <Icon Name="@(_expanded ? "chevron-up" : "chevron-down")" Size="14" Class="faint" />
+    </div>
+
+    @if (Step.Status == AiToolCallStatus.PendingConfirmation)
+    {
+        <div class="step-confirm">
+            <div class="small">This action changes data and runs as <b>@(Step.ActorName ?? Step.AgentName)</b>. Review the details before confirming.</div>
+            <pre class="step-pre">@PrettyArguments</pre>
+            <div class="flex gap-2 justify-end">
+                <button class="btn btn-secondary btn-sm" disabled="@Busy" @onclick="() => OnReject.InvokeAsync(Step)"><Icon Name="x" Size="14" /> Reject</button>
+                <button class="btn btn-success btn-sm" disabled="@Busy" @onclick="() => OnConfirm.InvokeAsync(Step)">
+                    @if (Busy)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="check" Size="14" />
+                    }
+                    Confirm &amp; run
+                </button>
+            </div>
+        </div>
+    }
+    else if (_expanded)
+    {
+        <div class="step-body">
+            @if (!string.IsNullOrEmpty(Step.ActorName))
+            {
+                <div class="tiny faint mb-2"><Icon Name="id-card" Size="11" /> Identity: @Step.ActorName</div>
+            }
+            @if (!string.IsNullOrEmpty(Step.ArgumentsJson))
+            {
+                <div class="eyebrow mb-1">@(Step.Kind == AiTraceKinds.Delegation ? "Task" : "Arguments")</div>
+                <pre class="step-pre">@PrettyArguments</pre>
+            }
+            @if (!string.IsNullOrEmpty(Step.ErrorMessage))
+            {
+                <div class="alert alert-danger mt-2"><Icon Name="alert-circle" Size="14" /><div class="small">@Step.ErrorMessage</div></div>
+            }
+            @if (!string.IsNullOrEmpty(Step.ResultJson))
+            {
+                <div class="eyebrow mb-1 mt-2">Result</div>
+                <pre class="step-pre">@Pretty(Step.ResultJson)</pre>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool _expanded;
+
+    /// <summary>Gets or sets the step.</summary>
+    [Parameter, EditorRequired] public AiToolCallView Step { get; set; } = default!;
+
+    /// <summary>Gets or sets the agent names by key.</summary>
+    [Parameter] public IReadOnlyDictionary<string, string>? AgentNames { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a decision is being processed.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>Raised when the user confirms a pending action.</summary>
+    [Parameter] public EventCallback<AiToolCallView> OnConfirm { get; set; }
+
+    /// <summary>Raised when the user rejects a pending action.</summary>
+    [Parameter] public EventCallback<AiToolCallView> OnReject { get; set; }
+
+    private string Icon => Step.Kind switch
+    {
+        AiTraceKinds.Delegation => "arrow-right",
+        AiTraceKinds.Action => "zap",
+        _ => "wrench",
+    };
+
+    private string StatusText => Step.Status switch
+    {
+        AiToolCallStatus.Succeeded => Step.Kind == AiTraceKinds.Delegation ? "Done" : "Success",
+        AiToolCallStatus.PendingConfirmation => "Needs confirmation",
+        AiToolCallStatus.Confirmed => "Confirmed",
+        AiToolCallStatus.Rejected => "Rejected",
+        AiToolCallStatus.Denied => "Denied",
+        _ => "Failed",
+    };
+
+    private string StatusTone => Step.Status switch
+    {
+        AiToolCallStatus.Succeeded or AiToolCallStatus.Confirmed => "success",
+        AiToolCallStatus.PendingConfirmation => "warning",
+        AiToolCallStatus.Rejected => "neutral",
+        _ => "danger",
+    };
+
+    private string PrettyArguments => Pretty(Step.ArgumentsJson);
+
+    private static string Pretty(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return string.Empty;
+        }
+
+        return Servora.Application.Mcp.McpJson.TryParse(json, out var node) && node is not null
+            ? node.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
+            : json;
+    }
+
+    private string AgentName(string key) => AgentNames?.GetValueOrDefault(key) ?? key;
+}
