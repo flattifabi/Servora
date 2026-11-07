@@ -1,0 +1,29 @@
+.icon-chooser {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    gap: 6px;
+}
+
+.icon-choice {
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: all var(--speed) var(--ease);
+}
+
+.icon-choice:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+
+.icon-choice.selected {
+    background: var(--gradient);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: var(--glow);
+}

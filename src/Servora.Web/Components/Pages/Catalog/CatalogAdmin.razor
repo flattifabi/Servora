@@ -1,0 +1,251 @@
+@page "/catalog-admin"
+@* Service catalog administration: KPIs, category filter, item list and category management. *@
+@attribute [RequirePermission(Permissions.Requests.ManageCatalog)]
+@inject ICatalogAdminService Catalog
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Service catalog · Servora</PageTitle>
+
+<PageHeader Title="Service Catalog" Subtitle="Design the products and services employees can order." Icon="package">
+    <Actions>
+        <button class="btn btn-secondary" @onclick="() => _categoriesOpen = true"><Icon Name="folder" Size="16" /> Categories</button>
+        <a class="btn btn-primary" href="/catalog-admin/new"><Icon Name="plus" Size="16" /> New item</a>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Active items" Value="@(_stats?.ActiveItems.ToString() ?? "–")" Icon="package" Tone="primary" Caption="@(_stats is null ? null : $"{_stats.InactiveItems} inactive")" />
+    <StatCard Label="Categories" Value="@(_stats?.Categories.ToString() ?? "–")" Icon="folder" Tone="accent" Caption="organize the catalog" OnClick="() => _categoriesOpen = true" />
+    <StatCard Label="Need approval" Value="@(_stats?.ItemsWithApproval.ToString() ?? "–")" Icon="check-square" Tone="warning" Caption="active items" />
+    <StatCard Label="Orders" Value="@(_stats?.OrdersLast30Days.ToString() ?? "–")" Icon="shopping-cart" Tone="success" Caption="requested items, last 30 days" />
+</div>
+
+<div class="category-chips mb-4">
+    <button class="category-chip @(_categoryId is null ? "active" : null)" @onclick="() => SetCategoryAsync(null)">
+        <Icon Name="grid" Size="14" /> All items
+    </button>
+    @foreach (var category in _categories)
+    {
+        <button class="category-chip @(_categoryId == category.Id ? "active" : null) @(category.IsActive ? null : "inactive")" @onclick="() => SetCategoryAsync(category.Id)">
+            <Icon Name="@category.Icon" Size="14" /> @category.Name <span class="badge">@category.ItemCount</span>
+        </button>
+    }
+</div>
+
+<DataTable TItem="CatalogItemSummary" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+           Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search catalog items…"
+           OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(i => Nav.NavigateTo($"/catalog-admin/{i.Id}"))"
+           EmptyIcon="package" EmptyTitle="No catalog items" EmptyText="Create the first item employees can order.">
+    <EmptyContent>
+        <a class="btn btn-primary btn-sm" href="/catalog-admin/new"><Icon Name="plus" Size="14" /> New item</a>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="CatalogItemSummary" Title="Item" SortKey="Name">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <div class="item-icon"><Icon Name="@context.Icon" Size="18" /></div>
+                    <div style="min-width:0">
+                        <div class="cell-primary">@context.Name</div>
+                        <div class="tiny faint truncate" style="max-width:360px">@context.ShortDescription</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="CatalogItemSummary" Title="Category" SortKey="Category" Value="@(i => i.CategoryName ?? "—")" />
+        <DataColumn TItem="CatalogItemSummary" Title="Price" Align="right" Width="110px">
+            <Template><span class="mono small">@SmLabels.Price(context.Price)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="CatalogItemSummary" Title="Delivery" Width="100px">
+            <Template><span class="small">@(context.DeliveryDays == 0 ? "Same day" : $"{context.DeliveryDays} d")</span></Template>
+        </DataColumn>
+        <DataColumn TItem="CatalogItemSummary" Title="Questions" Align="right" Width="100px" Value="i => i.VariableCount" />
+        <DataColumn TItem="CatalogItemSummary" Title="Fulfilment">
+            <Template><span class="small">@(context.FulfillmentGroupName ?? "—")</span></Template>
+        </DataColumn>
+        <DataColumn TItem="CatalogItemSummary" Title="Approval" Width="110px">
+            <Template>
+                @if (context.ApprovalRequired)
+                {
+                    <span class="pill pill-warning no-dot"><Icon Name="check-square" Size="12" /> Required</span>
+                }
+                else
+                {
+                    <span class="faint small">None</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="CatalogItemSummary" Title="Status" Width="100px">
+            <Template><StatusPill Text="@(context.IsActive ? "Active" : "Inactive")" /></Template>
+        </DataColumn>
+        <DataColumn TItem="CatalogItemSummary" Title="Updated" SortKey="Updated" Width="110px">
+            <Template><RelativeTime Value="context.UpdatedAt" Class="small" /></Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<Drawer @bind-Open="_categoriesOpen" Title="Catalog categories" Subtitle="Categories group items in the portal. Inactive categories are hidden." Size="lg">
+    <ChildContent>
+        <div class="stack" style="gap:10px">
+            @foreach (var category in _categories)
+            {
+                <div class="category-row">
+                    <div class="item-icon"><Icon Name="@category.Icon" Size="16" /></div>
+                    <div class="flex-1" style="min-width:0">
+                        <div class="flex items-center gap-2">
+                            <b>@category.Name</b>
+                            @if (!category.IsActive)
+                            {
+                                <StatusPill Text="Inactive" />
+                            }
+                        </div>
+                        <div class="tiny faint truncate">@(category.Description ?? "No description") · @category.ItemCount item(s) · order @category.Order</div>
+                    </div>
+                    <button class="icon-btn" title="Edit" @onclick="() => EditCategory(category)"><Icon Name="edit" Size="15" /></button>
+                    <button class="icon-btn" title="Delete" disabled="@(category.ItemCount > 0)" @onclick="() => AskDeleteCategory(category)"><Icon Name="trash" Size="15" /></button>
+                </div>
+            }
+        </div>
+
+        <div class="card mt-6">
+            <div class="card-header"><h3><Icon Name="@(_category.Id is null ? "plus" : "edit")" Size="16" /> @(_category.Id is null ? "New category" : $"Edit {_category.Name}")</h3>
+                @if (_category.Id is not null)
+                {
+                    <button class="btn btn-ghost btn-sm" @onclick="NewCategory">New instead</button>
+                }
+            </div>
+            <div class="card-body">
+                <div class="form-grid">
+                    <FormField Label="Name" Required="true"><input class="input" @bind="_category.Name" maxlength="100" /></FormField>
+                    <FormField Label="Sort order"><input class="input" type="number" @bind="_category.Order" /></FormField>
+                    <FormField Label="Description" Class="span-all"><input class="input" @bind="_category.Description" maxlength="1000" /></FormField>
+                    <FormField Label="Icon" Class="span-all"><IconChooser @bind-Value="_category.Icon" /></FormField>
+                    <FormField Class="span-all"><Switch @bind-Value="_category.IsActive" Label="Active (visible in the catalog)" /></FormField>
+                </div>
+            </div>
+            <div class="card-footer flex justify-end">
+                <button class="btn btn-primary" disabled="@_busy" @onclick="SaveCategoryAsync"><Icon Name="save" Size="14" /> Save category</button>
+            </div>
+        </div>
+    </ChildContent>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_deleteOpen" Title="Delete category?" Danger="true" ConfirmText="Delete"
+               Message="@($"The category \"{_deleting?.Name}\" will be deleted.")" OnConfirm="DeleteCategoryAsync" />
+
+@code {
+    private PageRequest _request = new() { PageSize = 25, SortBy = "Name" };
+    private PagedResult<CatalogItemSummary>? _page;
+    private IReadOnlyList<CatalogCategoryModel> _categories = [];
+    private CatalogAdminStats? _stats;
+    private Guid? _categoryId;
+    private bool _loading;
+    private bool _busy;
+    private bool _categoriesOpen;
+    private bool _deleteOpen;
+    private CatalogCategoryModel _category = new();
+    private CatalogCategoryModel? _deleting;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMetaAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadMetaAsync()
+    {
+        _stats = (await Catalog.GetStatsAsync()).Value;
+        _categories = (await Catalog.ListCategoriesAsync()).Value ?? [];
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Catalog.ListItemsAsync(_categoryId, _request);
+        _loading = false;
+        if (result.Succeeded)
+        {
+            _page = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Could not load the catalog", result.Error);
+        }
+    }
+
+    private Task SetCategoryAsync(Guid? id)
+    {
+        _categoryId = id;
+        _request = _request with { Page = 1 };
+        return LoadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _request = _request with { Page = page };
+        return LoadAsync();
+    }
+
+    private Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        _request = _request with { SortBy = sort.SortBy, SortDescending = sort.Descending, Page = 1 };
+        return LoadAsync();
+    }
+
+    private Task SearchAsync(string term)
+    {
+        _request = _request with { Search = term, Page = 1 };
+        return LoadAsync();
+    }
+
+    private void NewCategory() => _category = new CatalogCategoryModel { Order = (_categories.Count + 1) * 10 };
+
+    private void EditCategory(CatalogCategoryModel category) => _category = new CatalogCategoryModel
+    {
+        Id = category.Id,
+        Name = category.Name,
+        Description = category.Description,
+        Icon = category.Icon,
+        Order = category.Order,
+        IsActive = category.IsActive,
+    };
+
+    private async Task SaveCategoryAsync()
+    {
+        _busy = true;
+        var result = await Catalog.SaveCategoryAsync(_category);
+        _busy = false;
+        if (Toasts.FromResult(result, "Category saved"))
+        {
+            NewCategory();
+            await LoadMetaAsync();
+        }
+    }
+
+    private void AskDeleteCategory(CatalogCategoryModel category)
+    {
+        _deleting = category;
+        _deleteOpen = true;
+    }
+
+    private async Task DeleteCategoryAsync()
+    {
+        if (_deleting?.Id is not { } id)
+        {
+            return;
+        }
+
+        var result = await Catalog.DeleteCategoryAsync(id);
+        if (Toasts.FromResult(result, "Category deleted"))
+        {
+            if (_categoryId == id)
+            {
+                _categoryId = null;
+                await LoadAsync();
+            }
+
+            await LoadMetaAsync();
+        }
+    }
+}

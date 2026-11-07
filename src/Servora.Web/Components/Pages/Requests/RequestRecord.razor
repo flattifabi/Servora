@@ -1,0 +1,321 @@
+@page "/requests/{Id:guid}"
+@* Request record page for fulfillers: requested items with answers, approvals and catalog tasks; cancel; activity. *@
+@attribute [RequirePermission(Permissions.Requests.Read)]
+@inject IRequestService Requests
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(_detail?.Number ?? "Request") · Servora</PageTitle>
+
+@if (_detail is null)
+{
+    @if (_notFound)
+    {
+        <EmptyState Icon="shopping-cart" Title="Request not found" Text="The request does not exist or you cannot access it.">
+            <a class="btn btn-primary" href="/requests">Back to requests</a>
+        </EmptyState>
+    }
+    else
+    {
+        <Skeleton Lines="2" Height="34px" Width="50%" />
+        <div class="grid grid-sidebar mt-6"><div class="card card-body"><Skeleton Lines="8" Height="38px" /></div><div class="card card-body"><Skeleton Lines="6" /></div></div>
+    }
+}
+else
+{
+    <PageHeader Title="@_detail.ShortDescription" Icon="shopping-cart">
+        <Breadcrumbs><a href="/requests">Requests</a> <Icon Name="chevron-right" Size="12" /> <span>@_detail.Number</span></Breadcrumbs>
+        <SubtitleContent>
+            <div class="flex items-center gap-2 flex-wrap mt-2">
+                <span class="mono small muted">@_detail.Number</span>
+                <StatusPill Text="@SmLabels.Label(_detail.State)" Tone="@SmLabels.Tone(_detail.State)" />
+                <span class="small muted">for</span>
+                <span class="person"><Avatar Name="@_detail.RequestedForName" Size="sm" /><span class="person-name">@_detail.RequestedForName</span></span>
+            </div>
+        </SubtitleContent>
+        <Actions>
+            <button class="btn btn-secondary" @onclick="ReloadAsync"><Icon Name="refresh" Size="16" /> Refresh</button>
+            @if (_detail.CanCancel)
+            {
+                <button class="btn btn-outline-danger" @onclick="() => _cancelOpen = true"><Icon Name="x-circle" Size="16" /> Cancel request</button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <div class="mb-4">
+        <StateFlow States="@StateLabels" Current="@SmLabels.Label(_detail.State)" />
+    </div>
+
+    @if (_detail.State is RequestState.Rejected or RequestState.Cancelled)
+    {
+        <div class="alert alert-danger mb-4"><Icon Name="x-circle" Size="18" /><div>This request was @SmLabels.Label(_detail.State).ToLowerInvariant() <RelativeTime Value="_detail.ClosedAt" />.</div></div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="stack" style="gap:20px;min-width:0">
+            @foreach (var item in _detail.Items)
+            {
+                <div class="card" @key="item.Id">
+                    <div class="card-header">
+                        <div class="flex items-center gap-3" style="min-width:0">
+                            <div class="ritm-icon"><Icon Name="@item.Icon" Size="20" /></div>
+                            <div style="min-width:0">
+                                <h3>@item.ItemName @(item.Quantity > 1 ? $"× {item.Quantity}" : null)</h3>
+                                <div class="card-subtitle"><span class="mono">@item.Number</span> · @(item.AssignmentGroupName ?? "No fulfilment group") · @SmLabels.Price(item.UnitPrice * item.Quantity)</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            @if (item.Approval != ApprovalStatus.NotRequested)
+                            {
+                                <StatusPill Text="@($"Approval {SmLabels.Label(item.Approval).ToLowerInvariant()}")" Tone="@SmLabels.Tone(item.Approval)" />
+                            }
+                            <StatusPill Text="@SmLabels.Label(item.State)" Tone="@SmLabels.Tone(item.State)" />
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="list" Size="16" /> Order details</div>
+                            @if (item.Answers.Count == 0)
+                            {
+                                <div class="small muted">No questions were asked for this item.</div>
+                            }
+                            else
+                            {
+                                <div class="answers">
+                                    @foreach (var answer in item.Answers)
+                                    {
+                                        <div class="answer">
+                                            <div class="tiny faint">@answer.Label</div>
+                                            <div class="answer-value @(answer.Type == CatalogVariableType.MultilineText ? "multiline" : null)">@(string.IsNullOrWhiteSpace(answer.Value) ? "—" : answer.Value)</div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        @if (item.Approval != ApprovalStatus.NotRequested)
+                        {
+                            <div class="form-section">
+                                <div class="form-section-title"><Icon Name="check-square" Size="16" /> Approvals</div>
+                                <RecordApprovals Table="@TableNames.RequestItem" RecordId="item.Id" OnDecided="ReloadAsync" />
+                            </div>
+                        }
+
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="clipboard-list" Size="16" /> Fulfilment tasks</div>
+                            @if (item.Tasks.Count == 0)
+                            {
+                                <div class="small muted">@(item.State == RequestItemState.PendingApproval ? "Tasks are created as soon as the item is approved." : "No tasks.")</div>
+                            }
+                            else
+                            {
+                                <div class="stack" style="gap:8px">
+                                    @foreach (var task in item.Tasks)
+                                    {
+                                        var open = task.State is CatalogTaskState.Open or CatalogTaskState.WorkInProgress;
+                                        <div class="task-row" @key="task.Id">
+                                            <StatusPill Text="@SmLabels.Label(task.State)" Tone="@SmLabels.Tone(task.State)" />
+                                            <div class="flex-1" style="min-width:0">
+                                                <div class="cell-primary">@task.ShortDescription</div>
+                                                <div class="tiny faint"><span class="mono">@task.Number</span> · @(task.AssignmentGroupName ?? "No group") · @(task.AssignedToName ?? "unassigned")
+                                                    @if (!string.IsNullOrWhiteSpace(task.CloseNotes))
+                                                    {
+                                                        <span> · “@task.CloseNotes”</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                            @if (_detail.CanFulfil && open)
+                                            {
+                                                <div class="flex gap-1">
+                                                    @if (task.AssignedToId is null)
+                                                    {
+                                                        <button class="btn btn-ghost btn-sm" @onclick="() => AssignToMeAsync(task)"><Icon Name="user-check" Size="14" /> Assign to me</button>
+                                                    }
+                                                    <button class="btn btn-success btn-sm" @onclick="() => EditTask(task, CatalogTaskState.Completed)"><Icon Name="check" Size="14" /> Complete</button>
+                                                    <button class="icon-btn" title="Update task" @onclick="() => EditTask(task, task.State)"><Icon Name="edit" Size="15" /></button>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <div>
+                <Tabs Items="s_tabs" @bind-ActiveKey="_tab" />
+                <div class="mt-4 card card-body">
+                    @if (_tab == "attachments")
+                    {
+                        <AttachmentList Table="@TableNames.Request" RecordId="_detail.Id" AllowUpload="_detail.CanFulfil" AllowDelete="_detail.CanFulfil" />
+                    }
+                    else
+                    {
+                        <ActivityStream Table="@TableNames.Request" RecordId="_detail.Id" AllowPosting="_detail.CanFulfil" />
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="stack sticky-top" style="gap:16px">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="info" Size="16" /> Key facts</h3></div>
+                <div class="card-body">
+                    <dl class="kv">
+                        <dt>Number</dt><dd class="mono">@_detail.Number</dd>
+                        <dt>State</dt><dd><StatusPill Text="@SmLabels.Label(_detail.State)" Tone="@SmLabels.Tone(_detail.State)" /></dd>
+                        <dt>Items</dt><dd>@_detail.Items.Count</dd>
+                        <dt>Total</dt><dd class="mono">@SmLabels.Price(_detail.TotalPrice)</dd>
+                        <dt>Opened</dt><dd><RelativeTime Value="_detail.OpenedAt" /></dd>
+                        <dt>Expected</dt><dd><RelativeTime Value="_detail.DueAt" /></dd>
+                        @if (_detail.ClosedAt is { } closed)
+                        {
+                            <dt>Closed</dt><dd><RelativeTime Value="closed" /></dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="users" Size="16" /> People</h3></div>
+                <div class="card-body stack" style="gap:12px">
+                    <PersonRow Label="Requested for" Name="@_detail.RequestedForName" />
+                    <PersonRow Label="Ordered by" Name="@_detail.OpenedByName" />
+                </div>
+            </div>
+            <div class="card card-body">
+                <div class="small muted">Fulfilment progress</div>
+                <div class="flex items-center justify-between mt-2">
+                    <b>@ClosedTasks / @TotalTasks tasks closed</b>
+                    <span class="small muted">@Percent%</span>
+                </div>
+                <div class="progress success mt-2"><span style="width:@Percent%"></span></div>
+            </div>
+        </div>
+    </div>
+
+    <Drawer @bind-Open="_taskOpen" Title="@($"Update {_task?.Number}")" Subtitle="@_task?.ShortDescription">
+        <ChildContent>
+            <div class="form-grid cols-1">
+                <FormField Label="State">
+                    <select class="select" @bind="_update.State">
+                        @foreach (var state in Enum.GetValues<CatalogTaskState>())
+                        {
+                            <option value="@state">@SmLabels.Label(state)</option>
+                        }
+                    </select>
+                </FormField>
+                <FormField Label="Assignment group"><GroupPicker @bind-Value="_update.GroupId" /></FormField>
+                <FormField Label="Assigned to"><UserPicker @bind-Value="_update.AssignedToId" /></FormField>
+                @if (_update.State is CatalogTaskState.Completed or CatalogTaskState.Cancelled)
+                {
+                    <FormField Label="Close notes" Help="Visible to the requester.">
+                        <textarea class="textarea" rows="3" @bind="_update.CloseNotes"></textarea>
+                    </FormField>
+                }
+                <FormField Label="Work note" Help="Internal note on the task.">
+                    <textarea class="textarea" rows="3" @bind="_update.WorkNote"></textarea>
+                </FormField>
+            </div>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _taskOpen = false">Cancel</button>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveTaskAsync"><Icon Name="save" Size="14" /> Save</button>
+        </Footer>
+    </Drawer>
+
+    <Modal @bind-Open="_cancelOpen" Title="Cancel request" Subtitle="@_detail.Number" Icon="x-circle" Size="sm">
+        <ChildContent>
+            <div class="alert alert-danger mb-4"><Icon Name="alert-triangle" Size="16" /><div>Open items and tasks are cancelled and pending approvals withdrawn. This cannot be undone.</div></div>
+            <FormField Label="Reason" Required="true"><textarea class="textarea" rows="3" @bind="_cancelReason"></textarea></FormField>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _cancelOpen = false">Back</button>
+            <button class="btn btn-danger" disabled="@_busy" @onclick="CancelAsync">Cancel request</button>
+        </Footer>
+    </Modal>
+}
+
+@code {
+    private static readonly IReadOnlyList<TabItem> s_tabs = [new("activity", "Activity", "activity"), new("attachments", "Attachments", "paperclip")];
+    private static readonly IReadOnlyList<string> s_flow = [SmLabels.Label(RequestState.Submitted), SmLabels.Label(RequestState.InProgress), SmLabels.Label(RequestState.Completed)];
+
+    private RequestDetail? _detail;
+    private bool _notFound;
+    private bool _busy;
+    private string _tab = "activity";
+    private bool _taskOpen;
+    private bool _cancelOpen;
+    private string? _cancelReason;
+    private CatalogTaskListItem? _task;
+    private CatalogTaskForm _update = new();
+
+    /// <summary>Gets or sets the request identifier.</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    private IReadOnlyList<string> StateLabels => _detail?.State is RequestState.Rejected or RequestState.Cancelled
+        ? [s_flow[0], SmLabels.Label(_detail.State)]
+        : s_flow;
+
+    private int TotalTasks => _detail?.Items.Sum(i => i.Tasks.Count) ?? 0;
+
+    private int ClosedTasks => _detail?.Items.Sum(i => i.Tasks.Count(t => t.State is CatalogTaskState.Completed or CatalogTaskState.Cancelled)) ?? 0;
+
+    private int Percent => TotalTasks == 0 ? 0 : ClosedTasks * 100 / TotalTasks;
+
+    /// <inheritdoc />
+    protected override Task OnParametersSetAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        var result = await Requests.GetAsync(Id);
+        _notFound = !result.Succeeded;
+        _detail = result.Value;
+    }
+
+    private async Task AssignToMeAsync(CatalogTaskListItem task)
+    {
+        var result = await Requests.AssignTaskToMeAsync(task.Id);
+        if (Toasts.FromResult(result, $"{task.Number} assigned to you"))
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private void EditTask(CatalogTaskListItem task, CatalogTaskState state)
+    {
+        _task = task;
+        _update = new CatalogTaskForm { State = state, GroupId = task.AssignmentGroupId, AssignedToId = task.AssignedToId };
+        _taskOpen = true;
+    }
+
+    private async Task SaveTaskAsync()
+    {
+        if (_task is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        var result = await Requests.UpdateTaskAsync(_task.Id, new CatalogTaskUpdate(_update.State, _update.GroupId, _update.AssignedToId, _update.CloseNotes, _update.WorkNote));
+        _busy = false;
+        if (Toasts.FromResult(result, $"{_task.Number} updated"))
+        {
+            _taskOpen = false;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        _busy = true;
+        var result = await Requests.CancelRequestAsync(Id, _cancelReason ?? string.Empty);
+        _busy = false;
+        if (Toasts.FromResult(result, "Request cancelled"))
+        {
+            _cancelOpen = false;
+            await ReloadAsync();
+        }
+    }
+}

@@ -1,0 +1,94 @@
+@* Risk questionnaire of a change request with a live risk preview. *@
+@inject IChangeService Changes
+@inject ToastService Toasts
+
+<Modal Open="Open" OpenChanged="OpenChanged" Title="Risk assessment" Subtitle="Answer every question; the risk level is calculated automatically." Icon="gauge" Size="lg">
+    <ChildContent>
+        <div class="stack" style="gap:18px">
+            @for (var q = 0; q < ChangeRiskCalculator.Questions.Count; q++)
+            {
+                var question = ChangeRiskCalculator.Questions[q];
+                <div>
+                    <div class="risk-question"><span class="risk-num">@(q + 1)</span> @question.Text</div>
+                    <div class="risk-options">
+                        @for (var o = 0; o < question.Options.Count; o++)
+                        {
+                            var index = o;
+                            var selected = _answers.TryGetValue(question.Key, out var current) && current == index;
+                            <button type="button" class="risk-option @(selected ? "selected" : null)" @onclick="() => _answers[question.Key] = index">
+                                @question.Options[o].Text
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <div class="flex items-center gap-2" style="margin-right:auto">
+            @if (Preview is { } preview)
+            {
+                <span class="small muted">Calculated risk</span>
+                <span class="pill pill-@SmLabels.Tone(preview.Risk) no-dot">@SmLabels.Label(preview.Risk) · score @preview.Score</span>
+            }
+            else
+            {
+                <span class="small faint">@_answers.Count of @ChangeRiskCalculator.Questions.Count answered</span>
+            }
+        </div>
+        <button class="btn btn-secondary" @onclick="() => OpenChanged.InvokeAsync(false)">Cancel</button>
+        <button class="btn btn-primary" disabled="@(Preview is null || _busy)" @onclick="SaveAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            Save assessment
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private Dictionary<string, int> _answers = [];
+    private bool _busy;
+    private bool _wasOpen;
+
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the change identifier.</summary>
+    [Parameter, EditorRequired] public Guid ChangeId { get; set; }
+
+    /// <summary>Gets or sets the previous answers.</summary>
+    [Parameter] public IReadOnlyDictionary<string, int>? Answers { get; set; }
+
+    /// <summary>Raised after the assessment was saved.</summary>
+    [Parameter] public EventCallback OnAssessed { get; set; }
+
+    private RiskAssessmentResult? Preview => ChangeRiskCalculator.Calculate(_answers);
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Open && !_wasOpen)
+        {
+            _answers = Answers is null ? [] : new Dictionary<string, int>(Answers);
+        }
+
+        _wasOpen = Open;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        var result = await Changes.AssessRiskAsync(ChangeId, _answers);
+        _busy = false;
+        if (Toasts.FromResult(result, $"Risk assessed: {(result.Value is null ? string.Empty : SmLabels.Label(result.Value.Risk))}"))
+        {
+            await OpenChanged.InvokeAsync(false);
+            await OnAssessed.InvokeAsync();
+        }
+    }
+}

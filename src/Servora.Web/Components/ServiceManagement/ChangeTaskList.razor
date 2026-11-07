@@ -1,0 +1,197 @@
+@* Change tasks of a change request with add / edit drawer and state actions. *@
+@inject IChangeService Changes
+@inject ToastService Toasts
+
+<div class="flex items-center justify-between mb-3">
+    <div class="small muted">@Tasks.Count(t => t.State is ChangeTaskState.Completed or ChangeTaskState.Cancelled) of @Tasks.Count task(s) closed</div>
+    @if (CanEdit)
+    {
+        <button class="btn btn-secondary btn-sm" @onclick="NewTask"><Icon Name="plus" Size="14" /> Add task</button>
+    }
+</div>
+
+@if (Tasks.Count == 0)
+{
+    <EmptyState Icon="clipboard-list" Title="No change tasks" Text="Split the implementation into tasks for the teams involved." />
+}
+else
+{
+    <div class="card card-flush">
+        <div class="table-wrap">
+            <table class="table compact">
+                <thead>
+                    <tr><th style="width:120px">Number</th><th>Task</th><th style="width:130px">State</th><th>Assigned</th><th style="width:170px">Planned (UTC)</th><th style="width:1%"></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var task in Tasks)
+                    {
+                        var open = task.State is ChangeTaskState.Open or ChangeTaskState.InProgress;
+                        <tr @key="task.Id">
+                            <td class="mono">@task.Number</td>
+                            <td class="cell-primary">
+                                <div>@task.ShortDescription</div>
+                                @if (!string.IsNullOrWhiteSpace(task.CloseNotes))
+                                {
+                                    <div class="tiny faint">@task.CloseNotes</div>
+                                }
+                            </td>
+                            <td><StatusPill Text="@SmLabels.Label(task.State)" Tone="@SmLabels.Tone(task.State)" /></td>
+                            <td>
+                                @if (task.AssignedToName is not null)
+                                {
+                                    <span class="person"><Avatar Name="@task.AssignedToName" Size="sm" /><span class="person-name">@task.AssignedToName</span></span>
+                                }
+                                else
+                                {
+                                    <span class="small faint">@(task.AssignmentGroupName ?? "Unassigned")</span>
+                                }
+                            </td>
+                            <td class="small">@SmLabels.Utc(task.PlannedStartAt)</td>
+                            <td class="nowrap">
+                                @if (CanEdit && open)
+                                {
+                                    <div class="flex gap-1">
+                                        @if (task.State == ChangeTaskState.Open)
+                                        {
+                                            <button class="icon-btn" title="Start work" @onclick="() => SetStateAsync(task, ChangeTaskState.InProgress)"><Icon Name="play" Size="15" /></button>
+                                        }
+                                        <button class="icon-btn" title="Complete" @onclick="() => Close(task, ChangeTaskState.Completed)"><Icon Name="check" Size="15" /></button>
+                                        <button class="icon-btn" title="Edit" @onclick="() => EditTask(task)"><Icon Name="edit" Size="15" /></button>
+                                        <button class="icon-btn" title="Cancel task" @onclick="() => Close(task, ChangeTaskState.Cancelled)"><Icon Name="x" Size="15" /></button>
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<Drawer @bind-Open="_drawerOpen" Title="@(_editId is null ? "New change task" : "Edit change task")" Subtitle="Tasks must be closed before the change can be closed.">
+    <ChildContent>
+        <div class="form-grid cols-1">
+            <FormField Label="Short description" Required="true">
+                <input class="input" @bind="_model.ShortDescription" maxlength="300" />
+            </FormField>
+            <FormField Label="Assignment group"><GroupPicker @bind-Value="_model.AssignmentGroupId" /></FormField>
+            <FormField Label="Assigned to"><UserPicker @bind-Value="_model.AssignedToId" /></FormField>
+            <FormField Label="Planned start (UTC)"><UtcDateTimeInput @bind-Value="_model.PlannedStartAt" /></FormField>
+            <FormField Label="Planned end (UTC)"><UtcDateTimeInput @bind-Value="_model.PlannedEndAt" /></FormField>
+            <FormField Label="Description">
+                <textarea class="textarea" rows="5" @bind="_model.Description"></textarea>
+            </FormField>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _drawerOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync"><Icon Name="save" Size="14" /> Save task</button>
+    </Footer>
+</Drawer>
+
+<Modal @bind-Open="_closeOpen" Title="@(_closeState == ChangeTaskState.Completed ? "Complete task" : "Cancel task")" Subtitle="@_closing?.ShortDescription" Size="sm"
+       Icon="@(_closeState == ChangeTaskState.Completed ? "check-circle" : "x-circle")">
+    <ChildContent>
+        <FormField Label="Close notes" Help="What was done or why the task is cancelled.">
+            <textarea class="textarea" rows="3" @bind="_closeNotes"></textarea>
+        </FormField>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _closeOpen = false">Back</button>
+        <button class="btn @(_closeState == ChangeTaskState.Completed ? "btn-success" : "btn-danger")" disabled="@_busy" @onclick="ConfirmCloseAsync">
+            @(_closeState == ChangeTaskState.Completed ? "Complete" : "Cancel task")
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private ChangeTaskEditModel _model = new();
+    private Guid? _editId;
+    private bool _drawerOpen;
+    private bool _busy;
+    private bool _closeOpen;
+    private ChangeTaskItem? _closing;
+    private ChangeTaskState _closeState;
+    private string? _closeNotes;
+
+    /// <summary>Gets or sets the change identifier.</summary>
+    [Parameter, EditorRequired] public Guid ChangeId { get; set; }
+
+    /// <summary>Gets or sets the tasks.</summary>
+    [Parameter] public IReadOnlyList<ChangeTaskItem> Tasks { get; set; } = [];
+
+    /// <summary>Gets or sets a value indicating whether tasks can be added and changed.</summary>
+    [Parameter] public bool CanEdit { get; set; }
+
+    /// <summary>Raised after a task changed.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private void NewTask()
+    {
+        _editId = null;
+        _model = new ChangeTaskEditModel();
+        _drawerOpen = true;
+    }
+
+    private void EditTask(ChangeTaskItem task)
+    {
+        _editId = task.Id;
+        _model = new ChangeTaskEditModel
+        {
+            ShortDescription = task.ShortDescription,
+            Description = task.Description,
+            AssignmentGroupId = task.AssignmentGroupId,
+            AssignedToId = task.AssignedToId,
+            PlannedStartAt = task.PlannedStartAt,
+            PlannedEndAt = task.PlannedEndAt,
+        };
+        _drawerOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        Result result = _editId is { } id ? await Changes.UpdateTaskAsync(id, _model) : await Changes.AddTaskAsync(ChangeId, _model);
+        _busy = false;
+        if (Toasts.FromResult(result, _editId is null ? "Task added" : "Task saved"))
+        {
+            _drawerOpen = false;
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private async Task SetStateAsync(ChangeTaskItem task, ChangeTaskState state)
+    {
+        var result = await Changes.SetTaskStateAsync(task.Id, state, null);
+        if (Toasts.FromResult(result, $"{task.Number}: {SmLabels.Label(state)}"))
+        {
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private void Close(ChangeTaskItem task, ChangeTaskState state)
+    {
+        _closing = task;
+        _closeState = state;
+        _closeNotes = null;
+        _closeOpen = true;
+    }
+
+    private async Task ConfirmCloseAsync()
+    {
+        if (_closing is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        var result = await Changes.SetTaskStateAsync(_closing.Id, _closeState, _closeNotes);
+        _busy = false;
+        if (Toasts.FromResult(result, $"{_closing.Number}: {SmLabels.Label(_closeState)}"))
+        {
+            _closeOpen = false;
+            await OnChanged.InvokeAsync();
+        }
+    }
+}

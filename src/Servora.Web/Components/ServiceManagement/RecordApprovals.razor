@@ -1,0 +1,104 @@
+@* Approvals of one record grouped by approval round (approvals tab of change and request pages). *@
+@inject IApprovalInboxService Inbox
+
+@if (_items is null)
+{
+    <Skeleton Lines="3" Height="40px" />
+}
+else if (_items.Count == 0)
+{
+    <EmptyState Icon="check-square" Title="No approvals" Text="@EmptyText" />
+}
+else
+{
+    <div class="stack" style="gap:10px">
+        @foreach (var approval in _items)
+        {
+            <div class="record-approval">
+                <Avatar Name="@approval.ApproverName" />
+                <div class="flex-1" style="min-width:0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <b>@approval.ApproverName</b>
+                        @if (approval.GroupName is not null)
+                        {
+                            <span class="tag"><Icon Name="users" Size="12" /> @approval.GroupName</span>
+                        }
+                        <StatusPill Text="@SmLabels.Label(approval.State)" Tone="@SmLabels.Tone(approval.State)" />
+                    </div>
+                    <div class="tiny faint mt-1">
+                        Requested <RelativeTime Value="approval.RequestedAt" />
+                        @if (approval.DecidedAt is { } decided)
+                        {
+                            <span> · decided <RelativeTime Value="decided" /></span>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(approval.Comments))
+                    {
+                        <div class="small mt-2">“@approval.Comments”</div>
+                    }
+                </div>
+                @if (approval.CanDecide)
+                {
+                    <div class="flex gap-2">
+                        <button class="btn btn-outline-danger btn-sm" @onclick="() => Decide(approval, false)"><Icon Name="x" Size="14" /> Reject</button>
+                        <button class="btn btn-success btn-sm" @onclick="() => Decide(approval, true)"><Icon Name="check" Size="14" /> Approve</button>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+<ApprovalDecisionDialog @bind-Open="_dialogOpen" Item="_selected" Approve="_approve" OnDecided="DecidedAsync" />
+
+@code {
+    private IReadOnlyList<ApprovalItem>? _items;
+    private ApprovalItem? _selected;
+    private bool _approve;
+    private bool _dialogOpen;
+    private (string, Guid)? _loadedFor;
+
+    /// <summary>Gets or sets the technical table name.</summary>
+    [Parameter, EditorRequired] public string Table { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the record identifier.</summary>
+    [Parameter, EditorRequired] public Guid RecordId { get; set; }
+
+    /// <summary>Gets or sets the empty state text.</summary>
+    [Parameter] public string EmptyText { get; set; } = "No approval was requested for this record.";
+
+    /// <summary>Raised after the current user decided an approval.</summary>
+    [Parameter] public EventCallback OnDecided { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor != (Table, RecordId))
+        {
+            _loadedFor = (Table, RecordId);
+            await ReloadAsync();
+        }
+    }
+
+    /// <summary>Reloads the approvals.</summary>
+    /// <returns>A task that completes when reloaded.</returns>
+    public async Task ReloadAsync()
+    {
+        var result = await Inbox.GetForRecordAsync(Table, RecordId);
+        _items = result.Succeeded ? result.Value : [];
+        StateHasChanged();
+    }
+
+    private void Decide(ApprovalItem item, bool approve)
+    {
+        _selected = item;
+        _approve = approve;
+        _dialogOpen = true;
+    }
+
+    private async Task DecidedAsync()
+    {
+        await ReloadAsync();
+        await OnDecided.InvokeAsync();
+    }
+}

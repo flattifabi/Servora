@@ -1,0 +1,223 @@
+@page "/requests"
+@* Fulfiller workspace for service catalog requests: catalog tasks, requested items and requests. *@
+@attribute [RequirePermission(Permissions.Requests.Read)]
+@inject IRequestService Requests
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Requests · Servora</PageTitle>
+
+<PageHeader Title="Requests" Subtitle="Fulfil what employees ordered from the service catalog." Icon="shopping-cart">
+    <Actions>
+        <PermissionView Permission="@Permissions.Requests.ManageCatalog">
+            <a class="btn btn-secondary" href="/catalog-admin"><Icon Name="package" Size="16" /> Manage catalog</a>
+        </PermissionView>
+        <PermissionView Permission="@Permissions.Requests.Write">
+            <a class="btn btn-primary" href="/requests/new"><Icon Name="plus" Size="16" /> New request</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Open requests" Value="@Stat(s => s.OpenRequests)" Icon="shopping-cart" Tone="primary"
+              Caption="@(_stats is null ? null : $"{_stats.CompletedLast30Days} completed in 30 days")" OnClick="() => SetViewAsync(RequestsView, RequestListFilter.Open)" />
+    <StatCard Label="Awaiting approval" Value="@Stat(s => s.AwaitingApproval)" Icon="check-square" Tone="warning" Caption="requested items" OnClick="() => SetViewAsync(ItemsView, RequestListFilter.AwaitingApproval)" />
+    <StatCard Label="Open tasks" Value="@Stat(s => s.OpenTasks)" Icon="clipboard-list" Tone="info" Caption="catalog tasks" OnClick="() => SetViewAsync(TasksView, RequestListFilter.Open)" />
+    <StatCard Label="Unassigned" Value="@Stat(s => s.UnassignedTasks)" Icon="user-plus" Tone="danger" Caption="tasks without assignee" OnClick="() => SetViewAsync(TasksView, RequestListFilter.Open)" />
+</div>
+
+<div class="flex items-center gap-3 mb-4 flex-wrap">
+    <div class="segmented">
+        <button class="@(_view == TasksView ? "active" : null)" @onclick="() => SetViewAsync(TasksView, RequestListFilter.MyGroups)"><Icon Name="clipboard-list" Size="14" /> Catalog tasks</button>
+        <button class="@(_view == ItemsView ? "active" : null)" @onclick="() => SetViewAsync(ItemsView, RequestListFilter.Open)"><Icon Name="package" Size="14" /> Requested items</button>
+        <button class="@(_view == RequestsView ? "active" : null)" @onclick="() => SetViewAsync(RequestsView, RequestListFilter.Open)"><Icon Name="shopping-cart" Size="14" /> Requests</button>
+    </div>
+</div>
+
+@if (_view == TasksView)
+{
+    <DataTable TItem="CatalogTaskListItem" Items="_tasks?.Items" TotalCount="_tasks?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+               Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search tasks…"
+               OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(t => Nav.NavigateTo($"/requests/{t.RequestId}"))"
+               EmptyIcon="clipboard-list" EmptyTitle="No catalog tasks" EmptyText="Nothing to fulfil for this filter.">
+        <Toolbar><FilterBar Filters="s_taskFilters" Current="_filter" OnSelect="SetFilterAsync" /></Toolbar>
+        <Columns>
+            <DataColumn TItem="CatalogTaskListItem" Title="Number" SortKey="Number" Width="130px"><Template><span class="cell-link mono">@context.Number</span></Template></DataColumn>
+            <DataColumn TItem="CatalogTaskListItem" Title="Task" Class="cell-primary">
+                <Template>
+                    <div>@context.ShortDescription</div>
+                    <div class="tiny faint mono">@context.RequestItemNumber</div>
+                </Template>
+            </DataColumn>
+            <DataColumn TItem="CatalogTaskListItem" Title="State" SortKey="State" Width="150px"><Template><StatusPill Text="@SmLabels.Label(context.State)" Tone="@SmLabels.Tone(context.State)" /></Template></DataColumn>
+            <DataColumn TItem="CatalogTaskListItem" Title="Priority" SortKey="Priority" Width="120px"><Template><PriorityBadge Priority="context.Priority" /></Template></DataColumn>
+            <DataColumn TItem="CatalogTaskListItem" Title="Group" Value="@(t => t.AssignmentGroupName ?? "—")" />
+            <DataColumn TItem="CatalogTaskListItem" Title="Assigned to">
+                <Template>
+                    @if (context.AssignedToName is not null)
+                    {
+                        <span class="person"><Avatar Name="@context.AssignedToName" Size="sm" /><span class="person-name">@context.AssignedToName</span></span>
+                    }
+                    else
+                    {
+                        <span class="pill pill-danger no-dot">Unassigned</span>
+                    }
+                </Template>
+            </DataColumn>
+            <DataColumn TItem="CatalogTaskListItem" Title="Due" Width="110px"><Template><RelativeTime Value="context.DueAt" Class="small" /></Template></DataColumn>
+        </Columns>
+    </DataTable>
+}
+else if (_view == ItemsView)
+{
+    <DataTable TItem="RequestItemListItem" Items="_items?.Items" TotalCount="_items?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+               Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search requested items…"
+               OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(i => Nav.NavigateTo($"/requests/{i.RequestId}"))"
+               EmptyIcon="package" EmptyTitle="No requested items" EmptyText="No requested items match this filter.">
+        <Toolbar><FilterBar Filters="s_itemFilters" Current="_filter" OnSelect="SetFilterAsync" /></Toolbar>
+        <Columns>
+            <DataColumn TItem="RequestItemListItem" Title="Number" SortKey="Number" Width="130px"><Template><span class="cell-link mono">@context.Number</span></Template></DataColumn>
+            <DataColumn TItem="RequestItemListItem" Title="Item" Class="cell-primary">
+                <Template>
+                    <div>@context.ItemName @(context.Quantity > 1 ? $"× {context.Quantity}" : null)</div>
+                    <div class="tiny faint mono">@context.RequestNumber</div>
+                </Template>
+            </DataColumn>
+            <DataColumn TItem="RequestItemListItem" Title="Requested for">
+                <Template><span class="person"><Avatar Name="@context.RequestedForName" Size="sm" /><span class="person-name">@context.RequestedForName</span></span></Template>
+            </DataColumn>
+            <DataColumn TItem="RequestItemListItem" Title="State" SortKey="State" Width="150px"><Template><StatusPill Text="@SmLabels.Label(context.State)" Tone="@SmLabels.Tone(context.State)" /></Template></DataColumn>
+            <DataColumn TItem="RequestItemListItem" Title="Approval" Width="130px">
+                <Template>
+                    @if (context.Approval == ApprovalStatus.NotRequested)
+                    {
+                        <span class="faint small">Not required</span>
+                    }
+                    else
+                    {
+                        <StatusPill Text="@SmLabels.Label(context.Approval)" Tone="@SmLabels.Tone(context.Approval)" />
+                    }
+                </Template>
+            </DataColumn>
+            <DataColumn TItem="RequestItemListItem" Title="Fulfilment group" Value="@(i => i.AssignmentGroupName ?? "—")" />
+            <DataColumn TItem="RequestItemListItem" Title="Opened" SortKey="Opened" Width="110px"><Template><RelativeTime Value="context.OpenedAt" Class="small" /></Template></DataColumn>
+        </Columns>
+    </DataTable>
+}
+else
+{
+    <DataTable TItem="RequestListItem" Items="_requests?.Items" TotalCount="_requests?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+               Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search requests…"
+               OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(r => Nav.NavigateTo($"/requests/{r.Id}"))"
+               EmptyIcon="shopping-cart" EmptyTitle="No requests" EmptyText="No requests match this filter.">
+        <Toolbar><FilterBar Filters="s_requestFilters" Current="_filter" OnSelect="SetFilterAsync" /></Toolbar>
+        <Columns>
+            <DataColumn TItem="RequestListItem" Title="Number" SortKey="Number" Width="130px"><Template><span class="cell-link mono">@context.Number</span></Template></DataColumn>
+            <DataColumn TItem="RequestListItem" Title="Short description" Class="cell-primary" Value="r => r.ShortDescription" />
+            <DataColumn TItem="RequestListItem" Title="Requested for">
+                <Template><span class="person"><Avatar Name="@context.RequestedForName" Size="sm" /><span class="person-name">@context.RequestedForName</span></span></Template>
+            </DataColumn>
+            <DataColumn TItem="RequestListItem" Title="State" SortKey="State" Width="160px"><Template><StatusPill Text="@SmLabels.Label(context.State)" Tone="@SmLabels.Tone(context.State)" /></Template></DataColumn>
+            <DataColumn TItem="RequestListItem" Title="Items" Align="right" Width="80px" Value="r => r.ItemCount" />
+            <DataColumn TItem="RequestListItem" Title="Total" Align="right" Width="110px"><Template><span class="mono small">@SmLabels.Price(context.TotalPrice)</span></Template></DataColumn>
+            <DataColumn TItem="RequestListItem" Title="Opened" SortKey="Opened" Width="110px"><Template><RelativeTime Value="context.OpenedAt" Class="small" /></Template></DataColumn>
+            <DataColumn TItem="RequestListItem" Title="Due" Width="110px"><Template><RelativeTime Value="context.DueAt" Class="small" /></Template></DataColumn>
+        </Columns>
+    </DataTable>
+}
+
+@code {
+    private static readonly IReadOnlyList<(RequestListFilter Filter, string Label)> s_taskFilters =
+        [(RequestListFilter.MyGroups, "My groups"), (RequestListFilter.AssignedToMe, "Assigned to me"), (RequestListFilter.Open, "All open"), (RequestListFilter.Closed, "Closed"), (RequestListFilter.All, "All")];
+
+    private static readonly IReadOnlyList<(RequestListFilter Filter, string Label)> s_itemFilters =
+        [(RequestListFilter.Open, "Open"), (RequestListFilter.AwaitingApproval, "Awaiting approval"), (RequestListFilter.MyGroups, "My groups"), (RequestListFilter.Closed, "Closed"), (RequestListFilter.All, "All")];
+
+    private static readonly IReadOnlyList<(RequestListFilter Filter, string Label)> s_requestFilters =
+        [(RequestListFilter.Open, "Open"), (RequestListFilter.AwaitingApproval, "Awaiting approval"), (RequestListFilter.Closed, "Closed"), (RequestListFilter.All, "All")];
+
+    private string _view = TasksView;
+    private RequestListFilter _filter = RequestListFilter.MyGroups;
+    private PageRequest _request = new() { PageSize = 25 };
+    private PagedResult<CatalogTaskListItem>? _tasks;
+    private PagedResult<RequestItemListItem>? _items;
+    private PagedResult<RequestListItem>? _requests;
+    private RequestStats? _stats;
+    private bool _loading;
+
+    private const string TasksView = "tasks";
+    private const string ItemsView = "items";
+    private const string RequestsView = "requests";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _stats = (await Requests.GetStatsAsync()).Value;
+        await LoadAsync();
+    }
+
+    private string Stat(Func<RequestStats, int> selector) => _stats is null ? "–" : selector(_stats).ToString("N0");
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        Result result;
+        switch (_view)
+        {
+            case TasksView:
+                var tasks = await Requests.ListTasksAsync(_filter, _request);
+                _tasks = tasks.Value;
+                result = tasks;
+                break;
+            case ItemsView:
+                var items = await Requests.ListItemsAsync(_filter, _request);
+                _items = items.Value;
+                result = items;
+                break;
+            default:
+                var requests = await Requests.ListRequestsAsync(_filter, _request);
+                _requests = requests.Value;
+                result = requests;
+                break;
+        }
+
+        _loading = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Could not load the list", result.Error);
+        }
+    }
+
+    private Task SetViewAsync(string view, RequestListFilter filter)
+    {
+        _view = view;
+        _filter = filter;
+        _request = new PageRequest { PageSize = 25 };
+        return LoadAsync();
+    }
+
+    private Task SetFilterAsync(RequestListFilter filter)
+    {
+        _filter = filter;
+        _request = _request with { Page = 1 };
+        return LoadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _request = _request with { Page = page };
+        return LoadAsync();
+    }
+
+    private Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        _request = _request with { SortBy = sort.SortBy, SortDescending = sort.Descending, Page = 1 };
+        return LoadAsync();
+    }
+
+    private Task SearchAsync(string term)
+    {
+        _request = _request with { Search = term, Page = 1 };
+        return LoadAsync();
+    }
+}

@@ -1,0 +1,82 @@
+@* Dialog to approve or reject an approval with a comment (mandatory for rejections). *@
+@inject IApprovalInboxService Inbox
+@inject ToastService Toasts
+
+<Modal Open="Open" OpenChanged="OpenChanged" Title="@($"{(Approve ? "Approve" : "Reject")} {Item?.RecordNumber}")" Subtitle="@Item?.RecordSummary"
+       Icon="@(Approve ? "check-circle" : "x-circle")">
+    <ChildContent>
+        <FormField Label="@(Approve ? "Comment (optional)" : "Reason for the rejection")" Required="!Approve" Error="@_error"
+                   Help="@(Approve ? "Visible in the record's activity stream." : "The requester sees this reason.")">
+            <textarea class="textarea" rows="4" @bind="_comment" @bind:event="oninput" placeholder="@(Approve ? "Add a note for the requester…" : "Explain why you reject…")"></textarea>
+        </FormField>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="Close">Cancel</button>
+        <button class="btn @(Approve ? "btn-success" : "btn-danger")" disabled="@_busy" @onclick="SubmitAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            <Icon Name="@(Approve ? "check" : "x")" Size="14" /> @(Approve ? "Approve" : "Reject")
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private string _comment = string.Empty;
+    private string? _error;
+    private bool _busy;
+    private Guid? _itemId;
+
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the approval to decide.</summary>
+    [Parameter] public ApprovalItem? Item { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the user approves (otherwise rejects).</summary>
+    [Parameter] public bool Approve { get; set; }
+
+    /// <summary>Raised after a successful decision.</summary>
+    [Parameter] public EventCallback OnDecided { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Item?.Id != _itemId)
+        {
+            _itemId = Item?.Id;
+            _comment = string.Empty;
+            _error = null;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (Item is null)
+        {
+            return;
+        }
+
+        if (!Approve && string.IsNullOrWhiteSpace(_comment))
+        {
+            _error = "Please give a reason.";
+            return;
+        }
+
+        _busy = true;
+        var result = Approve ? await Inbox.ApproveAsync(Item.Id, _comment) : await Inbox.RejectAsync(Item.Id, _comment);
+        _busy = false;
+        if (Toasts.FromResult(result, Approve ? $"{Item.RecordNumber} approved" : $"{Item.RecordNumber} rejected"))
+        {
+            _comment = string.Empty;
+            await OpenChanged.InvokeAsync(false);
+            await OnDecided.InvokeAsync();
+        }
+    }
+
+    private Task Close() => OpenChanged.InvokeAsync(false);
+}

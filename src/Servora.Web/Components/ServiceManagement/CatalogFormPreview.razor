@@ -1,0 +1,91 @@
+@* Portal-style live preview of a catalog item's order form. Lets catalog managers try the form and its validation. *@
+
+<div class="preview-shell">
+    <div class="preview-hero">
+        <div class="preview-icon"><Icon Name="@Icon" Size="26" /></div>
+        <div style="min-width:0">
+            <div class="preview-name">@(string.IsNullOrWhiteSpace(Name) ? "Untitled item" : Name)</div>
+            <div class="small muted">@(string.IsNullOrWhiteSpace(ShortDescription) ? "Short description shown on the catalog card." : ShortDescription)</div>
+            <div class="flex items-center gap-2 flex-wrap mt-2">
+                <span class="tag"><Icon Name="tag" Size="12" /> @SmLabels.Price(Price)</span>
+                <span class="tag"><Icon Name="clock" Size="12" /> @(DeliveryDays == 0 ? "Same day" : $"{DeliveryDays} day(s)")</span>
+                @if (ApprovalRequired)
+                {
+                    <span class="tag"><Icon Name="check-square" Size="12" /> Approval required</span>
+                }
+            </div>
+        </div>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Description))
+    {
+        <div class="small preview-description">@Description</div>
+    }
+    <div class="form-grid cols-1 mt-4">
+        @if (Variables.Count == 0)
+        {
+            <div class="small faint text-center" style="padding:18px">No questions yet – the item can be ordered with one click.</div>
+        }
+        @foreach (var variable in Variables.OrderBy(v => v.Order))
+        {
+            <CatalogVariableInput @key="variable.Name" Definition="variable" Value="@ValueOf(variable)" ValueChanged="v => _values[variable.Name] = v"
+                                  Error="@_errors.GetValueOrDefault(variable.Name)" />
+        }
+    </div>
+    <div class="flex items-center gap-2 mt-4">
+        <button class="btn btn-secondary btn-sm" @onclick="Validate"><Icon Name="shield-check" Size="14" /> Validate answers</button>
+        <button class="btn btn-ghost btn-sm" @onclick="Reset"><Icon Name="refresh" Size="14" /> Reset</button>
+        <div class="flex-1"></div>
+        <button class="btn btn-primary btn-sm" disabled title="Preview only"><Icon Name="shopping-cart" Size="14" /> Order now</button>
+    </div>
+    @if (_validated && _errors.Count == 0)
+    {
+        <div class="alert alert-success mt-3"><Icon Name="check-circle" Size="16" /><div>All answers are valid.</div></div>
+    }
+</div>
+
+@code {
+    private readonly Dictionary<string, string?> _values = [];
+    private IReadOnlyDictionary<string, string> _errors = new Dictionary<string, string>();
+    private bool _validated;
+
+    /// <summary>Gets or sets the item name.</summary>
+    [Parameter] public string? Name { get; set; }
+
+    /// <summary>Gets or sets the short description.</summary>
+    [Parameter] public string? ShortDescription { get; set; }
+
+    /// <summary>Gets or sets the description.</summary>
+    [Parameter] public string? Description { get; set; }
+
+    /// <summary>Gets or sets the icon.</summary>
+    [Parameter] public string Icon { get; set; } = "package";
+
+    /// <summary>Gets or sets the price.</summary>
+    [Parameter] public decimal Price { get; set; }
+
+    /// <summary>Gets or sets the delivery time.</summary>
+    [Parameter] public int DeliveryDays { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether approval is required.</summary>
+    [Parameter] public bool ApprovalRequired { get; set; }
+
+    /// <summary>Gets or sets the variables.</summary>
+    [Parameter] public IReadOnlyList<CatalogVariableDefinition> Variables { get; set; } = [];
+
+    private string? ValueOf(CatalogVariableDefinition variable) =>
+        _values.TryGetValue(variable.Name, out var value) ? value : variable.DefaultValue;
+
+    private void Validate()
+    {
+        var answers = Variables.ToDictionary(v => v.Name, ValueOf);
+        _errors = CatalogVariableValidator.Validate(Variables, answers).Errors;
+        _validated = true;
+    }
+
+    private void Reset()
+    {
+        _values.Clear();
+        _errors = new Dictionary<string, string>();
+        _validated = false;
+    }
+}

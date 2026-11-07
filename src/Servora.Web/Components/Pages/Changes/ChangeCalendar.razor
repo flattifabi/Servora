@@ -1,0 +1,139 @@
+@page "/changes/calendar"
+@* Change calendar: month grid (Monday first, UTC) of planned implementation windows. *@
+@attribute [RequirePermission(Permissions.Changes.Read)]
+@inject IChangeService Changes
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Change calendar · Servora</PageTitle>
+
+<PageHeader Title="Change calendar" Subtitle="Planned implementation windows of all changes (UTC)." Icon="calendar">
+    <Breadcrumbs><a href="/changes">Changes</a> <Icon Name="chevron-right" Size="12" /> <span>Calendar</span></Breadcrumbs>
+    <Actions>
+        <PermissionView Permission="@Permissions.Changes.Create">
+            <a class="btn btn-primary" href="/changes/new"><Icon Name="plus" Size="16" /> New change</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="This month" Value="@InMonth.Count().ToString()" Icon="calendar" Tone="primary" Caption="changes planned" />
+    <StatCard Label="High risk" Value="@InMonth.Count(e => e.Risk >= ChangeRisk.High).ToString()" Icon="alert-triangle" Tone="danger" Caption="high or very high" />
+    <StatCard Label="Emergency" Value="@InMonth.Count(e => e.Type == ChangeType.Emergency).ToString()" Icon="flame" Tone="warning" Caption="expedited" />
+    <StatCard Label="Awaiting CAB" Value="@InMonth.Count(e => e.State == ChangeState.Authorize).ToString()" Icon="check-square" Tone="info" Caption="not yet authorized" />
+</div>
+
+<div class="card card-flush">
+    <div class="table-toolbar">
+        <div class="btn-group">
+            <button class="btn btn-secondary btn-sm btn-icon" title="Previous month" @onclick="() => MoveAsync(-1)"><Icon Name="chevron-left" Size="16" /></button>
+            <button class="btn btn-secondary btn-sm" @onclick="TodayAsync">Today</button>
+            <button class="btn btn-secondary btn-sm btn-icon" title="Next month" @onclick="() => MoveAsync(1)"><Icon Name="chevron-right" Size="16" /></button>
+        </div>
+        <h3 style="margin:0 8px">@_month.ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</h3>
+        @if (_loading)
+        {
+            <span class="spinner"></span>
+        }
+        <div class="spacer"></div>
+        <div class="flex items-center gap-3 small muted">
+            <span class="flex items-center gap-1"><span class="cal-dot type-normal"></span> Normal</span>
+            <span class="flex items-center gap-1"><span class="cal-dot type-standard"></span> Standard</span>
+            <span class="flex items-center gap-1"><span class="cal-dot type-emergency"></span> Emergency</span>
+        </div>
+    </div>
+    <div class="cal-grid cal-head">
+        @foreach (var day in s_weekdays)
+        {
+            <div class="cal-weekday">@day</div>
+        }
+    </div>
+    <div class="cal-grid">
+        @for (var i = 0; i < 42; i++)
+        {
+            var date = _gridStart.AddDays(i);
+            var entries = EntriesOn(date);
+            <div class="cal-day @(date.Month != _month.Month ? "other" : null) @(date == Today ? "today" : null)">
+                <div class="cal-date">@date.Day</div>
+                @foreach (var entry in entries.Take(3))
+                {
+                    <button class="cal-entry type-@entry.Type.ToString().ToLowerInvariant() @(entry.State == ChangeState.Closed ? "closed" : null)"
+                            title="@($"{entry.Number} · {entry.ShortDescription}\n{SmLabels.Utc(entry.PlannedStartAt)} – {SmLabels.Utc(entry.PlannedEndAt)}\n{entry.State} · risk {SmLabels.Label(entry.Risk)}{(entry.ConfigurationItemName is null ? string.Empty : " · " + entry.ConfigurationItemName)}")"
+                            @onclick="@(() => Nav.NavigateTo($"/changes/{entry.Id}"))">
+                        <span class="cal-time">@(entry.PlannedStartAt.UtcDateTime.Date == date.ToDateTime(TimeOnly.MinValue) ? entry.PlannedStartAt.UtcDateTime.ToString("HH:mm") : "…")</span>
+                        <span class="truncate">@entry.ShortDescription</span>
+                    </button>
+                }
+                @if (entries.Count > 3)
+                {
+                    <div class="cal-more">+@(entries.Count - 3) more</div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@if (!_loading && _entries.Count == 0)
+{
+    <div class="small muted text-center mt-4">No changes are planned in this period.</div>
+}
+
+@code {
+    private static readonly string[] s_weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    private DateOnly _month;
+    private DateOnly _gridStart;
+    private IReadOnlyList<ChangeCalendarEntry> _entries = [];
+    private bool _loading;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    private IEnumerable<ChangeCalendarEntry> InMonth
+    {
+        get
+        {
+            var start = new DateTimeOffset(_month.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var end = start.AddMonths(1);
+            return _entries.Where(e => e.PlannedStartAt < end && e.PlannedEndAt > start);
+        }
+    }
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => TodayAsync();
+
+    private Task TodayAsync()
+    {
+        _month = new DateOnly(Today.Year, Today.Month, 1);
+        return LoadAsync();
+    }
+
+    private Task MoveAsync(int months)
+    {
+        _month = _month.AddMonths(months);
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var offset = ((int)_month.DayOfWeek + 6) % 7;
+        _gridStart = _month.AddDays(-offset);
+        var from = new DateTimeOffset(_gridStart.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        _loading = true;
+        var result = await Changes.GetCalendarAsync(from, from.AddDays(42));
+        _loading = false;
+        if (result.Succeeded)
+        {
+            _entries = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Could not load the calendar", result.Error);
+        }
+    }
+
+    private List<ChangeCalendarEntry> EntriesOn(DateOnly date)
+    {
+        var start = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var end = start.AddDays(1);
+        return _entries.Where(e => e.PlannedStartAt < end && e.PlannedEndAt > start).ToList();
+    }
+}

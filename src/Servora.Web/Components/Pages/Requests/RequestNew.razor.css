@@ -1,0 +1,116 @@
+.catalog-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.catalog-search {
+    max-width: 520px;
+}
+
+.category-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.category-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--speed) var(--ease);
+}
+
+.category-chip:hover {
+    border-color: var(--primary);
+    color: var(--text);
+}
+
+.category-chip.active {
+    background: var(--gradient);
+    border-color: transparent;
+    color: #fff;
+    box-shadow: var(--glow);
+}
+
+.chip-count {
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    color: var(--text-2);
+}
+
+.category-chip.active .chip-count {
+    background: rgba(255, 255, 255, .22);
+    color: #fff;
+}
+
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.catalog-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    min-height: 170px;
+}
+
+.catalog-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    background: var(--gradient-soft);
+    color: var(--primary);
+}
+
+.catalog-name {
+    font-weight: 700;
+    font-size: 15px;
+}
+
+.catalog-description {
+    flex: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.next-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    color: var(--text-2);
+}
+
+.next-steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}

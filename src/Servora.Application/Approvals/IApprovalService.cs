@@ -27,4 +27,13 @@ public interface IApprovalService
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result.</returns>
     Task<Result> CancelAsync(string tableName, Guid recordId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Counts the approvals awaiting a decision by the given user (direct or through approval groups). Used by
+    /// dashboards. The default implementation returns <see langword="null"/>, meaning "not supported".
+    /// </summary>
+    /// <param name="userId">The approver user identifier.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of pending approvals, or <see langword="null"/> when unknown.</returns>
+    Task<int?> CountPendingForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<int?>(null);
 }
