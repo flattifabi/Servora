@@ -1,0 +1,8 @@
+/* Unread inbox rows are highlighted with a subtle accent bar. */
+.inbox ::deep .row-unread td {
+    background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.inbox ::deep .row-unread td:first-child {
+    box-shadow: inset 3px 0 0 var(--primary);
+}

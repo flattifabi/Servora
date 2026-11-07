@@ -1,0 +1,149 @@
+@page "/notifications"
+@* The current user's in-app notification inbox (full page behind the top bar bell). Users only ever see their own messages. *@
+@attribute [Authorize]
+@inject INotificationInbox Inbox
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Inbox · Servora</PageTitle>
+
+<PageHeader Title="Inbox" Subtitle="Notifications about records you are involved in." Icon="inbox">
+    <Actions>
+        <button class="btn btn-secondary" disabled="@(_unread == 0)" @onclick="MarkAllReadAsync"><Icon Name="check-circle" Size="16" /> Mark all as read</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-3 mb-6">
+    <StatCard Label="Unread" Value="@_unread.ToString("N0")" Icon="bell" Tone="@(_unread > 0 ? "warning" : "success")" Caption="@(_unread > 0 ? "waiting for you" : "all caught up")" />
+    <StatCard Label="Total" Value="@(_total?.ToString("N0") ?? "–")" Icon="inbox" Caption="@(_unreadOnly ? "unread messages" : "messages in your inbox")" />
+    <StatCard Label="Today" Value="@_items.Count(i => i.CreatedAt > DateTimeOffset.UtcNow.AddDays(-1)).ToString("N0")" Icon="clock" Tone="info" Caption="on this page, last 24 hours" />
+</div>
+
+<div class="inbox">
+<DataTable TItem="InboxItem" Items="_items" TotalCount="@(_total ?? 0)" PageNumber="_page" PageSize="PageSize" Loading="_loading" ShowSearch="false"
+           OnPageChanged="GoToPageAsync" OnRowClick="OpenAsync" RowClass="@(i => i.IsRead ? null : "row-unread")"
+           EmptyIcon="inbox" EmptyTitle="@(_unreadOnly ? "No unread notifications" : "Your inbox is empty")" EmptyText="You will be notified here when records you work on change.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(!_unreadOnly ? "active" : null)" @onclick="() => FilterAsync(false)">All</button>
+            <button class="@(_unreadOnly ? "active" : null)" @onclick="() => FilterAsync(true)">Unread</button>
+        </div>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="InboxItem" Title="" Width="28px">
+            <Template>
+                @if (!context.IsRead)
+                {
+                    <span class="live-dot" title="Unread"></span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="InboxItem" Title="Notification">
+            <Template>
+                <div style="font-weight:@(context.IsRead ? "500" : "650")">@context.Title</div>
+                @if (!string.IsNullOrWhiteSpace(context.Body))
+                {
+                    <div class="small muted truncate" style="max-width:640px">@context.Body</div>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="InboxItem" Title="Received" Width="140px"><Template><RelativeTime Value="context.CreatedAt" /></Template></DataColumn>
+        <DataColumn TItem="InboxItem" Title="" Width="96px">
+            <Template>
+                <div class="flex gap-1" @onclick:stopPropagation="true">
+                    @if (!context.IsRead)
+                    {
+                        <button class="icon-btn" title="Mark as read" @onclick="() => MarkReadAsync(context)"><Icon Name="check" Size="15" /></button>
+                    }
+                    <button class="icon-btn" title="Delete" @onclick="() => DeleteAsync(context)"><Icon Name="trash" Size="15" /></button>
+                </div>
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+</div>
+
+@code {
+    private const int PageSize = 25;
+
+    private IReadOnlyList<InboxItem> _items = [];
+    private int? _total;
+    private int _unread;
+    private int _page = 1;
+    private bool _unreadOnly;
+    private bool _loading = true;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var page = await Inbox.GetAsync(new PageRequest { Page = _page, PageSize = PageSize }, _unreadOnly);
+        _items = page.Items;
+        _total = page.TotalCount;
+        _unread = await Inbox.GetUnreadCountAsync();
+        _loading = false;
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+
+    private async Task FilterAsync(bool unreadOnly)
+    {
+        _unreadOnly = unreadOnly;
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private async Task OpenAsync(InboxItem item)
+    {
+        if (!item.IsRead)
+        {
+            await Inbox.MarkReadAsync(item.Id);
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Link) && item.Link.StartsWith('/') && !item.Link.StartsWith("//", StringComparison.Ordinal))
+        {
+            Nav.NavigateTo(item.Link);
+        }
+        else
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task MarkReadAsync(InboxItem item)
+    {
+        var result = await Inbox.MarkReadAsync(item.Id);
+        if (result.Succeeded)
+        {
+            await LoadAsync();
+        }
+        else
+        {
+            Toasts.FromResult(result, string.Empty);
+        }
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        var result = await Inbox.MarkAllReadAsync();
+        if (Toasts.FromResult(result, "All notifications marked as read"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync(InboxItem item)
+    {
+        var result = await Inbox.DeleteAsync(item.Id);
+        if (Toasts.FromResult(result, "Notification deleted"))
+        {
+            await LoadAsync();
+        }
+    }
+}

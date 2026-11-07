@@ -1,0 +1,358 @@
+@page "/admin/sla"
+@* Studio: SLA definitions (conditions, target, schedule) and live monitoring of running task SLA timers. *@
+@attribute [RequirePermission(Permissions.Platform.ManageSla)]
+@inject ISlaAdminService Slas
+@inject ITableRegistry Registry
+@inject INotificationAdminService NotificationAdmin
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>SLA Definitions · Servora</PageTitle>
+
+<PageHeader Title="Service Level Agreements" Subtitle="Response and resolution targets measured around the clock or in business hours, with automatic breach handling." Icon="timer">
+    <Actions>
+        <button class="btn btn-secondary" disabled="@_loading" @onclick="LoadAsync"><Icon Name="refresh" Size="16" /> Refresh</button>
+        <button class="btn btn-primary" @onclick="() => OpenAsync(null)"><Icon Name="plus" Size="16" /> New SLA</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Running timers" Value="@(_overview?.Running.ToString("N0") ?? "–")" Icon="timer" Caption="in progress or paused" />
+    <StatCard Label="Breached" Value="@(_overview?.RunningBreached.ToString("N0") ?? "–")" Icon="flame" Tone="danger" Caption="running past target" />
+    <StatCard Label="Compliance" Value="@(_overview is null ? "–" : _overview.ComplianceRate.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " %")" Icon="target"
+              Tone="@(_overview is null || _overview.ComplianceRate >= 90 ? "success" : _overview.ComplianceRate >= 75 ? "warning" : "danger")"
+              Caption="@($"{_overview?.AchievedLast30Days ?? 0} of {_overview?.CompletedLast30Days ?? 0} met · 30 days")" />
+    <StatCard Label="Definitions" Value="@_definitions.Count.ToString()" Icon="clipboard-list" Tone="accent" Caption="@($"{_definitions.Count(d => d.IsActive)} active")" />
+</div>
+
+<Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+
+<div class="mt-4">
+    @if (_tab == "monitor")
+    {
+        <DataTable TItem="SlaTimerRow" Items="_overview?.Timers" TotalCount="@(_overview?.Timers.Count ?? 0)" PageSize="500" ShowPager="false" ShowSearch="false" Loading="_loading"
+                   OnRowClick="t => Nav.NavigateTo(t.Url)" EmptyIcon="check-circle" EmptyTitle="No running SLA timers"
+                   EmptyText="Timers start automatically when a record matches the start condition of an active SLA definition.">
+            <ToolbarEnd><span class="small faint">Most urgent first</span></ToolbarEnd>
+            <Columns>
+                <DataColumn TItem="SlaTimerRow" Title="Record">
+                    <Template>
+                        <div class="cell-link">@(context.RecordDisplay ?? context.RecordId.ToString("D")[..8])</div>
+                        <div class="tiny faint">@TableLabel(context.TableName)</div>
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="SlaTimerRow" Title="SLA" Value="t => t.DefinitionName" />
+                <DataColumn TItem="SlaTimerRow" Title="Stage">
+                    <Template><StatusPill Text="@(context.Stage == "InProgress" ? "In progress" : context.Stage)" Tone="@(context.Breached ? "danger" : context.Stage == "Paused" ? "warning" : "info")" /></Template>
+                </DataColumn>
+                <DataColumn TItem="SlaTimerRow" Title="Elapsed" Width="220px">
+                    <Template>
+                        <div class="progress @(context.Breached ? "danger" : context.PercentElapsed >= 75 ? "warning" : "success")">
+                            <span style="width:@(Math.Min(100, context.PercentElapsed).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span>
+                        </div>
+                        <div class="tiny faint mt-1">@context.PercentElapsed.ToString("0", System.Globalization.CultureInfo.InvariantCulture)% of target</div>
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="SlaTimerRow" Title="Started"><Template><RelativeTime Value="context.StartedAt" /></Template></DataColumn>
+                <DataColumn TItem="SlaTimerRow" Title="Due"><Template><RelativeTime Value="context.DueAt" Placeholder="paused" /></Template></DataColumn>
+            </Columns>
+        </DataTable>
+    }
+    else
+    {
+        <DataTable TItem="SlaDefinitionModel" Items="_definitions" TotalCount="_definitions.Count" PageSize="500" ShowPager="false" ShowSearch="false" Loading="_loading"
+                   OnRowClick="d => OpenAsync(d)" EmptyIcon="timer" EmptyTitle="No SLA definitions yet"
+                   EmptyText="Define response and resolution targets for incidents, requests or any other table.">
+            <Columns>
+                <DataColumn TItem="SlaDefinitionModel" Title="SLA">
+                    <Template>
+                        <div class="cell-link">@context.Name</div>
+                        @if (!string.IsNullOrWhiteSpace(context.Description))
+                        {
+                            <div class="tiny faint truncate" style="max-width:380px">@context.Description</div>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="SlaDefinitionModel" Title="Table"><Template><span class="tag">@TableLabel(context.TableName)</span></Template></DataColumn>
+                <DataColumn TItem="SlaDefinitionModel" Title="Target"><Template><span style="font-weight:600">@FormatDuration(context.TargetMinutes)</span></Template></DataColumn>
+                <DataColumn TItem="SlaDefinitionModel" Title="Schedule">
+                    <Template>
+                        @if (context.ScheduleType == SlaScheduleType.TwentyFourSeven)
+                        {
+                            <span class="pill pill-neutral no-dot">24 × 7</span>
+                        }
+                        else
+                        {
+                            <span class="pill pill-info no-dot">Business hours</span>
+                            <span class="tiny faint"> @FormatMinute(context.DayStartMinute)–@FormatMinute(context.DayEndMinute) · @context.TimeZoneId</span>
+                        }
+                    </Template>
+                </DataColumn>
+                <DataColumn TItem="SlaDefinitionModel" Title="Running" Align="right" Value="d => d.ActiveTimers" />
+                <DataColumn TItem="SlaDefinitionModel" Title="State"><Template><StatusPill Text="@(context.IsActive ? "Active" : "Inactive")" Tone="@(context.IsActive ? "success" : "neutral")" /></Template></DataColumn>
+                <DataColumn TItem="SlaDefinitionModel" Title="Updated"><Template><RelativeTime Value="context.UpdatedAt" /></Template></DataColumn>
+            </Columns>
+        </DataTable>
+    }
+</div>
+
+<Drawer @bind-Open="_editorOpen" Title="@(_model.Id == Guid.Empty ? "New SLA definition" : _model.Name)" Subtitle="@(_table?.Label ?? "SLA definition")" Size="lg">
+    <ChildContent>
+        <div class="form-grid">
+            <FormField Label="Name" Required="true"><input class="input" @bind="_model.Name" placeholder="e.g. P1 resolution" /></FormField>
+            <FormField Label="Table" Required="true" Help="@(_model.Id == Guid.Empty ? null : "The table cannot be changed.")">
+                <select class="select" value="@_model.TableName" disabled="@(_model.Id != Guid.Empty)" @onchange="e => SelectTableAsync(e.Value?.ToString())">
+                    <option value="">— Select table —</option>
+                    @foreach (var table in _tables)
+                    {
+                        <option value="@table.Name">@table.Label (@table.Name)</option>
+                    }
+                </select>
+            </FormField>
+            <FormField Label="Description" Class="span-all"><textarea class="textarea" rows="2" @bind="_model.Description"></textarea></FormField>
+            <FormField Label="Target" Required="true" Help="Business time until the SLA breaches.">
+                <div class="flex items-center gap-2">
+                    <input class="input" type="number" min="0" style="max-width:110px" value="@(_model.TargetMinutes / 60)" @onchange="e => SetTarget(e.Value, null)" /> <span class="small muted">h</span>
+                    <input class="input" type="number" min="0" max="59" style="max-width:90px" value="@(_model.TargetMinutes % 60)" @onchange="e => SetTarget(null, e.Value)" /> <span class="small muted">min</span>
+                </div>
+            </FormField>
+            <FormField Label="Breach notification" Help="Sent once when the timer breaches; an activity entry is always written.">
+                <select class="select" value="@_model.BreachNotificationId" @onchange="e => _model.BreachNotificationId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null">
+                    <option value="">— None —</option>
+                    @foreach (var notification in _notifications.Where(n => string.Equals(n.TableName, _model.TableName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        <option value="@notification.Id">@notification.Name</option>
+                    }
+                </select>
+            </FormField>
+            <FormField Label="State" Class="span-all">
+                <Switch @bind-Value="_model.IsActive" Label="@(_model.IsActive ? "Active – new timers are attached" : "Inactive – no new timers")" />
+            </FormField>
+        </div>
+
+        <div class="form-section mt-4">
+            <div class="form-section-title"><Icon Name="calendar-clock" Size="16" /> Schedule</div>
+            <div class="segmented mb-3">
+                <button class="@(_model.ScheduleType == SlaScheduleType.TwentyFourSeven ? "active" : null)" @onclick="() => _model.ScheduleType = SlaScheduleType.TwentyFourSeven">24 × 7</button>
+                <button class="@(_model.ScheduleType == SlaScheduleType.BusinessHours ? "active" : null)" @onclick="() => _model.ScheduleType = SlaScheduleType.BusinessHours">Business hours</button>
+            </div>
+            @if (_model.ScheduleType == SlaScheduleType.BusinessHours)
+            {
+                <div class="form-grid">
+                    <FormField Label="Time zone" Class="span-all">
+                        <select class="select" @bind="_model.TimeZoneId">
+                            @foreach (var zone in s_timeZones)
+                            {
+                                <option value="@zone.Id">@zone.DisplayName</option>
+                            }
+                        </select>
+                    </FormField>
+                    <FormField Label="Day starts"><input class="input" type="time" value="@FormatMinute(_model.DayStartMinute)" @onchange="e => _model.DayStartMinute = ParseMinute(e.Value, _model.DayStartMinute)" /></FormField>
+                    <FormField Label="Day ends"><input class="input" type="time" value="@FormatMinute(_model.DayEndMinute)" @onchange="e => _model.DayEndMinute = ParseMinute(e.Value, _model.DayEndMinute)" /></FormField>
+                    <FormField Label="Business days" Class="span-all">
+                        <div class="flex gap-2 flex-wrap">
+                            @foreach (var day in s_week)
+                            {
+                                var d = day;
+                                <button class="btn btn-sm @(_model.BusinessDays.Contains(d) ? "btn-primary" : "btn-secondary")" @onclick="() => ToggleDay(d)">@d.ToString()[..3]</button>
+                            }
+                        </div>
+                    </FormField>
+                </div>
+            }
+            else
+            {
+                <div class="small muted">The clock runs continuously, including nights, weekends and holidays.</div>
+            }
+        </div>
+
+        @if (_table is null)
+        {
+            <div class="alert alert-info mt-4"><Icon Name="info" Size="16" /> Select a table to define the start, pause, stop and cancel conditions.</div>
+        }
+        else
+        {
+            <div class="form-section mt-4">
+                <div class="form-section-title"><Icon Name="play" Size="16" /> Start condition</div>
+                <div class="small muted mb-2">The timer is attached when a record matches. Empty: every record of the table.</div>
+                <ConditionBuilder Condition="_model.StartCondition" Fields="_table.Fields" />
+            </div>
+            <div class="form-section mt-4">
+                <div class="form-section-title"><Icon Name="pause" Size="16" /> Pause condition</div>
+                <div class="small muted mb-2">While it matches, the clock stops (e.g. state is "On hold"). Empty: never pauses.</div>
+                <ConditionBuilder Condition="_model.PauseCondition" Fields="_table.Fields" />
+            </div>
+            <div class="form-section mt-4">
+                <div class="form-section-title"><Icon Name="check-circle" Size="16" /> Stop condition</div>
+                <div class="small muted mb-2">The timer completes (achieved or breached) when it matches (e.g. state is "Resolved").</div>
+                <ConditionBuilder Condition="_model.StopCondition" Fields="_table.Fields" />
+            </div>
+            <div class="form-section mt-4">
+                <div class="form-section-title"><Icon Name="x-circle" Size="16" /> Cancel condition</div>
+                <div class="small muted mb-2">The timer is cancelled and excluded from compliance (e.g. state is "Cancelled").</div>
+                <ConditionBuilder Condition="_model.CancelCondition" Fields="_table.Fields" />
+            </div>
+        }
+    </ChildContent>
+    <Footer>
+        @if (_model.Id != Guid.Empty)
+        {
+            <button class="btn btn-outline-danger" style="margin-right:auto" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete</button>
+        }
+        <button class="btn btn-secondary" @onclick="() => _editorOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            Save SLA
+        </button>
+    </Footer>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete SLA definition?"
+               Message="@($"'{_model.Name}' and all of its timers ({_model.ActiveTimers} running) will be deleted permanently.")" ConfirmText="Delete SLA" OnConfirm="DeleteAsync" />
+
+@code {
+    private static readonly DayOfWeek[] s_week = [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
+    private static readonly IReadOnlyList<TimeZoneInfo> s_timeZones = TimeZoneInfo.GetSystemTimeZones();
+
+    private IReadOnlyList<SlaDefinitionModel> _definitions = [];
+    private IReadOnlyList<TableDefinition> _tables = [];
+    private IReadOnlyList<NotificationModel> _notifications = [];
+    private SlaOverview? _overview;
+    private SlaDefinitionModel _model = new();
+    private TableDefinition? _table;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _editorOpen;
+    private bool _confirmDelete;
+    private string? _tab = "monitor";
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("monitor", "Running timers", "activity", _overview?.Running),
+        new("definitions", "Definitions", "clipboard-list", _definitions.Count),
+    ];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _tables = await Registry.GetTablesAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var definitions = await Slas.ListAsync();
+        if (definitions.Succeeded)
+        {
+            _definitions = definitions.Value!;
+        }
+        else
+        {
+            Toasts.Error("SLA definitions could not be loaded", definitions.Error);
+        }
+
+        var overview = await Slas.GetOverviewAsync();
+        _overview = overview.Succeeded ? overview.Value : null;
+        if (_definitions.Count == 0 && _tab == "monitor" && (_overview?.Running ?? 0) == 0)
+        {
+            _tab = "definitions";
+        }
+
+        _loading = false;
+    }
+
+    private string TableLabel(string name) => _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))?.Label ?? name;
+
+    private async Task OpenAsync(SlaDefinitionModel? definition)
+    {
+        if (definition is null)
+        {
+            _model = new SlaDefinitionModel { TimeZoneId = TimeZoneInfo.Local.Id };
+        }
+        else
+        {
+            var loaded = await Slas.GetAsync(definition.Id);
+            if (!loaded.Succeeded)
+            {
+                Toasts.Error("The SLA could not be loaded", loaded.Error);
+                return;
+            }
+
+            _model = loaded.Value!;
+        }
+
+        _table = string.IsNullOrEmpty(_model.TableName) ? null : await Registry.GetTableAsync(_model.TableName);
+        if (_notifications.Count == 0)
+        {
+            var notifications = await NotificationAdmin.ListAsync();
+            _notifications = notifications.Succeeded ? notifications.Value! : [];
+        }
+
+        _editorOpen = true;
+    }
+
+    private async Task SelectTableAsync(string? name)
+    {
+        _model.TableName = name ?? string.Empty;
+        _model.StartCondition = new ConditionGroup();
+        _model.PauseCondition = new ConditionGroup();
+        _model.StopCondition = new ConditionGroup();
+        _model.CancelCondition = new ConditionGroup();
+        _model.BreachNotificationId = null;
+        _table = string.IsNullOrEmpty(name) ? null : await Registry.GetTableAsync(name);
+    }
+
+    private void SetTarget(object? hours, object? minutes)
+    {
+        var h = hours is null ? _model.TargetMinutes / 60 : int.TryParse(hours.ToString(), out var parsedHours) ? Math.Max(0, parsedHours) : 0;
+        var m = minutes is null ? _model.TargetMinutes % 60 : int.TryParse(minutes.ToString(), out var parsedMinutes) ? Math.Clamp(parsedMinutes, 0, 59) : 0;
+        _model.TargetMinutes = (h * 60) + m;
+    }
+
+    private void ToggleDay(DayOfWeek day)
+    {
+        if (!_model.BusinessDays.Remove(day))
+        {
+            _model.BusinessDays.Add(day);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        var result = await Slas.SaveAsync(_model);
+        _busy = false;
+        if (Toasts.FromResult(result, "SLA definition saved"))
+        {
+            _editorOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await Slas.DeleteAsync(_model.Id);
+        if (Toasts.FromResult(result, "SLA definition deleted"))
+        {
+            _editorOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private static string FormatDuration(int minutes)
+    {
+        var span = TimeSpan.FromMinutes(minutes);
+        return span.TotalHours >= 24 && span.Hours == 0 && span.Minutes == 0
+            ? $"{(int)span.TotalDays} d"
+            : span.Minutes == 0 ? $"{(int)span.TotalHours} h" : span.TotalHours >= 1 ? $"{(int)span.TotalHours} h {span.Minutes} min" : $"{span.Minutes} min";
+    }
+
+    private static string FormatMinute(int minute) => $"{minute / 60:00}:{minute % 60:00}";
+
+    private static int ParseMinute(object? value, int fallback) =>
+        TimeOnly.TryParse(value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var time) ? (time.Hour * 60) + time.Minute : fallback;
+}

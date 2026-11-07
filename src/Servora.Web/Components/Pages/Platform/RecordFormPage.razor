@@ -1,0 +1,401 @@
+@page "/table/{Name}/{RecordKey}"
+@* Generic form of any table (typed or custom, including custom fields) laid out by the studio form layout; table ACLs are enforced by the record service. *@
+@attribute [RequirePermission(Permissions.Platform.ReadRecords)]
+@inject ITableRegistry Registry
+@inject IRecordService Records
+@inject ITableDesignerService Designer
+@inject ITableAccessService Access
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@Title · Servora</PageTitle>
+
+@if (_table is null || (_row is null && !IsNew))
+{
+    @if (_loading)
+    {
+        <Skeleton Lines="10" Height="22px" />
+    }
+    else if (_table is null)
+    {
+        <EmptyState Icon="table" Title="Table not found" Text="@($"There is no table named '{Name}'.")">
+            <a class="btn btn-secondary" href="/admin/tables">Browse tables</a>
+        </EmptyState>
+    }
+    else
+    {
+        <EmptyState Icon="@(_forbidden ? "lock" : "search")" Title="@(_forbidden ? "No access" : "Record not found")"
+                    Text="@(_forbidden ? "You do not have permission to open this record." : "The record does not exist or was deleted.")">
+            <a class="btn btn-secondary" href="@($"/table/{_table.Name}")">Back to @_table.PluralLabel.ToLowerInvariant()</a>
+        </EmptyState>
+    }
+}
+else
+{
+    <PageHeader Title="@Title" Icon="@_table.Icon">
+        <Breadcrumbs>
+            <a href="@($"/table/{_table.Name}")">@_table.PluralLabel</a> <Icon Name="chevron-right" Size="12" /> @(IsNew ? "New" : Display)
+        </Breadcrumbs>
+        <SubtitleContent>
+            <div class="flex items-center gap-2 mt-1 flex-wrap">
+                @if (!IsNew && Number is { Length: > 0 } number && number != Display)
+                {
+                    <span class="tag mono">@number</span>
+                }
+                @if (StateField is { } state && !IsNew)
+                {
+                    <StatusPill Text="@StateLabel(state)" />
+                }
+                <span class="pill @(_table.IsCustom ? "pill-accent" : "pill-neutral") no-dot">@_table.Label</span>
+                @if (!IsNew && _row!.GetValueOrDefault("UpdatedAt") is DateTimeOffset updated)
+                {
+                    <span class="small faint">Updated <RelativeTime Value="updated" /></span>
+                }
+                @if (Dirty)
+                {
+                    <span class="pill pill-warning no-dot">Unsaved changes</span>
+                }
+            </div>
+        </SubtitleContent>
+        <Actions>
+            @if (!IsNew && _canDelete)
+            {
+                <button class="btn btn-outline-danger" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete</button>
+            }
+            @if (!IsNew && Dirty)
+            {
+                <button class="btn btn-secondary" @onclick="Reset"><Icon Name="refresh" Size="16" /> Discard</button>
+            }
+            @if (_canSave)
+            {
+                <button class="btn btn-primary" disabled="@(_busy || (!IsNew && !Dirty))" @onclick="SaveAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="save" Size="16" />
+                    }
+                    @(IsNew ? "Create" : "Save")
+                </button>
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (StateField is { Choices.Count: > 1 and <= 10 } flowField)
+    {
+        <div class="mb-6">
+            <StateFlow States="flowField.Choices.Select(c => c.Label).ToList()" Current="@StateLabel(flowField)" />
+        </div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="stack">
+            <div class="card">
+                <div class="card-body">
+                    @foreach (var section in _sections)
+                    {
+                        <div class="form-section">
+                            @if (_sections.Count > 1 || section.Title != "General")
+                            {
+                                <div class="form-section-title"><Icon Name="layers" Size="16" /> @section.Title</div>
+                            }
+                            <div class="form-grid">
+                                @foreach (var field in section.Fields)
+                                {
+                                    var f = field;
+                                    <FormField Label="@f.Label" Required="@(f.IsRequired && IsEditable(f))" Help="@f.HelpText" Error="@_errors.GetValueOrDefault(f.Name)"
+                                               Class="@(f.Type is FieldType.Text or FieldType.Json ? "span-all" : null)">
+                                        <FieldInput Field="f" Value="@_values.GetValueOrDefault(f.Name)" ValueChanged="v => OnChanged(f, v)"
+                                                    DisplayText="@(_row is null ? null : FieldValueFormatter.Display(f, _row))"
+                                                    Disabled="@(!IsEditable(f))" Invalid="@_errors.ContainsKey(f.Name)" />
+                                    </FormField>
+                                }
+                            </div>
+                        </div>
+                    }
+                    @if (_sections.Count == 0)
+                    {
+                        <EmptyState Icon="layers" Title="No fields on the form" Text="Configure the form layout of this table in the studio." />
+                    }
+                </div>
+            </div>
+
+            @if (!IsNew)
+            {
+                <Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+                @switch (_tab)
+                {
+                    case "attachments":
+                        <div class="card"><div class="card-body"><AttachmentList Table="@_table.Name" RecordId="_id" AllowUpload="_canSave" AllowDelete="_canSave" /></div></div>
+                        break;
+                    case "json":
+                        <div class="card">
+                            <div class="card-header">
+                                <div>
+                                    <h3>Table API</h3>
+                                    <div class="small muted">The same record as returned by <span class="mono">GET /api/v1/table/@_table.Name/@_id</span>.</div>
+                                </div>
+                            </div>
+                            <div class="card-body"><pre class="code-block">@RawJson</pre></div>
+                        </div>
+                        break;
+                    default:
+                        <div class="card"><div class="card-body"><ActivityStream Table="@_table.Name" RecordId="_id" AllowPosting="_canSave" /></div></div>
+                        break;
+                }
+            }
+        </div>
+
+        <div class="stack sticky-top">
+            <div class="card">
+                <div class="card-header"><h3 class="flex items-center gap-2"><Icon Name="info" Size="16" /> Record</h3></div>
+                <div class="card-body">
+                    @if (IsNew)
+                    {
+                        <p class="small muted">The record number, audit fields and defaults are assigned when the record is created.</p>
+                    }
+                    else
+                    {
+                        <dl class="kv">
+                            @foreach (var field in _systemFields)
+                            {
+                                <dt>@field.Label</dt>
+                                <dd><FieldValueDisplay Field="field" Row="_row!" /></dd>
+                            }
+                        </dl>
+                    }
+                </div>
+            </div>
+            @if (!IsNew)
+            {
+                <SlaTimersCard @ref="_slaCard" Table="@_table.Name" RecordId="_id" />
+            }
+            <div class="card">
+                <div class="card-header"><h3 class="flex items-center gap-2"><Icon Name="shield-check" Size="16" /> Your access</h3></div>
+                <div class="card-body small">
+                    <div class="flex items-center justify-between"><span>Edit</span>@AccessIcon(_canSave)</div>
+                    <div class="flex items-center justify-between mt-2"><span>Delete</span>@AccessIcon(_canDelete)</div>
+                    <div class="tiny faint mt-3">Table permissions are enforced on the server for the UI, flows and the Table API.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="@($"Delete {_table.Label.ToLowerInvariant()}?")"
+                   Message="@($"'{Display}' will be deleted permanently. This cannot be undone.")" ConfirmText="Delete" OnConfirm="DeleteAsync" />
+}
+
+@code {
+    private static readonly string[] s_systemFieldNames = ["Number", "Id", "CreatedAt", "CreatedBy", "UpdatedAt", "UpdatedBy"];
+
+    private TableDefinition? _table;
+    private IReadOnlyDictionary<string, object?>? _row;
+    private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string?> _original = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _errors = new(StringComparer.OrdinalIgnoreCase);
+    private List<(string Title, List<FieldDefinition> Fields)> _sections = [];
+    private List<FieldDefinition> _systemFields = [];
+    private SlaTimersCard? _slaCard;
+    private Guid _id;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _forbidden;
+    private bool _canSave;
+    private bool _canDelete;
+    private bool _confirmDelete;
+    private string? _tab = "activity";
+    private string? _loadedKey;
+
+    /// <summary>Gets or sets the technical table name from the route.</summary>
+    [Parameter] public string Name { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the record identifier from the route, or <c>new</c>.</summary>
+    [Parameter] public string RecordKey { get; set; } = string.Empty;
+
+    private bool IsNew => string.Equals(RecordKey, "new", StringComparison.OrdinalIgnoreCase);
+
+    private bool Dirty => _values.Any(v => !string.Equals(v.Value ?? string.Empty, _original.GetValueOrDefault(v.Key) ?? string.Empty, StringComparison.Ordinal));
+
+    private string Display => _row is null || _table is null ? string.Empty
+        : _table.FindField(_table.DisplayField) is { } displayField && FieldValueFormatter.Display(displayField, _row) is { Length: > 0 } text ? text : _id.ToString("D");
+
+    private string? Number => _row?.GetValueOrDefault("Number")?.ToString();
+
+    private string Title => _table is null ? Name : IsNew ? $"New {_table.Label.ToLowerInvariant()}" : Display;
+
+    private FieldDefinition? StateField => _table?.Fields.FirstOrDefault(f => f.Type == FieldType.Choice && IsStateName(f));
+
+    private IReadOnlyList<TabItem> TabItems => [new("activity", "Activity", "message-square"), new("attachments", "Attachments", "paperclip"), new("json", "API view", "braces")];
+
+    private string RawJson => _row is null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(
+        _row.ToDictionary(kv => kv.Key, kv => ConditionValueConverter.Normalize(kv.Value) is Enum e ? e.ToString() : ConditionValueConverter.Normalize(kv.Value)),
+        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{Name}/{RecordKey}";
+        if (_loadedKey == key)
+        {
+            return;
+        }
+
+        _loadedKey = key;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _forbidden = false;
+        _row = null;
+        _values.Clear();
+        _original.Clear();
+        _errors.Clear();
+        _table = await Registry.GetTableAsync(Name);
+        if (_table is null)
+        {
+            _loading = false;
+            return;
+        }
+
+        if (!IsNew)
+        {
+            if (!Guid.TryParse(RecordKey, out _id))
+            {
+                _loading = false;
+                return;
+            }
+
+            var result = await Records.GetAsync(_table.Name, _id);
+            if (!result.Succeeded)
+            {
+                _forbidden = result.ErrorKind == ResultErrorKind.Forbidden;
+                _loading = false;
+                return;
+            }
+
+            _row = result.Value;
+        }
+
+        _canSave = await Access.IsAllowedAsync(_table.Name, IsNew ? TableOperation.Create : TableOperation.Write);
+        _canDelete = !IsNew && await Access.IsAllowedAsync(_table.Name, TableOperation.Delete);
+
+        var layout = await Designer.GetLayoutAsync(_table.Name);
+        var sections = layout.Succeeded ? layout.Value!.Sections : [];
+        _sections = sections
+            .Select(s => (s.Title, s.Fields.Select(_table.FindField).OfType<FieldDefinition>().Where(f => !s_systemFieldNames.Contains(f.Name)).ToList()))
+            .Where(s => s.Item2.Count > 0)
+            .ToList();
+        if (_sections.Count == 0)
+        {
+            var editable = _table.Fields.Where(f => !f.IsReadOnly).ToList();
+            if (editable.Count > 0)
+            {
+                _sections = [("General", editable)];
+            }
+        }
+
+        _systemFields = s_systemFieldNames.Select(_table.FindField).OfType<FieldDefinition>().ToList();
+
+        foreach (var field in _sections.SelectMany(s => s.Fields))
+        {
+            var text = IsNew ? field.DefaultValue : FieldValueFormatter.ToEditorText(field, _row!.GetValueOrDefault(field.Name));
+            _values[field.Name] = text;
+            _original[field.Name] = text;
+        }
+
+        _loading = false;
+    }
+
+    private bool IsEditable(FieldDefinition field) => _canSave && !field.IsReadOnly && Access.IsFieldWritable(_table!, field);
+
+    private void OnChanged(FieldDefinition field, string? value)
+    {
+        _values[field.Name] = value;
+        _errors.Remove(field.Name);
+    }
+
+    private void Reset()
+    {
+        foreach (var (key, value) in _original)
+        {
+            _values[key] = value;
+        }
+
+        _errors.Clear();
+    }
+
+    private async Task SaveAsync()
+    {
+        _errors.Clear();
+        foreach (var field in _sections.SelectMany(s => s.Fields).Where(f => f.IsRequired && IsEditable(f) && string.IsNullOrWhiteSpace(_values.GetValueOrDefault(f.Name))))
+        {
+            _errors[field.Name] = $"'{field.Label}' is mandatory.";
+        }
+
+        if (_errors.Count > 0)
+        {
+            Toasts.Warning("Please complete the mandatory fields", _errors.Values.First());
+            return;
+        }
+
+        var changes = _sections.SelectMany(s => s.Fields)
+            .Where(IsEditable)
+            .Where(f => IsNew ? !string.IsNullOrEmpty(_values.GetValueOrDefault(f.Name)) : !string.Equals(_values.GetValueOrDefault(f.Name) ?? string.Empty, _original.GetValueOrDefault(f.Name) ?? string.Empty, StringComparison.Ordinal))
+            .ToDictionary(f => f.Name, f => (object?)_values.GetValueOrDefault(f.Name), StringComparer.OrdinalIgnoreCase);
+
+        _busy = true;
+        if (IsNew)
+        {
+            var created = await Records.CreateAsync(_table!.Name, changes);
+            _busy = false;
+            if (Toasts.FromResult(created, $"{_table.Label} created"))
+            {
+                Nav.NavigateTo($"/table/{_table.Name}/{created.Value}");
+            }
+
+            return;
+        }
+
+        var updated = await Records.UpdateAsync(_table!.Name, _id, changes);
+        _busy = false;
+        if (Toasts.FromResult(updated, "Changes saved"))
+        {
+            _loadedKey = null;
+            await LoadAsync();
+            if (_slaCard is not null)
+            {
+                await _slaCard.ReloadAsync();
+            }
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await Records.DeleteAsync(_table!.Name, _id);
+        if (Toasts.FromResult(result, $"{_table.Label} deleted"))
+        {
+            Nav.NavigateTo($"/table/{_table.Name}");
+        }
+    }
+
+    private string StateLabel(FieldDefinition field)
+    {
+        var text = _values.TryGetValue(field.Name, out var edited) ? edited : FieldValueFormatter.ToEditorText(field, _row?.GetValueOrDefault(field.Name));
+        return field.Choices.FirstOrDefault(c => string.Equals(c.Value, text, StringComparison.OrdinalIgnoreCase))?.Label
+            ?? (_row is null ? text ?? string.Empty : FieldValueFormatter.Display(field, _row));
+    }
+
+    private static bool IsStateName(FieldDefinition field)
+    {
+        var name = field.Name.StartsWith("u_", StringComparison.OrdinalIgnoreCase) ? field.Name[2..] : field.Name;
+        return name.Equals("State", StringComparison.OrdinalIgnoreCase) || name.Equals("Status", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static RenderFragment AccessIcon(bool allowed) => allowed
+        ? @<span class="text-success flex items-center gap-1"><Icon Name="check-circle" Size="15" /> Allowed</span>
+        : @<span class="faint flex items-center gap-1"><Icon Name="lock" Size="15" /> Not allowed</span>;
+}

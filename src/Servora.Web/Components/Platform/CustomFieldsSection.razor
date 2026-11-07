@@ -1,0 +1,104 @@
+@* Reusable section that renders and edits the administrator-defined custom fields of a typed table (CustomFieldsJson).
+   Usage in a module form: <CustomFieldsSection TableName="incident" @bind-Json="_model.CustomFieldsJson" @ref="_custom" />
+   and call _custom.Validate() before saving. *@
+@inject ITableRegistry Registry
+
+@if (_fields.Count > 0)
+{
+    <div class="form-section">
+        <div class="form-section-title"><Icon Name="layers" Size="16" /> @Title</div>
+        <div class="form-grid">
+            @foreach (var field in _fields)
+            {
+                <FormField Label="@field.Label" Required="field.IsRequired" Help="@field.HelpText" Error="@_errors.GetValueOrDefault(field.Name)"
+                           Class="@(field.Type is FieldType.Text or FieldType.Json ? "span-all" : null)">
+                    <FieldInput Field="field" Value="@_values.GetValueOrDefault(field.Name)" ValueChanged="v => OnChangedAsync(field, v)"
+                                Disabled="ReadOnly" Invalid="@_errors.ContainsKey(field.Name)" />
+                </FormField>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _errors = new(StringComparer.OrdinalIgnoreCase);
+    private List<FieldDefinition> _fields = [];
+    private string? _loadedFor;
+    private string? _appliedJson;
+
+    /// <summary>Gets or sets the technical name of the typed table.</summary>
+    [Parameter, EditorRequired] public string TableName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the custom field JSON of the record (bind with <c>@bind-Json</c>).</summary>
+    [Parameter] public string? Json { get; set; }
+
+    /// <summary>Raised with the new JSON after a valid change.</summary>
+    [Parameter] public EventCallback<string?> JsonChanged { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the fields are read only.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Gets or sets the section title.</summary>
+    [Parameter] public string Title { get; set; } = "Additional information";
+
+    /// <summary>Gets a value indicating whether every entered value is valid.</summary>
+    public bool IsValid => _errors.Count == 0;
+
+    /// <summary>Validates mandatory fields and entered values; shows errors inline.</summary>
+    /// <returns>A user-safe error message or <see langword="null"/> when valid.</returns>
+    public string? Validate()
+    {
+        foreach (var field in _fields.Where(f => f.IsRequired && string.IsNullOrWhiteSpace(_values.GetValueOrDefault(f.Name))))
+        {
+            _errors[field.Name] = $"'{field.Label}' is mandatory.";
+        }
+
+        StateHasChanged();
+        return _errors.Count == 0 ? null : _errors.Values.First();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.Equals(_loadedFor, TableName, StringComparison.OrdinalIgnoreCase))
+        {
+            _loadedFor = TableName;
+            var table = await Registry.GetTableAsync(TableName);
+            _fields = table?.Fields.Where(f => f.IsCustom).ToList() ?? [];
+            _appliedJson = null;
+        }
+
+        if (_appliedJson != Json || _values.Count == 0)
+        {
+            _appliedJson = Json;
+            _values.Clear();
+            var stored = RecordEntityAccessor.ParseObject(Json);
+            foreach (var field in _fields)
+            {
+                _values[field.Name] = FieldValueFormatter.ToEditorText(field, RecordEntityAccessor.ToCanonical(field, stored.GetValueOrDefault(field.Name)));
+            }
+        }
+    }
+
+    private async Task OnChangedAsync(FieldDefinition field, string? text)
+    {
+        _values[field.Name] = text;
+        if (!RecordValueConverter.TryConvert(text, field, null, out var value, out var error))
+        {
+            _errors[field.Name] = error!;
+            return;
+        }
+
+        if (value is string s && field.MaxLength is { } max && s.Length > max)
+        {
+            _errors[field.Name] = $"'{field.Label}' must not exceed {max} characters.";
+            return;
+        }
+
+        _errors.Remove(field.Name);
+        Json = RecordEntityAccessor.SetJsonValue(Json, field.Name, value);
+        _appliedJson = Json;
+        await JsonChanged.InvokeAsync(Json);
+    }
+}

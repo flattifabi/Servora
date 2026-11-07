@@ -1,0 +1,122 @@
+@* Top bar bell with unread badge and a dropdown of the latest in-app notifications (polls every 60 seconds).
+   Usage (orchestrator, TopBar): <NotificationBell /> *@
+@implements IDisposable
+@inject INotificationInbox Inbox
+@inject NavigationManager Nav
+
+<div class="dropdown notification-bell">
+    <button class="icon-btn" title="@(_unread > 0 ? $"{_unread} unread notifications" : "Notifications")" @onclick="ToggleAsync">
+        <Icon Name="bell" />
+        @if (_unread > 0)
+        {
+            <span class="bell-badge">@(_unread > 99 ? "99+" : _unread.ToString())</span>
+        }
+    </button>
+    @if (_open)
+    {
+        <div class="click-catcher" @onclick="() => _open = false"></div>
+        <div class="dropdown-menu bell-menu">
+            <div class="flex items-center justify-between" style="padding:8px 10px 6px">
+                <span class="dropdown-header" style="padding:0">Notifications</span>
+                @if (_unread > 0)
+                {
+                    <button class="btn btn-ghost btn-sm" @onclick="MarkAllReadAsync">Mark all read</button>
+                }
+            </div>
+            @if (_items is null)
+            {
+                <div style="padding:10px"><Skeleton Lines="3" /></div>
+            }
+            else if (_items.Count == 0)
+            {
+                <div class="small faint" style="padding:18px 10px;text-align:center">You're all caught up.</div>
+            }
+            else
+            {
+                @foreach (var item in _items)
+                {
+                    var current = item;
+                    <button class="dropdown-item bell-item @(current.IsRead ? null : "unread")" @onclick="() => OpenAsync(current)">
+                        <div style="min-width:0;flex:1">
+                            <div class="truncate" style="font-weight:@(current.IsRead ? "500" : "650")">@current.Title</div>
+                            @if (!string.IsNullOrWhiteSpace(current.Body))
+                            {
+                                <div class="tiny faint truncate">@current.Body</div>
+                            }
+                            <div class="tiny faint"><RelativeTime Value="current.CreatedAt" /></div>
+                        </div>
+                    </button>
+                }
+            }
+            <div class="dropdown-divider"></div>
+            <a class="dropdown-item" href="/notifications" @onclick="() => _open = false"><Icon Name="inbox" Size="15" /> Open inbox</a>
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly TimeSpan s_pollInterval = TimeSpan.FromSeconds(60);
+
+    private IReadOnlyList<InboxItem>? _items;
+    private int _unread;
+    private bool _open;
+    private Timer? _timer;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _unread = await Inbox.GetUnreadCountAsync();
+        _timer = new Timer(_ => _ = InvokeAsync(RefreshCountAsync), null, s_pollInterval, s_pollInterval);
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _timer?.Dispose();
+
+    private async Task RefreshCountAsync()
+    {
+        try
+        {
+            _unread = await Inbox.GetUnreadCountAsync();
+            StateHasChanged();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit was disposed while polling.
+        }
+    }
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open)
+        {
+            _items = null;
+            var page = await Inbox.GetAsync(new PageRequest { PageSize = 8 });
+            _items = page.Items;
+            _unread = await Inbox.GetUnreadCountAsync();
+        }
+    }
+
+    private async Task OpenAsync(InboxItem item)
+    {
+        _open = false;
+        if (!item.IsRead)
+        {
+            await Inbox.MarkReadAsync(item.Id);
+            _unread = Math.Max(0, _unread - 1);
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Link) && item.Link.StartsWith('/') && !item.Link.StartsWith("//", StringComparison.Ordinal))
+        {
+            Nav.NavigateTo(item.Link);
+        }
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        await Inbox.MarkAllReadAsync();
+        _unread = 0;
+        var page = await Inbox.GetAsync(new PageRequest { PageSize = 8 });
+        _items = page.Items;
+    }
+}

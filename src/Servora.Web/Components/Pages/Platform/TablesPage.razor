@@ -1,0 +1,236 @@
+@page "/admin/tables"
+@* Studio: catalog of typed and custom tables with creation of new custom tables. *@
+@attribute [RequirePermission(Permissions.Platform.ManageTables)]
+@inject ITableDesignerService Designer
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Tables &amp; Fields · Servora</PageTitle>
+
+<PageHeader Title="Tables & Fields" Subtitle="The data dictionary: built-in tables, custom tables and custom fields — configured without code or migrations." Icon="table">
+    <Actions>
+        <button class="btn btn-primary" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> New table</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Tables" Value="@_all.Count.ToString()" Icon="table" Caption="in the dictionary" />
+    <StatCard Label="Custom tables" Value="@_all.Count(t => t.IsCustom).ToString()" Icon="layers" Tone="accent" Caption="created in the studio" />
+    <StatCard Label="Custom fields" Value="@_all.Sum(t => t.CustomFieldCount).ToString()" Icon="edit" Tone="info" Caption="across all tables" />
+    <StatCard Label="Extensible" Value="@_all.Count(t => t.SupportsCustomFields).ToString()" Icon="sliders" Tone="success" Caption="tables accept custom fields" />
+</div>
+
+<DataTable TItem="TableSummary" Items="PageItems" TotalCount="Filtered.Count" PageNumber="_page" PageSize="PageSize" Loading="_loading"
+           SortBy="@_sort" SortDescending="_desc" OnPageChanged="p => _page = p" OnSortChanged="Sort" OnSearch="Search"
+           OnRowClick="@(t => Nav.NavigateTo($"/admin/tables/{t.Name}"))" SearchPlaceholder="Search tables…"
+           EmptyIcon="table" EmptyTitle="No tables found" EmptyText="Try another search or create a custom table.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_filter == "all" ? "active" : null)" @onclick="@(() => SetFilter("all"))">All</button>
+            <button class="@(_filter == "custom" ? "active" : null)" @onclick="@(() => SetFilter("custom"))">Custom</button>
+            <button class="@(_filter == "typed" ? "active" : null)" @onclick="@(() => SetFilter("typed"))">Built-in</button>
+        </div>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="TableSummary" Title="Table" SortKey="Label">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <div class="page-icon" style="width:32px;height:32px;border-radius:9px"><Icon Name="@context.Icon" Size="16" /></div>
+                    <div>
+                        <div class="cell-link">@context.Label</div>
+                        <div class="tiny faint mono">@context.Name</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="TableSummary" Title="Type">
+            <Template>
+                @if (context.IsCustom)
+                {
+                    <span class="pill pill-accent no-dot">Custom</span>
+                }
+                else
+                {
+                    <span class="pill pill-neutral no-dot">Built-in</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="TableSummary" Title="Fields" SortKey="FieldCount" Align="right" Value="t => t.FieldCount" />
+        <DataColumn TItem="TableSummary" Title="Custom fields" SortKey="CustomFieldCount" Align="right">
+            <Template>
+                @if (context.SupportsCustomFields)
+                {
+                    @context.CustomFieldCount
+                }
+                else
+                {
+                    <span class="faint" title="This table does not accept custom fields">n/a</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="TableSummary" Title="" Width="120px">
+            <Template>
+                <a class="btn btn-ghost btn-sm" href="@($"/table/{context.Name}")" @onclick:stopPropagation="true"><Icon Name="list" Size="14" /> Records</a>
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<Modal @bind-Open="_createOpen" Title="New custom table" Subtitle="Records are stored without schema changes on every database provider." Icon="layers">
+    <ChildContent>
+    <div class="form-grid">
+        <FormField Label="Label" Required="true" Help="Singular name, for example 'Asset audit'.">
+            <input class="input" value="@_input.Label" @oninput="OnLabelInput" autofocus />
+        </FormField>
+        <FormField Label="Technical name" Required="true" Help="Starts with u_, lower case, cannot be changed later.">
+            <input class="input mono" value="@_input.Name" @oninput="@(e => { _input.Name = e.Value?.ToString() ?? string.Empty; _nameTouched = true; })" />
+        </FormField>
+        <FormField Label="Plural label">
+            <input class="input" @bind="_input.PluralLabel" placeholder="@(_input.Label + "s")" />
+        </FormField>
+        <FormField Label="Number prefix" Help="Optional, e.g. AUD → AUD0001001. Enables /go/AUD0001001.">
+            <input class="input mono" @bind="_input.NumberPrefix" maxlength="8" />
+        </FormField>
+        <FormField Label="Icon">
+            <div class="flex items-center gap-2">
+                <div class="page-icon" style="width:38px;height:38px;border-radius:10px;flex:none"><Icon Name="@_input.Icon" Size="18" /></div>
+                <select class="select" @bind="_input.Icon">
+                    @foreach (var icon in s_icons)
+                    {
+                        <option value="@icon">@icon</option>
+                    }
+                </select>
+            </div>
+        </FormField>
+        <FormField Label="Description" Class="span-all">
+            <textarea class="textarea" rows="2" @bind="_input.Description"></textarea>
+        </FormField>
+    </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _createOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_input.Label))" @onclick="CreateAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            Create table
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private const int PageSize = 25;
+    private static readonly string[] s_icons = ["table", "layers", "clipboard-list", "box", "package", "file-text", "folder", "server", "database", "laptop", "monitor", "building", "map-pin", "calendar", "tag", "star", "award", "target", "wrench", "lightbulb", "shield", "key", "globe", "users"];
+
+    private IReadOnlyList<TableSummary> _all = [];
+    private bool _loading = true;
+    private bool _createOpen;
+    private bool _busy;
+    private bool _nameTouched;
+    private string _filter = "all";
+    private string _search = string.Empty;
+    private string? _sort = "Label";
+    private bool _desc;
+    private int _page = 1;
+    private CustomTableInput _input = new();
+
+    private List<TableSummary> Filtered
+    {
+        get
+        {
+            IEnumerable<TableSummary> items = _all;
+            items = _filter switch
+            {
+                "custom" => items.Where(t => t.IsCustom),
+                "typed" => items.Where(t => !t.IsCustom),
+                _ => items,
+            };
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                items = items.Where(t => t.Label.Contains(_search, StringComparison.OrdinalIgnoreCase) || t.Name.Contains(_search, StringComparison.OrdinalIgnoreCase));
+            }
+
+            items = _sort switch
+            {
+                "FieldCount" => _desc ? items.OrderByDescending(t => t.FieldCount) : items.OrderBy(t => t.FieldCount),
+                "CustomFieldCount" => _desc ? items.OrderByDescending(t => t.CustomFieldCount) : items.OrderBy(t => t.CustomFieldCount),
+                _ => _desc ? items.OrderByDescending(t => t.Label) : items.OrderBy(t => t.Label),
+            };
+            return items.ToList();
+        }
+    }
+
+    private IReadOnlyList<TableSummary> PageItems => Filtered.Skip((_page - 1) * PageSize).Take(PageSize).ToList();
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Designer.ListTablesAsync();
+        if (result.Succeeded)
+        {
+            _all = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Tables could not be loaded", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private void SetFilter(string filter)
+    {
+        _filter = filter;
+        _page = 1;
+    }
+
+    private void Search(string term)
+    {
+        _search = term;
+        _page = 1;
+    }
+
+    private void Sort((string SortBy, bool Descending) sort)
+    {
+        _sort = sort.SortBy;
+        _desc = sort.Descending;
+    }
+
+    private void OpenCreate()
+    {
+        _input = new CustomTableInput { Icon = "table" };
+        _nameTouched = false;
+        _createOpen = true;
+    }
+
+    private void OnLabelInput(ChangeEventArgs e)
+    {
+        _input.Label = e.Value?.ToString() ?? string.Empty;
+        if (!_nameTouched || string.IsNullOrWhiteSpace(_input.Name))
+        {
+            var slug = new string(_input.Label.ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) ? c : '_').ToArray()).Trim('_');
+            while (slug.Contains("__", StringComparison.Ordinal))
+            {
+                slug = slug.Replace("__", "_", StringComparison.Ordinal);
+            }
+
+            _input.Name = slug.Length == 0 ? string.Empty : "u_" + (slug.Length > 40 ? slug[..40] : slug);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        var result = await Designer.CreateTableAsync(_input);
+        _busy = false;
+        if (Toasts.FromResult(result, "Table created"))
+        {
+            _createOpen = false;
+            Nav.NavigateTo($"/admin/tables/{result.Value}");
+        }
+    }
+}

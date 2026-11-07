@@ -1,0 +1,490 @@
+@page "/admin/business-rules"
+@* Studio: declarative business rules (before / after, condition, actions) for any table – no code. *@
+@attribute [RequirePermission(Permissions.Platform.ManageBusinessRules)]
+@inject IBusinessRuleService Rules
+@inject ITableRegistry Registry
+@inject IFlowExecutionService Flows
+@inject INotificationAdminService NotificationAdmin
+@inject ToastService Toasts
+
+<PageTitle>Business Rules · Servora</PageTitle>
+
+<PageHeader Title="Business Rules" Subtitle="Declarative server-side logic: set values, enforce policies, add work notes, start flows and send notifications when records change." Icon="zap">
+    <Actions>
+        <button class="btn btn-primary" @onclick="() => OpenAsync(null)"><Icon Name="plus" Size="16" /> New rule</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Rules" Value="@_all.Count.ToString()" Icon="zap" Caption="@($"on {_all.Select(r => r.TableName).Distinct(StringComparer.OrdinalIgnoreCase).Count()} tables")" />
+    <StatCard Label="Active" Value="@_all.Count(r => r.IsActive).ToString()" Icon="play" Tone="success" Caption="currently enforced" />
+    <StatCard Label="Before save" Value="@_all.Count(r => r.Timing == BusinessRuleTiming.Before).ToString()" Icon="shield-check" Tone="warning" Caption="synchronous, can abort" />
+    <StatCard Label="After save" Value="@_all.Count(r => r.Timing == BusinessRuleTiming.After).ToString()" Icon="activity" Tone="info" Caption="asynchronous follow-ups" />
+</div>
+
+<DataTable TItem="BusinessRuleModel" Items="PageItems" TotalCount="Filtered.Count" PageNumber="_page" PageSize="PageSize" Loading="_loading"
+           SortBy="@_sort" SortDescending="_desc" OnPageChanged="p => _page = p" OnSortChanged="Sort" OnSearch="Search"
+           OnRowClick="r => OpenAsync(r)" SearchPlaceholder="Search rules…"
+           EmptyIcon="zap" EmptyTitle="@(_all.Count == 0 ? "No business rules yet" : "No matching rules")"
+           EmptyText="@(_all.Count == 0 ? "Create a rule to set field values, enforce policies or automate follow-ups when records change." : "Try another search or table filter.")">
+    <Toolbar>
+        <select class="select" style="width:auto;min-width:200px" value="@_tableFilter" @onchange="e => { _tableFilter = e.Value?.ToString() ?? string.Empty; _page = 1; }">
+            <option value="">All tables</option>
+            @foreach (var table in _all.Select(r => r.TableName).Distinct(StringComparer.OrdinalIgnoreCase).Order())
+            {
+                <option value="@table">@TableLabel(table)</option>
+            }
+        </select>
+        <div class="segmented">
+            <button class="@(_timingFilter is null ? "active" : null)" @onclick="() => SetTiming(null)">All</button>
+            <button class="@(_timingFilter == BusinessRuleTiming.Before ? "active" : null)" @onclick="() => SetTiming(BusinessRuleTiming.Before)">Before</button>
+            <button class="@(_timingFilter == BusinessRuleTiming.After ? "active" : null)" @onclick="() => SetTiming(BusinessRuleTiming.After)">After</button>
+        </div>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="BusinessRuleModel" Title="Rule" SortKey="Name">
+            <Template>
+                <div class="cell-link">@context.Name</div>
+                @if (!string.IsNullOrWhiteSpace(context.Description))
+                {
+                    <div class="tiny faint truncate" style="max-width:420px">@context.Description</div>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="BusinessRuleModel" Title="Table" SortKey="TableName">
+            <Template><span class="tag">@TableLabel(context.TableName)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="BusinessRuleModel" Title="When">
+            <Template>
+                <div class="flex items-center gap-1 flex-wrap">
+                    <span class="pill @(context.Timing == BusinessRuleTiming.Before ? "pill-warning" : "pill-info") no-dot">@context.Timing</span>
+                    <span class="small muted">@Events(context.OnInsert, context.OnUpdate, context.OnDelete)</span>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="BusinessRuleModel" Title="Actions">
+            <Template>
+                <div class="flex gap-1 flex-wrap">
+                    @foreach (var group in context.Actions.GroupBy(a => a.Type))
+                    {
+                        <span class="badge" title="@ActionLabel(group.Key)"><Icon Name="@ActionIcon(group.Key)" Size="12" /> @group.Count()</span>
+                    }
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="BusinessRuleModel" Title="Order" SortKey="Order" Align="right" Value="r => r.Order" />
+        <DataColumn TItem="BusinessRuleModel" Title="Updated" SortKey="UpdatedAt">
+            <Template><RelativeTime Value="context.UpdatedAt" /></Template>
+        </DataColumn>
+        <DataColumn TItem="BusinessRuleModel" Title="Active" Width="90px">
+            <Template>
+                <div @onclick:stopPropagation="true">
+                    <Switch Value="context.IsActive" ValueChanged="v => ToggleAsync(context, v)" />
+                </div>
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<Drawer @bind-Open="_editorOpen" Title="@(_model.Id == Guid.Empty ? "New business rule" : _model.Name)" Subtitle="@(_table is null ? "Business rule" : _table.Label)" Size="lg">
+    <ChildContent>
+        <div class="form-grid">
+            <FormField Label="Name" Required="true">
+                <input class="input" @bind="_model.Name" placeholder="e.g. Default priority for VIP callers" />
+            </FormField>
+            <FormField Label="Table" Required="true" Help="@(_model.Id == Guid.Empty ? null : "The table cannot be changed.")">
+                <select class="select" value="@_model.TableName" disabled="@(_model.Id != Guid.Empty)" @onchange="e => SelectTableAsync(e.Value?.ToString())">
+                    <option value="">— Select table —</option>
+                    @foreach (var table in _tables)
+                    {
+                        <option value="@table.Name">@table.Label (@table.Name)</option>
+                    }
+                </select>
+            </FormField>
+            <FormField Label="Description" Class="span-all">
+                <textarea class="textarea" rows="2" @bind="_model.Description"></textarea>
+            </FormField>
+            <FormField Label="When">
+                <div class="segmented">
+                    <button class="@(_model.Timing == BusinessRuleTiming.Before ? "active" : null)" @onclick="() => _model.Timing = BusinessRuleTiming.Before">Before save</button>
+                    <button class="@(_model.Timing == BusinessRuleTiming.After ? "active" : null)" @onclick="() => _model.Timing = BusinessRuleTiming.After">After save (async)</button>
+                </div>
+            </FormField>
+            <FormField Label="Order" Help="Lower numbers run first.">
+                <input class="input" type="number" @bind="_model.Order" />
+            </FormField>
+            <FormField Label="Runs on" Class="span-all">
+                <div class="flex gap-4 flex-wrap">
+                    <label class="checkbox"><input type="checkbox" @bind="_model.OnInsert" /> Insert</label>
+                    <label class="checkbox"><input type="checkbox" @bind="_model.OnUpdate" /> Update</label>
+                    <label class="checkbox"><input type="checkbox" @bind="_model.OnDelete" /> Delete</label>
+                    <span class="flex-1"></span>
+                    <Switch @bind-Value="_model.IsActive" Label="@(_model.IsActive ? "Active" : "Inactive")" />
+                </div>
+            </FormField>
+        </div>
+
+        <div class="form-section mt-4">
+            <div class="form-section-title"><Icon Name="filter" Size="16" /> Condition</div>
+            @if (_table is null)
+            {
+                <div class="small faint">Select a table to define the condition.</div>
+            }
+            else
+            {
+                <div class="small muted mb-2">Leave empty to run for every record. Change operators (changes, changes to, changes from) compare with the previous values.</div>
+                <ConditionBuilder Condition="_model.Condition" Fields="_table.Fields" AllowChangeOperators="true" />
+            }
+        </div>
+
+        <div class="form-section mt-4">
+            <div class="form-section-title"><Icon Name="zap" Size="16" /> Actions</div>
+            <div class="stack" style="gap:10px">
+                @foreach (var action in _model.Actions.ToList())
+                {
+                    var a = action;
+                    var target = a.Field is null ? null : _table?.FindField(a.Field);
+                    <div class="cond-group">
+                        <div class="flex items-center gap-2">
+                            <span class="badge">@(_model.Actions.IndexOf(a) + 1)</span>
+                            <select class="select" style="max-width:240px" value="@a.Type" @onchange="e => a.Type = Enum.Parse<BusinessRuleActionType>(e.Value!.ToString()!)">
+                                @foreach (var type in Enum.GetValues<BusinessRuleActionType>())
+                                {
+                                    <option value="@type" disabled="@(!IsAllowed(type))">@ActionLabel(type)</option>
+                                }
+                            </select>
+                            @if (!IsAllowed(a.Type))
+                            {
+                                <span class="small text-warning"><Icon Name="alert-triangle" Size="13" /> @(_model.Timing == BusinessRuleTiming.Before ? "after rules only" : "before rules only")</span>
+                            }
+                            <span class="flex-1"></span>
+                            <button class="icon-btn" title="Move up" disabled="@(_model.Actions.IndexOf(a) == 0)" @onclick="() => Move(a, -1)"><Icon Name="arrow-up" Size="14" /></button>
+                            <button class="icon-btn" title="Move down" disabled="@(_model.Actions.IndexOf(a) == _model.Actions.Count - 1)" @onclick="() => Move(a, 1)"><Icon Name="arrow-down" Size="14" /></button>
+                            <button class="icon-btn" title="Remove action" @onclick="() => _model.Actions.Remove(a)"><Icon Name="trash" Size="14" /></button>
+                        </div>
+                        <div class="form-grid mt-2">
+                            @switch (a.Type)
+                            {
+                                case BusinessRuleActionType.SetField:
+                                    <FormField Label="Field">
+                                        <select class="select" value="@a.Field" @onchange="e => { a.Field = e.Value?.ToString(); a.Value = null; }">
+                                            <option value="">— Field —</option>
+                                            @foreach (var field in WritableFields)
+                                            {
+                                                <option value="@field.Name">@field.Label</option>
+                                            }
+                                        </select>
+                                    </FormField>
+                                    <FormField Label="Value" Help="Empty clears the field.">
+                                        @if (target is not null)
+                                        {
+                                            <FieldInput Field="target" Value="@a.Value" ValueChanged="v => a.Value = v" />
+                                        }
+                                        else
+                                        {
+                                            <input class="input" disabled placeholder="Select a field first" />
+                                        }
+                                    </FormField>
+                                    break;
+                                case BusinessRuleActionType.Abort:
+                                    <FormField Label="Message shown to the user" Class="span-all" Help="Supports ${Field} placeholders.">
+                                        <input class="input" @bind="a.Message" placeholder="e.g. A resolution note is required before resolving." />
+                                    </FormField>
+                                    break;
+                                case BusinessRuleActionType.AddWorkNote:
+                                    <FormField Label="Work note" Class="span-all" Help="Supports ${Field} placeholders.">
+                                        <textarea class="textarea" rows="2" @bind="a.Message"></textarea>
+                                    </FormField>
+                                    break;
+                                case BusinessRuleActionType.StartFlow:
+                                    <FormField Label="Flow" Class="span-all" Help="The record is passed as input (table, record id, number).">
+                                        <select class="select" value="@a.TargetId" @onchange="e => a.TargetId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null">
+                                            <option value="">— Select flow —</option>
+                                            @foreach (var flow in _flows)
+                                            {
+                                                <option value="@flow.Id">@flow.Name@(flow.IsActive ? string.Empty : " (inactive)")</option>
+                                            }
+                                        </select>
+                                    </FormField>
+                                    break;
+                                case BusinessRuleActionType.SendNotification:
+                                    <FormField Label="Notification" Class="span-all">
+                                        <select class="select" value="@a.TargetId" @onchange="e => a.TargetId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null">
+                                            <option value="">— Select notification —</option>
+                                            @foreach (var notification in _notifications.Where(n => string.Equals(n.TableName, _model.TableName, StringComparison.OrdinalIgnoreCase)))
+                                            {
+                                                <option value="@notification.Id">@notification.Name</option>
+                                            }
+                                        </select>
+                                    </FormField>
+                                    break;
+                            }
+                        </div>
+                    </div>
+                }
+                @if (_model.Actions.Count == 0)
+                {
+                    <div class="small faint">No actions yet.</div>
+                }
+                <div><button class="btn btn-ghost btn-sm" @onclick="AddAction"><Icon Name="plus" Size="14" /> Add action</button></div>
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        @if (_model.Id != Guid.Empty)
+        {
+            <button class="btn btn-outline-danger" style="margin-right:auto" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete</button>
+        }
+        <button class="btn btn-secondary" @onclick="() => _editorOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            Save rule
+        </button>
+    </Footer>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete business rule?" Message="@($"'{_model.Name}' will be deleted permanently.")" ConfirmText="Delete rule" OnConfirm="DeleteAsync" />
+
+@code {
+    private const int PageSize = 25;
+
+    private IReadOnlyList<BusinessRuleModel> _all = [];
+    private IReadOnlyList<TableDefinition> _tables = [];
+    private IReadOnlyList<FlowSummary> _flows = [];
+    private IReadOnlyList<NotificationModel> _notifications = [];
+    private BusinessRuleModel _model = new();
+    private TableDefinition? _table;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _editorOpen;
+    private bool _confirmDelete;
+    private string _tableFilter = string.Empty;
+    private BusinessRuleTiming? _timingFilter;
+    private string _search = string.Empty;
+    private string? _sort = "Name";
+    private bool _desc;
+    private int _page = 1;
+
+    private List<BusinessRuleModel> Filtered
+    {
+        get
+        {
+            IEnumerable<BusinessRuleModel> items = _all;
+            if (!string.IsNullOrEmpty(_tableFilter))
+            {
+                items = items.Where(r => string.Equals(r.TableName, _tableFilter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (_timingFilter is { } timing)
+            {
+                items = items.Where(r => r.Timing == timing);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                items = items.Where(r => r.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                    || (r.Description?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || r.TableName.Contains(_search, StringComparison.OrdinalIgnoreCase));
+            }
+
+            items = _sort switch
+            {
+                "TableName" => _desc ? items.OrderByDescending(r => r.TableName) : items.OrderBy(r => r.TableName),
+                "Order" => _desc ? items.OrderByDescending(r => r.Order) : items.OrderBy(r => r.Order),
+                "UpdatedAt" => _desc ? items.OrderByDescending(r => r.UpdatedAt) : items.OrderBy(r => r.UpdatedAt),
+                _ => _desc ? items.OrderByDescending(r => r.Name) : items.OrderBy(r => r.Name),
+            };
+            return items.ToList();
+        }
+    }
+
+    private IReadOnlyList<BusinessRuleModel> PageItems => Filtered.Skip((_page - 1) * PageSize).Take(PageSize).ToList();
+
+    private IEnumerable<FieldDefinition> WritableFields => _table?.Fields.Where(f => !f.IsReadOnly) ?? [];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _tables = await Registry.GetTablesAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Rules.ListAsync();
+        if (result.Succeeded)
+        {
+            _all = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Business rules could not be loaded", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private string TableLabel(string name) => _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))?.Label ?? name;
+
+    private void SetTiming(BusinessRuleTiming? timing)
+    {
+        _timingFilter = timing;
+        _page = 1;
+    }
+
+    private void Search(string term)
+    {
+        _search = term;
+        _page = 1;
+    }
+
+    private void Sort((string SortBy, bool Descending) sort)
+    {
+        _sort = sort.SortBy;
+        _desc = sort.Descending;
+    }
+
+    private async Task OpenAsync(BusinessRuleModel? rule)
+    {
+        if (rule is null)
+        {
+            _model = new BusinessRuleModel { TableName = _tableFilter };
+        }
+        else
+        {
+            var loaded = await Rules.GetAsync(rule.Id);
+            if (!loaded.Succeeded)
+            {
+                Toasts.Error("The rule could not be loaded", loaded.Error);
+                return;
+            }
+
+            _model = loaded.Value!;
+        }
+
+        _table = string.IsNullOrEmpty(_model.TableName) ? null : await Registry.GetTableAsync(_model.TableName);
+        if (_flows.Count == 0)
+        {
+            _flows = await Flows.ListStartableAsync();
+        }
+
+        if (_notifications.Count == 0)
+        {
+            var notifications = await NotificationAdmin.ListAsync();
+            _notifications = notifications.Succeeded ? notifications.Value! : [];
+        }
+
+        _editorOpen = true;
+    }
+
+    private async Task SelectTableAsync(string? name)
+    {
+        _model.TableName = name ?? string.Empty;
+        _model.Condition = new ConditionGroup();
+        foreach (var action in _model.Actions.Where(a => a.Type == BusinessRuleActionType.SetField))
+        {
+            action.Field = null;
+            action.Value = null;
+        }
+
+        _table = string.IsNullOrEmpty(name) ? null : await Registry.GetTableAsync(name);
+    }
+
+    private bool IsAllowed(BusinessRuleActionType type) => type switch
+    {
+        BusinessRuleActionType.Abort => _model.Timing == BusinessRuleTiming.Before,
+        BusinessRuleActionType.StartFlow or BusinessRuleActionType.SendNotification => _model.Timing == BusinessRuleTiming.After,
+        _ => true,
+    };
+
+    private void AddAction() => _model.Actions.Add(new BusinessRuleAction { Type = BusinessRuleActionType.SetField });
+
+    private void Move(BusinessRuleAction action, int delta)
+    {
+        var index = _model.Actions.IndexOf(action);
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= _model.Actions.Count)
+        {
+            return;
+        }
+
+        _model.Actions.RemoveAt(index);
+        _model.Actions.Insert(target, action);
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        var result = await Rules.SaveAsync(_model);
+        _busy = false;
+        if (Toasts.FromResult(result, "Business rule saved"))
+        {
+            _editorOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task ToggleAsync(BusinessRuleModel rule, bool active)
+    {
+        var result = await Rules.SetActiveAsync(rule.Id, active);
+        if (Toasts.FromResult(result, active ? "Rule activated" : "Rule deactivated"))
+        {
+            rule.IsActive = active;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await Rules.DeleteAsync(_model.Id);
+        if (Toasts.FromResult(result, "Business rule deleted"))
+        {
+            _editorOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private static string Events(bool insert, bool update, bool delete)
+    {
+        var events = new List<string>(3);
+        if (insert)
+        {
+            events.Add("insert");
+        }
+
+        if (update)
+        {
+            events.Add("update");
+        }
+
+        if (delete)
+        {
+            events.Add("delete");
+        }
+
+        return events.Count == 0 ? "never" : string.Join(" · ", events);
+    }
+
+    private static string ActionLabel(BusinessRuleActionType type) => type switch
+    {
+        BusinessRuleActionType.SetField => "Set field value",
+        BusinessRuleActionType.Abort => "Abort with message",
+        BusinessRuleActionType.AddWorkNote => "Add work note",
+        BusinessRuleActionType.StartFlow => "Start flow",
+        BusinessRuleActionType.SendNotification => "Send notification",
+        _ => type.ToString(),
+    };
+
+    private static string ActionIcon(BusinessRuleActionType type) => type switch
+    {
+        BusinessRuleActionType.SetField => "edit",
+        BusinessRuleActionType.Abort => "x-circle",
+        BusinessRuleActionType.AddWorkNote => "sticky-note",
+        BusinessRuleActionType.StartFlow => "workflow",
+        BusinessRuleActionType.SendNotification => "mail",
+        _ => "zap",
+    };
+}
