@@ -18,11 +18,43 @@ public sealed record PasswordPolicy
     /// <summary>Gets a value indicating whether mixed case is required.</summary>
     public bool RequireMixedCase { get; init; } = true;
 
+    /// <summary>Gets a value indicating whether at least one symbol (non letter / digit) is required.</summary>
+    public bool RequireSymbol { get; init; }
+
     /// <summary>Gets the number of failed attempts before lockout.</summary>
     public int MaxFailedAttempts { get; init; } = 5;
 
     /// <summary>Gets the lockout duration.</summary>
     public TimeSpan LockoutDuration { get; init; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Describes the policy in one user-facing sentence, for example as help text below password inputs.</summary>
+    /// <returns>The description.</returns>
+    public string Describe()
+    {
+        var parts = new List<string>();
+        if (RequireMixedCase)
+        {
+            parts.Add("upper and lower case letters");
+        }
+
+        if (RequireDigit)
+        {
+            parts.Add("a digit");
+        }
+
+        if (RequireSymbol)
+        {
+            parts.Add("a symbol");
+        }
+
+        var rules = parts.Count switch
+        {
+            0 => string.Empty,
+            1 => $" with {parts[0]}",
+            _ => $" with {string.Join(", ", parts.Take(parts.Count - 1))} and {parts[^1]}",
+        };
+        return $"At least {MinimumLength} characters{rules}. Must not contain the user name.";
+    }
 
     /// <summary>Validates a candidate password.</summary>
     /// <param name="password">The candidate password.</param>
@@ -48,6 +80,11 @@ public sealed record PasswordPolicy
         if (RequireMixedCase && !(password.Any(char.IsUpper) && password.Any(char.IsLower)))
         {
             return "The password must contain upper and lower case letters.";
+        }
+
+        if (RequireSymbol && password.All(char.IsLetterOrDigit))
+        {
+            return "The password must contain at least one symbol.";
         }
 
         if (!string.IsNullOrEmpty(userName) && password.Contains(userName, StringComparison.OrdinalIgnoreCase))

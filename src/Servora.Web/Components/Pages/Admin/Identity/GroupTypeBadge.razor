@@ -1,0 +1,21 @@
+@* Pill for a group type: Assignment, Approval or Security. *@
+<span class="pill pill-@Tone no-dot"><Icon Name="@IconName" Size="12" /> @Type</span>
+
+@code {
+    /// <summary>Gets or sets the group type.</summary>
+    [Parameter] public GroupType Type { get; set; }
+
+    private string Tone => Type switch
+    {
+        GroupType.Approval => "warning",
+        GroupType.Security => "purple",
+        _ => "primary",
+    };
+
+    private string IconName => Type switch
+    {
+        GroupType.Approval => "check-square",
+        GroupType.Security => "shield",
+        _ => "inbox",
+    };
+}

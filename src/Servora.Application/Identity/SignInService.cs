@@ -1,5 +1,6 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Servora.Application.Common;
+using Servora.Application.Identity.Policies;
 using Servora.Application.Observability;
 using Servora.Application.Security;
 using Servora.Domain.Identity;
@@ -10,7 +11,8 @@ namespace Servora.Application.Identity;
 /// <summary>
 /// Default <see cref="ISignInService"/>. Local accounts are verified with the password hasher; directory accounts and
 /// unknown users are delegated to registered <see cref="IExternalCredentialValidator"/>s. Lockout and auditing apply to
-/// both paths. Error messages never reveal whether a user exists.
+/// both paths. Error messages never reveal whether a user exists. Password rules, lockout values and the
+/// "allow local sign-in" switch come from the authentication policy (<see cref="IAuthPolicyProvider"/>).
 /// </summary>
 /// <param name="dbFactory">The database context factory.</param>
 /// <param name="hasher">The password hasher.</param>
@@ -18,16 +20,16 @@ namespace Servora.Application.Identity;
 /// <param name="audit">The audit service.</param>
 /// <param name="clock">The clock.</param>
 /// <param name="permissions">The permission service (cache invalidation).</param>
+/// <param name="policyProvider">The authentication policy provider.</param>
 public sealed class SignInService(
     IAppDbContextFactory dbFactory,
     IPasswordHasherService hasher,
     IEnumerable<IExternalCredentialValidator> externalValidators,
     IAuditService audit,
     IClock clock,
-    IPermissionService permissions) : ISignInService
+    IPermissionService permissions,
+    IAuthPolicyProvider policyProvider) : ISignInService
 {
-    private readonly PasswordPolicy _policy = PasswordPolicy.Default;
-
     /// <inheritdoc />
     public async Task<SignInResult> ValidateCredentialsAsync(string userName, string password, CancellationToken cancellationToken = default)
     {
@@ -37,6 +39,7 @@ public sealed class SignInService(
             return await FailAsync(userName, SignInOutcome.InvalidCredentials, cancellationToken);
         }
 
+        var policy = await policyProvider.GetAsync(cancellationToken);
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var normalized = userName.ToUpperInvariant();
         var user = await db.Set<User>().FirstOrDefaultAsync(u => u.NormalizedUserName == normalized, cancellationToken);
@@ -62,12 +65,18 @@ public sealed class SignInService(
 
         if (user is { Source: UserSource.Local })
         {
+            // Local sign-in can be switched off by policy; the bootstrap administrator keeps break-glass access.
+            if (!policy.AllowLocalLogin && !BootstrapAccount.IsAdmin(user.UserName))
+            {
+                return await FailAsync(userName, SignInOutcome.InvalidCredentials, cancellationToken, "Local sign-in is disabled by the authentication policy.");
+            }
+
             if (user.PasswordHash is not null && hasher.Verify(user.PasswordHash, password))
             {
                 return await SucceedAsync(db, user, "local", now, cancellationToken);
             }
 
-            await RegisterFailureAsync(db, user, now, cancellationToken);
+            await RegisterFailureAsync(db, user, policy, now, cancellationToken);
             return await FailAsync(userName, SignInOutcome.InvalidCredentials, cancellationToken);
         }
 
@@ -89,6 +98,11 @@ public sealed class SignInService(
                     return await FailAsync(userName, SignInOutcome.Disabled, cancellationToken);
                 }
 
+                if (tracked.LockoutEndsAt is { } lockedUntil && lockedUntil > now)
+                {
+                    return await FailAsync(userName, SignInOutcome.LockedOut, cancellationToken);
+                }
+
                 return await SucceedAsync(db, tracked, validator.Source, now, cancellationToken);
             }
 
@@ -97,7 +111,7 @@ public sealed class SignInService(
 
         if (user is not null)
         {
-            await RegisterFailureAsync(db, user, now, cancellationToken);
+            await RegisterFailureAsync(db, user, policy, now, cancellationToken);
         }
 
         return await FailAsync(userName, directoryDown ? SignInOutcome.DirectoryUnavailable : SignInOutcome.InvalidCredentials, cancellationToken);
@@ -129,7 +143,8 @@ public sealed class SignInService(
             return Result.Invalid("The new password must be different from the current password.");
         }
 
-        if (_policy.Validate(newPassword, user.UserName) is { } error)
+        var passwordPolicy = await policyProvider.GetPasswordPolicyAsync(cancellationToken);
+        if (passwordPolicy.Validate(newPassword, user.UserName) is { } error)
         {
             return Result.Invalid(error);
         }
@@ -153,12 +168,12 @@ public sealed class SignInService(
         return new SignInResult(SignInOutcome.Success, user, source);
     }
 
-    private async Task RegisterFailureAsync(IAppDbContext db, User user, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task RegisterFailureAsync(IAppDbContext db, User user, AuthPolicySettings policy, DateTimeOffset now, CancellationToken cancellationToken)
     {
         user.FailedSignInCount++;
-        if (user.FailedSignInCount >= _policy.MaxFailedAttempts)
+        if (user.FailedSignInCount >= policy.MaxFailedAttempts)
         {
-            user.LockoutEndsAt = now.Add(_policy.LockoutDuration);
+            user.LockoutEndsAt = now.AddMinutes(policy.LockoutMinutes);
             user.FailedSignInCount = 0;
             await audit.WriteAsync(new AuditEntry("auth", "account.locked", AuditOutcome.Denied) { TargetType = "sys_user", TargetId = user.Id.ToString(), TargetName = user.UserName }, cancellationToken);
         }
@@ -166,12 +181,12 @@ public sealed class SignInService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task<SignInResult> FailAsync(string userName, SignInOutcome outcome, CancellationToken cancellationToken)
+    private async Task<SignInResult> FailAsync(string userName, SignInOutcome outcome, CancellationToken cancellationToken, string? reason = null)
     {
         await audit.WriteAsync(new AuditEntry("auth", "login.failed", outcome == SignInOutcome.LockedOut ? AuditOutcome.Denied : AuditOutcome.Failure)
         {
             ActorNameOverride = userName.Length > 256 ? userName[..256] : userName,
-            Message = outcome.ToString(),
+            Message = reason is null ? outcome.ToString() : $"{outcome}: {reason}",
         }, cancellationToken);
         return new SignInResult(outcome);
     }

@@ -1,0 +1,171 @@
+@page "/admin/groups"
+@attribute [RequirePermission(Permissions.Identity.ReadUsers)]
+@* Group administration list: KPIs, type and status filters, server-side search, sort and paging. *@
+@inject IGroupAdminService Groups
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Groups · Servora</PageTitle>
+
+<PageHeader Title="Groups" Subtitle="Teams that own work, approve changes and requests, and grant roles to their members." Icon="users">
+    <Actions>
+        <PermissionView Permission="@Permissions.Identity.ManageGroups">
+            <a class="btn btn-primary" href="/admin/groups/new"><Icon Name="plus" Size="16" /> New group</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_stats is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Assignment groups" Value="@_stats.Assignment.ToString("N0")" Icon="inbox" Tone="primary" Caption="@($"of {_stats.Total:N0} groups")" OnClick="() => SetType(GroupType.Assignment)" />
+        <StatCard Label="Approval groups" Value="@_stats.Approval.ToString("N0")" Icon="check-square" Tone="warning" Caption="CAB and approvers" OnClick="() => SetType(GroupType.Approval)" />
+        <StatCard Label="Memberships" Value="@_stats.Memberships.ToString("N0")" Icon="users" Tone="info" Caption="across all groups" />
+        <StatCard Label="Empty groups" Value="@_stats.Empty.ToString("N0")" Icon="alert-circle" Tone="@(_stats.Empty > 0 ? "danger" : "success")" Caption="active without members" />
+    }
+</div>
+
+<DataTable TItem="GroupListItem" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_pageNumber" PageSize="PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" SearchPlaceholder="Search name, description, e-mail…"
+           OnPageChanged="GoToPage" OnSortChanged="Sort" OnSearch="Search" OnRowClick="@(r => Nav.NavigateTo($"/admin/groups/{r.Id}"))"
+           EmptyIcon="users" EmptyTitle="No groups found" EmptyText="Create assignment groups so work can be routed to teams.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_type is null ? "active" : null)" @onclick="() => SetType(null)">All types</button>
+            <button class="@(_type == GroupType.Assignment ? "active" : null)" @onclick="() => SetType(GroupType.Assignment)">Assignment</button>
+            <button class="@(_type == GroupType.Approval ? "active" : null)" @onclick="() => SetType(GroupType.Approval)">Approval</button>
+            <button class="@(_type == GroupType.Security ? "active" : null)" @onclick="() => SetType(GroupType.Security)">Security</button>
+        </div>
+        <select class="select" style="width:auto" value="@(_active switch { true => "active", false => "inactive", _ => string.Empty })" @onchange="OnStatusChanged">
+            <option value="">Any status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+        </select>
+    </Toolbar>
+    <EmptyContent>
+        <PermissionView Permission="@Permissions.Identity.ManageGroups">
+            <a class="btn btn-primary" href="/admin/groups/new"><Icon Name="plus" Size="15" /> New group</a>
+        </PermissionView>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="GroupListItem" Title="Group" SortKey="Name">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <div class="page-icon" style="width:34px;height:34px;border-radius:10px"><Icon Name="users" Size="16" /></div>
+                    <div style="min-width:0">
+                        <div class="cell-primary">@context.Name</div>
+                        <div class="cell-sub truncate" style="max-width:380px">@context.Description</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="GroupListItem" Title="Type" SortKey="Type"><Template><GroupTypeBadge Type="context.Type" /></Template></DataColumn>
+        <DataColumn TItem="GroupListItem" Title="Manager">
+            <Template>
+                @if (context.ManagerName is not null)
+                {
+                    <span class="person"><Avatar Name="@context.ManagerName" Size="sm" /> <span class="person-name">@context.ManagerName</span></span>
+                }
+                else
+                {
+                    <span class="faint">—</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="GroupListItem" Title="Members" SortKey="Members" Align="right"><Template><b>@context.MemberCount</b></Template></DataColumn>
+        <DataColumn TItem="GroupListItem" Title="Roles granted">
+            <Template>
+                <div class="flex flex-wrap gap-1">
+                    @foreach (var role in context.Roles.Take(3))
+                    {
+                        <span class="tag"><Icon Name="shield" Size="11" /> @role</span>
+                    }
+                    @if (context.Roles.Count > 3)
+                    {
+                        <span class="tag">+@(context.Roles.Count - 3)</span>
+                    }
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="GroupListItem" Title="Status"><Template><StatusPill Text="@(context.IsActive ? "Active" : "Inactive")" /></Template></DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private const int PageSize = 25;
+    private PagedResult<GroupListItem>? _page;
+    private GroupStats? _stats;
+    private bool _loading = true;
+    private int _pageNumber = 1;
+    private string _sort = "Name";
+    private bool _desc;
+    private string? _search;
+    private GroupType? _type;
+    private bool? _active;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _stats = (await Groups.GetStatsAsync()).Value;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Groups.ListAsync(
+            new GroupListQuery(_type, _active),
+            new PageRequest { Page = _pageNumber, PageSize = PageSize, Search = _search, SortBy = _sort, SortDescending = _desc });
+        if (result.Succeeded)
+        {
+            _page = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Could not load groups", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task GoToPage(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task Sort((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task Search(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SetType(GroupType? type)
+    {
+        _type = type;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task OnStatusChanged(ChangeEventArgs e)
+    {
+        _active = e.Value?.ToString() switch { "active" => true, "inactive" => false, _ => null };
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+}

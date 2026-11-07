@@ -1,0 +1,39 @@
+@* Pill showing where an account or group is mastered: Local, Directory, Windows or Service. *@
+<span class="pill pill-@Tone no-dot" title="@Tooltip"><Icon Name="@IconName" Size="12" /> @Label</span>
+
+@code {
+    /// <summary>Gets or sets the source.</summary>
+    [Parameter] public UserSource Source { get; set; }
+
+    private string Tone => Source switch
+    {
+        UserSource.Directory => "info",
+        UserSource.Windows => "purple",
+        UserSource.Service => "accent",
+        _ => "neutral",
+    };
+
+    private string IconName => Source switch
+    {
+        UserSource.Directory => "id-card",
+        UserSource.Windows => "monitor",
+        UserSource.Service => "bot",
+        _ => "user",
+    };
+
+    private string Label => Source switch
+    {
+        UserSource.Directory => "Directory",
+        UserSource.Windows => "Windows",
+        UserSource.Service => "Service",
+        _ => "Local",
+    };
+
+    private string Tooltip => Source switch
+    {
+        UserSource.Directory => "Synchronised from LDAP / Active Directory",
+        UserSource.Windows => "Provisioned by Windows sign-in",
+        UserSource.Service => "Technical identity – cannot sign in interactively",
+        _ => "Local Servora account",
+    };
+}

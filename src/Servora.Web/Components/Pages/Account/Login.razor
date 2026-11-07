@@ -2,6 +2,9 @@
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
 @layout AuthLayout
+@using Servora.Application.Identity.Windows
+@inject IWindowsSignInService WindowsSignIn
+@inject ILogger<Login> Logger
 
 <PageTitle>Sign in · Servora</PageTitle>
 
@@ -17,6 +20,10 @@
     @if (SignedOut == 1)
     {
         <div class="alert alert-success mb-4"><Icon Name="check-circle" Size="18" /><div>You have been signed out.</div></div>
+    }
+    @if (SessionsRevoked == 1)
+    {
+        <div class="alert alert-info mb-4"><Icon Name="shield-check" Size="18" /><div>All of your sessions were signed out. Sign in again to continue.</div></div>
     }
 
     <form method="post" action="/auth/login" class="stack" style="gap:16px">
@@ -42,10 +49,13 @@
         <button type="submit" class="btn btn-primary btn-lg btn-block"><Icon Name="log-in" Size="18" /> Sign in</button>
     </form>
 
-    <div class="auth-divider">or</div>
-    <a class="btn btn-secondary btn-lg btn-block" href="/auth/windows?returnUrl=@Uri.EscapeDataString(ReturnUrl ?? "/")">
-        <Icon Name="monitor" Size="18" /> Sign in with Windows
-    </a>
+    @if (_windowsEnabled)
+    {
+        <div class="auth-divider">or</div>
+        <a class="btn btn-secondary btn-lg btn-block" href="/auth/windows?returnUrl=@Uri.EscapeDataString(ReturnUrl ?? "/")" data-enhance-nav="false">
+            <Icon Name="monitor" Size="18" /> Sign in with Windows
+        </a>
+    }
 
     <p class="small faint mt-6 text-center">
         Protected system. Access is logged and monitored.
@@ -53,6 +63,8 @@
 </div>
 
 @code {
+    private bool _windowsEnabled;
+
     /// <summary>Gets or sets the error message passed back by the login endpoint.</summary>
     [SupplyParameterFromQuery] public string? Error { get; set; }
 
@@ -64,4 +76,21 @@
 
     /// <summary>Gets or sets a flag indicating the user just signed out.</summary>
     [SupplyParameterFromQuery] public int? SignedOut { get; set; }
+
+    /// <summary>Gets or sets a flag indicating the user revoked all sessions.</summary>
+    [SupplyParameterFromQuery] public int? SessionsRevoked { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // The Windows button is only offered when Windows sign-in is enabled on /admin/directory.
+            _windowsEnabled = await WindowsSignIn.IsEnabledAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not determine whether Windows sign-in is enabled.");
+        }
+    }
 }

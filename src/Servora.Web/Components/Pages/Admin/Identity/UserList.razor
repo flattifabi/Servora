@@ -1,0 +1,233 @@
+@page "/admin/users"
+@attribute [RequirePermission(Permissions.Identity.ReadUsers)]
+@* User administration list: KPIs, status / source / role filters, server-side search, sort and paging. *@
+@inject IUserAdminService Users
+@inject IRoleAdminService Roles
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Users · Servora</PageTitle>
+
+<PageHeader Title="Users" Subtitle="People and technical identities that can work in Servora – local, directory and Windows accounts." Icon="user">
+    <Actions>
+        <PermissionView Permission="@Permissions.Identity.ManageDirectory">
+            <a class="btn btn-secondary" href="/admin/directory"><Icon Name="id-card" Size="16" /> Directory &amp; SSO</a>
+        </PermissionView>
+        <PermissionView Permission="@Permissions.Identity.ManageUsers">
+            <a class="btn btn-primary" href="/admin/users/new"><Icon Name="user-plus" Size="16" /> New user</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_stats is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Active users" Value="@_stats.Active.ToString("N0")" Icon="user-check" Tone="primary" Caption="@($"of {_stats.Total:N0} accounts")" OnClick="() => SetStatus(UserStatusFilter.Active)" />
+        <StatCard Label="Directory & Windows" Value="@_stats.External.ToString("N0")" Icon="id-card" Tone="info" Caption="mastered externally" OnClick="() => SetSource(UserSource.Directory)" />
+        <StatCard Label="Signed in (30 days)" Value="@_stats.ActiveLast30Days.ToString("N0")" Icon="activity" Tone="success" Caption="recently active" />
+        <StatCard Label="Locked out" Value="@_stats.LockedOut.ToString("N0")" Icon="lock" Tone="@(_stats.LockedOut > 0 ? "danger" : "accent")" Caption="too many failed sign-ins" OnClick="() => SetStatus(UserStatusFilter.Locked)" />
+    }
+</div>
+
+<DataTable TItem="UserListItem" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_pageNumber" PageSize="PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" SearchPlaceholder="Search name, user name, e-mail, department…"
+           OnPageChanged="GoToPage" OnSortChanged="Sort" OnSearch="Search" OnRowClick="@(r => Nav.NavigateTo($"/admin/users/{r.Id}"))"
+           EmptyIcon="users" EmptyTitle="No users found" EmptyText="No accounts match the current filters.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_status == UserStatusFilter.All ? "active" : null)" @onclick="() => SetStatus(UserStatusFilter.All)">All</button>
+            <button class="@(_status == UserStatusFilter.Active ? "active" : null)" @onclick="() => SetStatus(UserStatusFilter.Active)">Active</button>
+            <button class="@(_status == UserStatusFilter.Inactive ? "active" : null)" @onclick="() => SetStatus(UserStatusFilter.Inactive)">Inactive</button>
+            <button class="@(_status == UserStatusFilter.Locked ? "active" : null)" @onclick="() => SetStatus(UserStatusFilter.Locked)">Locked</button>
+        </div>
+        <select class="select" style="width:auto" value="@(_source?.ToString() ?? string.Empty)" @onchange="OnSourceChanged" title="Account source">
+            <option value="">All sources</option>
+            @foreach (var source in Enum.GetValues<UserSource>())
+            {
+                <option value="@source">@source</option>
+            }
+        </select>
+        <select class="select" style="width:auto;max-width:220px" value="@(_roleId?.ToString() ?? string.Empty)" @onchange="OnRoleChanged" title="Role">
+            <option value="">All roles</option>
+            @foreach (var role in _roles)
+            {
+                <option value="@role.Id">@role.Label</option>
+            }
+        </select>
+    </Toolbar>
+    <EmptyContent>
+        @if (HasFilters)
+        {
+            <button class="btn btn-secondary" @onclick="ClearFilters"><Icon Name="x" Size="15" /> Clear filters</button>
+        }
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="UserListItem" Title="User" SortKey="DisplayName">
+            <Template>
+                <div class="person">
+                    <Avatar Name="@context.DisplayName" Size="sm" ShowTitle="false" />
+                    <div style="min-width:0">
+                        <div class="person-name">@context.DisplayName</div>
+                        <div class="cell-sub">@context.UserName</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="UserListItem" Title="E-mail" Value="r => r.Email" Class="muted" />
+        <DataColumn TItem="UserListItem" Title="Department" SortKey="Department">
+            <Template>
+                <div>@context.Department</div>
+                <div class="cell-sub">@context.Title</div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="UserListItem" Title="Roles">
+            <Template>
+                <div class="flex flex-wrap gap-1">
+                    @foreach (var role in context.Roles.Take(3))
+                    {
+                        <span class="tag">@role</span>
+                    }
+                    @if (context.Roles.Count > 3)
+                    {
+                        <span class="tag">+@(context.Roles.Count - 3)</span>
+                    }
+                    @if (context.GroupCount > 0)
+                    {
+                        <span class="tag" title="Group memberships"><Icon Name="users" Size="11" /> @context.GroupCount</span>
+                    }
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="UserListItem" Title="Source" SortKey="Source"><Template><SourceBadge Source="context.Source" /></Template></DataColumn>
+        <DataColumn TItem="UserListItem" Title="Status">
+            <Template>
+                @if (!context.IsActive)
+                {
+                    <StatusPill Text="Inactive" />
+                }
+                else if (context.IsLockedOut)
+                {
+                    <StatusPill Text="Locked" Tone="danger" />
+                }
+                else if (context.MustChangePassword)
+                {
+                    <StatusPill Text="Password change" Tone="warning" />
+                }
+                else
+                {
+                    <StatusPill Text="Active" />
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="UserListItem" Title="Last sign-in" SortKey="LastSignInAt"><Template><RelativeTime Value="context.LastSignInAt" Placeholder="Never" /></Template></DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private const int PageSize = 25;
+    private PagedResult<UserListItem>? _page;
+    private UserStats? _stats;
+    private IReadOnlyList<RoleOption> _roles = [];
+    private bool _loading = true;
+    private int _pageNumber = 1;
+    private string _sort = "DisplayName";
+    private bool _desc;
+    private string? _search;
+    private UserStatusFilter _status = UserStatusFilter.All;
+    private UserSource? _source;
+    private Guid? _roleId;
+
+    /// <summary>Gets or sets an optional role filter passed in the query string (from the role page).</summary>
+    [SupplyParameterFromQuery(Name = "role")] public Guid? RoleFilter { get; set; }
+
+    private bool HasFilters => _status != UserStatusFilter.All || _source is not null || _roleId is not null || !string.IsNullOrWhiteSpace(_search);
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _roleId = RoleFilter;
+        var stats = await Users.GetStatsAsync();
+        _stats = stats.Value;
+        var roles = await Roles.GetOptionsAsync();
+        _roles = roles.Value ?? [];
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Users.ListAsync(
+            new UserListQuery(_status, _source, _roleId),
+            new PageRequest { Page = _pageNumber, PageSize = PageSize, Search = _search, SortBy = _sort, SortDescending = _desc });
+        if (result.Succeeded)
+        {
+            _page = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Could not load users", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task GoToPage(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task Sort((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task Search(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SetStatus(UserStatusFilter status)
+    {
+        _status = status;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SetSource(UserSource? source)
+    {
+        _source = source;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private Task OnSourceChanged(ChangeEventArgs e) =>
+        SetSource(Enum.TryParse<UserSource>(e.Value?.ToString(), out var source) ? source : null);
+
+    private async Task OnRoleChanged(ChangeEventArgs e)
+    {
+        _roleId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task ClearFilters()
+    {
+        _status = UserStatusFilter.All;
+        _source = null;
+        _roleId = null;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+}

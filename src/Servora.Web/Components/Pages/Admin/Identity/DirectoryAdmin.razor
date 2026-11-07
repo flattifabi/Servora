@@ -1,0 +1,767 @@
+@page "/admin/directory"
+@attribute [RequirePermission(Permissions.Identity.ManageDirectory)]
+@* LDAP / Active Directory and Windows SSO configuration: connection, attribute mapping, group→role mappings,
+   synchronisation (schedule, Sync now, history) and Windows integrated sign-in. *@
+@inject IDirectoryAdminService Directory
+@inject IRoleAdminService Roles
+@inject ToastService Toasts
+
+<PageTitle>Directory &amp; SSO · Servora</PageTitle>
+
+<PageHeader Title="Directory & SSO" Subtitle="Sign in with Active Directory / LDAP accounts, map directory groups to roles and enable Windows single sign-on." Icon="id-card">
+    <SubtitleContent>
+        @if (_overview is not null)
+        {
+            <div class="flex items-center gap-2 flex-wrap mt-2">
+                <StatusPill Text="@(_overview.Settings.Enabled ? "LDAP enabled" : "LDAP disabled")" Tone="@(_overview.Settings.Enabled ? "success" : "neutral")" />
+                <StatusPill Text="@(_overview.Settings.WindowsAuthEnabled ? "Windows SSO enabled" : "Windows SSO disabled")" Tone="@(_overview.Settings.WindowsAuthEnabled ? "success" : "neutral")" />
+                @if (_overview.Settings.Enabled && _overview.Settings.Security == LdapSecurityMode.None)
+                {
+                    <StatusPill Text="Unencrypted" Tone="danger" />
+                }
+            </div>
+        }
+    </SubtitleContent>
+    <Actions>
+        <button class="btn btn-secondary" disabled="@(_testing || _settings is null)" @onclick="TestConnectionAsync">
+            @if (_testing)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <Icon Name="plug" Size="16" />
+            }
+            Test connection
+        </button>
+        <button class="btn btn-primary" disabled="@(_saving || _settings is null)" @onclick="SaveAsync">
+            @if (_saving)
+            {
+                <span class="spinner"></span>
+            }
+            <Icon Name="save" Size="16" /> Save settings
+        </button>
+    </Actions>
+</PageHeader>
+
+@if (_overview is null || _settings is null)
+{
+    <div class="grid grid-4 mb-6">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" /></div>
+        }
+    </div>
+    <div class="card"><div class="card-body"><Skeleton Lines="8" Height="18px" /></div></div>
+}
+else
+{
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Directory users" Value="@_overview.DirectoryUserCount.ToString("N0")" Icon="id-card" Tone="info" Caption="provisioned from LDAP / AD" />
+        <StatCard Label="Windows users" Value="@_overview.WindowsUserCount.ToString("N0")" Icon="monitor" Tone="accent" Caption="created by Windows sign-in" />
+        <StatCard Label="Group mappings" Value="@(_mappings?.Count.ToString() ?? _overview.MappingCount.ToString())" Icon="git-branch" Tone="primary" Caption="directory group → role / group" OnClick="@(() => _tab = "mappings")" />
+        <StatCard Label="Last synchronisation" Value="@(LastRun is null ? "Never" : RelativeTime.Format(LastRun.StartedAt))" Icon="refresh"
+                  Tone="@(LastRun?.Status switch { DirectorySyncStatus.Failed => "danger", DirectorySyncStatus.CompletedWithWarnings => "warning", DirectorySyncStatus.Succeeded => "success", _ => "primary" })"
+                  Caption="@(LastRun?.Status.ToString() ?? "no run yet")" OnClick="@(() => _tab = "sync")" />
+    </div>
+
+    @if (_testResult is not null)
+    {
+        <div class="alert @(_testResult.Succeeded ? "alert-success" : "alert-danger") mb-4">
+            <Icon Name="@(_testResult.Succeeded ? "check-circle" : "alert-circle")" Size="18" />
+            <div class="flex-1">
+                <div><b>@_testResult.Message</b> <span class="faint small">(@_testResult.ElapsedMilliseconds ms)</span></div>
+                <ul class="small" style="margin:6px 0 0;padding-left:18px">
+                    @foreach (var step in _testResult.Steps)
+                    {
+                        <li>@step</li>
+                    }
+                </ul>
+            </div>
+            <button class="icon-btn" title="Dismiss" @onclick="() => _testResult = null"><Icon Name="x" Size="16" /></button>
+        </div>
+    }
+
+    <Tabs Items="s_tabs" @bind-ActiveKey="_tab" />
+
+    <div class="grid grid-sidebar mt-4">
+        <div class="stack">
+            @switch (_tab)
+            {
+                case "connection":
+                    <div class="card">
+                        <div class="card-header">
+                            <div><h3><Icon Name="server" Size="16" /> Directory server</h3><div class="card-subtitle">Connection used for sign-in, lookups and synchronisation.</div></div>
+                            <Switch @bind-Value="_settings.Enabled" Label="@(_settings.Enabled ? "Enabled" : "Disabled")" />
+                        </div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <FormField Label="Host" Required="true" Help="Domain controller or domain DNS name, e.g. dc01.corp.example.com">
+                                    <input class="input" @bind="_settings.Host" placeholder="dc01.corp.example.com" />
+                                </FormField>
+                                <FormField Label="Port" Required="true">
+                                    <input class="input" type="number" min="1" max="65535" @bind="_settings.Port" />
+                                </FormField>
+                                <FormField Label="Transport security">
+                                    <select class="select" value="@_settings.Security" @onchange="OnSecurityChanged">
+                                        <option value="@LdapSecurityMode.Ldaps">LDAPS – TLS (recommended, port 636)</option>
+                                        <option value="@LdapSecurityMode.StartTls">StartTLS (port 389, upgrade required)</option>
+                                        <option value="@LdapSecurityMode.None">None – unencrypted (lab only)</option>
+                                    </select>
+                                </FormField>
+                                <FormField Label="Timeout (seconds)">
+                                    <input class="input" type="number" min="1" max="120" @bind="_settings.TimeoutSeconds" />
+                                </FormField>
+                                <FormField Label="Certificate validation" Class="span-2">
+                                    <Switch @bind-Value="_settings.ValidateCertificate" Disabled="@(_settings.Security == LdapSecurityMode.None)" Label="Validate the server certificate against trusted roots" />
+                                </FormField>
+                                @if (_settings.Security == LdapSecurityMode.None)
+                                {
+                                    <div class="span-2 alert alert-danger"><Icon Name="alert-octagon" Size="18" /><div><b>Unencrypted connection.</b> Service account and user passwords are sent in clear text. Use LDAPS or StartTLS in production.</div></div>
+                                }
+                                else if (!_settings.ValidateCertificate)
+                                {
+                                    <div class="span-2 alert alert-warning"><Icon Name="alert-triangle" Size="18" /><div>Certificate validation is disabled. The connection is encrypted but not protected against man-in-the-middle attacks. Supported on Windows hosts only.</div></div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><div><h3><Icon Name="key" Size="16" /> Service account</h3><div class="card-subtitle">Used to search the directory. Anonymous binds are not supported.</div></div></div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <FormField Label="Base DN" Required="true" Class="span-2">
+                                    <input class="input mono" @bind="_settings.BaseDn" placeholder="DC=corp,DC=example,DC=com" />
+                                </FormField>
+                                <FormField Label="Bind DN or UPN" Required="true">
+                                    <input class="input mono" @bind="_settings.BindDn" placeholder="CN=svc-servora,OU=Service Accounts,DC=corp,DC=example,DC=com" />
+                                </FormField>
+                                <FormField Label="Bind password" Help="@(_overview.HasBindPassword ? "A password is stored (encrypted). Leave empty to keep it." : "Stored encrypted in the secret store. Never displayed again.")">
+                                    <input class="input" type="password" @bind="_bindPassword" autocomplete="new-password" placeholder="@(_overview.HasBindPassword ? "•••••••• (stored)" : "Enter password")" />
+                                </FormField>
+                                <FormField Label="NetBIOS domain" Help="Optional. Accepts DOMAIN\user logins only for this domain, e.g. CORP.">
+                                    <input class="input mono" @bind="_settings.NetBiosDomain" placeholder="CORP" />
+                                </FormField>
+                            </div>
+                        </div>
+                    </div>
+                    break;
+
+                case "users":
+                    <div class="card">
+                        <div class="card-header"><div><h3><Icon Name="search" Size="16" /> Search scope</h3><div class="card-subtitle">Where users and groups are searched. Defaults to the base DN.</div></div></div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <FormField Label="User search base">
+                                    <input class="input mono" @bind="_settings.UserSearchBase" placeholder="@(_settings.BaseDn.Length > 0 ? _settings.BaseDn : "OU=Users,DC=corp,DC=example,DC=com")" />
+                                </FormField>
+                                <FormField Label="User filter" Required="true">
+                                    <input class="input mono" @bind="_settings.UserFilter" />
+                                </FormField>
+                                <FormField Label="Group search base">
+                                    <input class="input mono" @bind="_settings.GroupSearchBase" placeholder="@(_settings.BaseDn.Length > 0 ? _settings.BaseDn : "OU=Groups,DC=corp,DC=example,DC=com")" />
+                                </FormField>
+                                <FormField Label="Group filter" Required="true">
+                                    <input class="input mono" @bind="_settings.GroupFilter" />
+                                </FormField>
+                                <FormField Label="Nested groups" Class="span-2">
+                                    <Switch @bind-Value="_settings.ResolveNestedGroups" Label="Resolve nested group memberships (Active Directory, slower on large directories)" />
+                                </FormField>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><div><h3><Icon Name="list" Size="16" /> Attribute mapping</h3><div class="card-subtitle">Directory attributes copied to Servora user fields at sign-in and synchronisation.</div></div></div>
+                        <div class="card-body">
+                            <div class="form-grid cols-3">
+                                <FormField Label="Login name"><input class="input mono" @bind="_settings.UserNameAttribute" /></FormField>
+                                <FormField Label="User principal name"><input class="input mono" @bind="_settings.UpnAttribute" /></FormField>
+                                <FormField Label="Unique ID"><input class="input mono" @bind="_settings.ExternalIdAttribute" /></FormField>
+                                <FormField Label="Display name"><input class="input mono" @bind="_settings.DisplayNameAttribute" /></FormField>
+                                <FormField Label="First name"><input class="input mono" @bind="_settings.FirstNameAttribute" /></FormField>
+                                <FormField Label="Last name"><input class="input mono" @bind="_settings.LastNameAttribute" /></FormField>
+                                <FormField Label="E-mail"><input class="input mono" @bind="_settings.EmailAttribute" /></FormField>
+                                <FormField Label="Phone"><input class="input mono" @bind="_settings.PhoneAttribute" /></FormField>
+                                <FormField Label="Title"><input class="input mono" @bind="_settings.TitleAttribute" /></FormField>
+                                <FormField Label="Department"><input class="input mono" @bind="_settings.DepartmentAttribute" /></FormField>
+                                <FormField Label="Member of"><input class="input mono" @bind="_settings.MemberOfAttribute" /></FormField>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><div><h3><Icon Name="user-plus" Size="16" /> Provisioning</h3><div class="card-subtitle">What happens when a directory user signs in for the first time.</div></div></div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <FormField Label="Just-in-time provisioning" Class="span-2">
+                                    <Switch @bind-Value="_settings.JitProvisioning" Label="Create a Servora account automatically at the first successful sign-in" />
+                                </FormField>
+                                <FormField Label="Default role for new users" Help="Granted once at creation. Group mappings add further roles.">
+                                    <select class="select" @bind="_settings.DefaultRoleName">
+                                        <option value="">No default role</option>
+                                        @foreach (var role in _roles)
+                                        {
+                                            <option value="@role.Name">@role.Label</option>
+                                        }
+                                    </select>
+                                </FormField>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><div><h3><Icon Name="target" Size="16" /> Test user lookup</h3><div class="card-subtitle">Uses the settings in this form (unsaved changes included).</div></div></div>
+                        <div class="card-body">
+                            <div class="flex gap-2">
+                                <div class="input-icon flex-1">
+                                    <Icon Name="user" Size="16" />
+                                    <input class="input" @bind="_lookupName" placeholder="jane.doe, CORP\jane.doe or jane.doe@corp.example.com" @onkeydown="OnLookupKeyDown" />
+                                </div>
+                                <button class="btn btn-secondary" disabled="@(_lookingUp || string.IsNullOrWhiteSpace(_lookupName))" @onclick="LookupAsync">
+                                    @if (_lookingUp)
+                                    {
+                                        <span class="spinner"></span>
+                                    }
+                                    else
+                                    {
+                                        <Icon Name="search" Size="15" />
+                                    }
+                                    Look up
+                                </button>
+                            </div>
+                            @if (_lookupError is not null)
+                            {
+                                <div class="alert alert-danger mt-4"><Icon Name="alert-circle" Size="18" /><div>@_lookupError</div></div>
+                            }
+                            @if (_preview is not null)
+                            {
+                                var entry = _preview.Entry;
+                                <div class="grid grid-2 mt-4" style="gap:16px">
+                                    <div>
+                                        <div class="flex items-center gap-3 mb-4">
+                                            <Avatar Name="@entry.EffectiveDisplayName" Size="lg" />
+                                            <div>
+                                                <div style="font-weight:650">@entry.EffectiveDisplayName</div>
+                                                <div class="small muted mono">@entry.UserName</div>
+                                            </div>
+                                            @if (entry.IsDisabled)
+                                            {
+                                                <StatusPill Text="Disabled" Tone="danger" />
+                                            }
+                                        </div>
+                                        <dl class="kv">
+                                            <dt>E-mail</dt><dd>@(entry.Email ?? "—")</dd>
+                                            <dt>Title</dt><dd>@(entry.Title ?? "—")</dd>
+                                            <dt>Department</dt><dd>@(entry.Department ?? "—")</dd>
+                                            <dt>Unique ID</dt><dd class="mono small">@(entry.ExternalId ?? "—")</dd>
+                                            <dt>SID</dt><dd class="mono small">@(entry.Sid ?? "—")</dd>
+                                            <dt>DN</dt><dd class="mono small">@entry.DistinguishedName</dd>
+                                        </dl>
+                                    </div>
+                                    <div>
+                                        <div class="eyebrow mb-2">Mapped roles</div>
+                                        <div class="flex flex-wrap gap-1 mb-4">
+                                            @foreach (var role in _preview.MappedRoles)
+                                            {
+                                                <span class="tag"><Icon Name="shield" Size="11" /> @role</span>
+                                            }
+                                            @if (_preview.MappedRoles.Count == 0)
+                                            {
+                                                <span class="small faint">None</span>
+                                            }
+                                        </div>
+                                        <div class="eyebrow mb-2">Mapped groups</div>
+                                        <div class="flex flex-wrap gap-1 mb-4">
+                                            @foreach (var group in _preview.MappedGroups)
+                                            {
+                                                <span class="tag"><Icon Name="users" Size="11" /> @group</span>
+                                            }
+                                            @if (_preview.MappedGroups.Count == 0)
+                                            {
+                                                <span class="small faint">None</span>
+                                            }
+                                        </div>
+                                        <div class="eyebrow mb-2">Directory groups (@entry.Groups.Count)</div>
+                                        <div class="flex flex-wrap gap-1" style="max-height:160px;overflow:auto">
+                                            @foreach (var group in entry.Groups.Take(50))
+                                            {
+                                                <span class="tag mono" title="@group">@(DistinguishedName.GetLeafValue(group) ?? group)</span>
+                                            }
+                                        </div>
+                                        @if (_preview.ExistingUserId is { } existingId)
+                                        {
+                                            <a class="btn btn-ghost btn-sm mt-3" href="/admin/users/@existingId"><Icon Name="external-link" Size="14" /> Open Servora account</a>
+                                        }
+                                    </div>
+                                </div>
+                                @if (_preview.Note is not null)
+                                {
+                                    <div class="alert alert-info mt-4"><Icon Name="info" Size="18" /><div>@_preview.Note</div></div>
+                                }
+                            }
+                        </div>
+                    </div>
+                    break;
+
+                case "mappings":
+                    <div class="card">
+                        <div class="card-header">
+                            <div><h3><Icon Name="git-branch" Size="16" /> Group → role mappings</h3><div class="card-subtitle">Members of a directory group receive the role and / or local group membership (marked as directory-managed).</div></div>
+                            <button class="btn btn-primary" @onclick="() => OpenMapping(null)"><Icon Name="plus" Size="15" /> Add mapping</button>
+                        </div>
+                        @if (_mappings is null)
+                        {
+                            <div class="card-body"><Skeleton Lines="4" /></div>
+                        }
+                        else if (_mappings.Count == 0)
+                        {
+                            <EmptyState Icon="git-branch" Title="No mappings yet" Text="Map directory groups such as 'Servora Admins' or 'IT Service Desk' to roles and groups.">
+                                <button class="btn btn-primary" @onclick="() => OpenMapping(null)"><Icon Name="plus" Size="15" /> Add mapping</button>
+                            </EmptyState>
+                        }
+                        else
+                        {
+                            <div class="table-wrap">
+                                <table class="table">
+                                    <thead><tr><th>Directory group</th><th>Role</th><th>Local group</th><th>Status</th><th class="text-right"></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var mapping in _mappings)
+                                        {
+                                            <tr class="clickable" @onclick="() => OpenMapping(mapping)">
+                                                <td>
+                                                    <div class="cell-primary mono truncate" style="max-width:360px" title="@mapping.DirectoryGroup">@mapping.DirectoryGroup</div>
+                                                    @if (!string.IsNullOrEmpty(mapping.Description))
+                                                    {
+                                                        <div class="cell-sub">@mapping.Description</div>
+                                                    }
+                                                </td>
+                                                <td>@if (mapping.RoleLabel is not null) { <span class="tag"><Icon Name="shield" Size="11" /> @mapping.RoleLabel</span> } else { <span class="faint">—</span> }</td>
+                                                <td>@if (mapping.GroupName is not null) { <span class="tag"><Icon Name="users" Size="11" /> @mapping.GroupName</span> } else { <span class="faint">—</span> }</td>
+                                                <td><StatusPill Text="@(mapping.IsActive ? "Active" : "Inactive")" /></td>
+                                                <td class="text-right" @onclick:stopPropagation="true">
+                                                    <button class="btn btn-ghost btn-sm" @onclick="() => AskDeleteMapping(mapping)"><Icon Name="trash" Size="14" /></button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                    break;
+
+                case "sync":
+                    <div class="card">
+                        <div class="card-header">
+                            <div><h3><Icon Name="refresh" Size="16" /> Synchronisation</h3><div class="card-subtitle">Keeps profile data, account status and mapped memberships in line with the directory.</div></div>
+                            <button class="btn btn-primary" disabled="@(_syncing || !_overview.Settings.Enabled)" @onclick="SyncNowAsync" title="@(_overview.Settings.Enabled ? null : "Enable and save the directory integration first")">
+                                @if (_syncing)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                else
+                                {
+                                    <Icon Name="play" Size="15" />
+                                }
+                                Sync now
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <FormField Label="Scheduled synchronisation" Class="span-2">
+                                    <Switch @bind-Value="_settings.SyncEnabled" Label="Run the synchronisation automatically in the background" />
+                                </FormField>
+                                <FormField Label="Interval (minutes)" Help="15 minutes to 7 days.">
+                                    <input class="input" type="number" min="15" max="10080" @bind="_settings.SyncIntervalMinutes" />
+                                </FormField>
+                                <FormField Label="Maximum entries per run" Help="Upper bound for safety; missing users are only deactivated after a complete run.">
+                                    <input class="input" type="number" min="1" max="100000" @bind="_settings.MaxSyncEntries" />
+                                </FormField>
+                                <FormField Label="Import" Class="span-2">
+                                    <Switch @bind-Value="_settings.SyncImportsNewUsers" Label="Import all users matching the filter (otherwise only existing accounts are refreshed)" />
+                                </FormField>
+                                <FormField Label="Deprovisioning" Class="span-2">
+                                    <Switch @bind-Value="_settings.DeactivateMissingUsers" Label="Deactivate directory accounts that are disabled or no longer match the user filter" />
+                                </FormField>
+                            </div>
+                        </div>
+                    </div>
+                    @if (_lastSync is not null)
+                    {
+                        <div class="card highlight">
+                            <div class="card-header"><h3><Icon Name="check-circle" Size="16" /> Result of the last run</h3><StatusPill Text="@_lastSync.Status.ToString()" Tone="@SyncTone(_lastSync.Status)" /></div>
+                            <div class="card-body">
+                                <div class="grid grid-4" style="gap:12px">
+                                    <div><div class="eyebrow">Read</div><div style="font-size:22px;font-weight:700">@_lastSync.UsersRead</div></div>
+                                    <div><div class="eyebrow">Created</div><div style="font-size:22px;font-weight:700" class="text-success">@_lastSync.UsersCreated</div></div>
+                                    <div><div class="eyebrow">Updated</div><div style="font-size:22px;font-weight:700" class="text-info">@_lastSync.UsersUpdated</div></div>
+                                    <div><div class="eyebrow">Deactivated</div><div style="font-size:22px;font-weight:700" class="text-warning">@_lastSync.UsersDeactivated</div></div>
+                                </div>
+                                <p class="small muted mb-0 mt-4">@_lastSync.Message</p>
+                            </div>
+                        </div>
+                    }
+                    <div class="card card-flush">
+                        <div class="card-header"><h3><Icon Name="history" Size="16" /> History</h3></div>
+                        @if (_history is null || _history.Count == 0)
+                        {
+                            <EmptyState Icon="history" Title="No synchronisation yet" Text="Runs appear here with their results." />
+                        }
+                        else
+                        {
+                            <div class="table-wrap">
+                                <table class="table compact">
+                                    <thead><tr><th>Started</th><th>Trigger</th><th>Status</th><th class="num">Read</th><th class="num">Created</th><th class="num">Updated</th><th class="num">Deactivated</th><th class="num">Memberships</th><th>Duration</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var run in _history)
+                                        {
+                                            <tr title="@run.Message">
+                                                <td><RelativeTime Value="run.StartedAt" /> <span class="cell-sub">@run.StartedBy</span></td>
+                                                <td>@run.Trigger</td>
+                                                <td><StatusPill Text="@run.Status.ToString()" Tone="@SyncTone(run.Status)" /></td>
+                                                <td class="num">@run.UsersRead</td>
+                                                <td class="num">@run.UsersCreated</td>
+                                                <td class="num">@run.UsersUpdated</td>
+                                                <td class="num">@run.UsersDeactivated</td>
+                                                <td class="num">@run.MembershipChanges</td>
+                                                <td class="muted">@(run.Duration is { } d ? $"{d.TotalSeconds:0.0} s" : "running")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                    break;
+
+                default:
+                    <div class="card">
+                        <div class="card-header">
+                            <div><h3><Icon Name="monitor" Size="16" /> Windows integrated sign-in</h3><div class="card-subtitle">Kerberos / NTLM single sign-on for domain-joined workstations.</div></div>
+                            <Switch @bind-Value="_settings.WindowsAuthEnabled" Label="@(_settings.WindowsAuthEnabled ? "Enabled" : "Disabled")" />
+                        </div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <FormField Label="Provisioning" Class="span-2">
+                                    <Switch @bind-Value="_settings.WindowsAutoProvision" Label="Create accounts for unknown Windows users (looked up in the directory when LDAP is enabled)" />
+                                </FormField>
+                                <FormField Label="Sign-in URL" Class="span-2">
+                                    <div class="readonly-value mono">/auth/windows</div>
+                                </FormField>
+                            </div>
+                            <div class="alert alert-info mt-4">
+                                <Icon Name="info" Size="18" />
+                                <div>
+                                    When enabled, the sign-in page shows <b>Sign in with Windows</b>. Requirements: the server is joined to the domain (or has a
+                                    Kerberos keytab), an SPN <span class="mono">HTTP/&lt;server name&gt;</span> is registered for the service account running Servora,
+                                    and browsers treat the site as intranet. The identity is matched by SID or looked up in the directory – local accounts are never
+                                    matched. Password sign-in keeps working when Windows sign-in is unavailable.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    break;
+            }
+        </div>
+
+        <aside class="stack sticky-top">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="activity" Size="16" /> Status</h3></div>
+                <div class="card-body">
+                    <dl class="kv">
+                        <dt>LDAP sign-in</dt><dd><StatusPill Text="@(_overview.Settings.Enabled ? "Enabled" : "Disabled")" /></dd>
+                        <dt>Server</dt><dd class="mono small">@(string.IsNullOrEmpty(_overview.Settings.Host) ? "—" : $"{_overview.Settings.Host}:{_overview.Settings.Port}")</dd>
+                        <dt>Security</dt><dd>@_overview.Settings.Security</dd>
+                        <dt>Bind password</dt><dd>@(_overview.HasBindPassword ? "Stored (encrypted)" : "Not set")</dd>
+                        <dt>Just-in-time</dt><dd>@(_overview.Settings.JitProvisioning ? "On" : "Off")</dd>
+                        <dt>Sync</dt><dd>@(_overview.Settings.SyncEnabled ? $"Every {_overview.Settings.SyncIntervalMinutes} min" : "Manual only")</dd>
+                        <dt>Windows SSO</dt><dd><StatusPill Text="@(_overview.Settings.WindowsAuthEnabled ? "Enabled" : "Disabled")" /></dd>
+                    </dl>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="shield-check" Size="16" /> Security notes</h3></div>
+                <div class="card-body small muted stack" style="gap:10px">
+                    <div><b class="text-primary">Without AD</b> Servora works fully with local accounts – this page is optional.</div>
+                    <div><b class="text-primary">Local accounts</b> are never linked to directory users with the same name.</div>
+                    <div><b class="text-primary">Changing the server</b> or bind account requires re-entering the bind password, so a stored password is never sent elsewhere.</div>
+                    <div><b class="text-primary">Break-glass:</b> the local <span class="mono">admin</span> account can always sign in.</div>
+                </div>
+            </div>
+        </aside>
+    </div>
+}
+
+<Drawer Open="_mappingOpen" OpenChanged="v => _mappingOpen = v" Title="@(_mapping.Id is null ? "Add mapping" : "Edit mapping")" Subtitle="Directory group → Servora role / group">
+    <ChildContent>
+        <div class="stack">
+            <FormField Label="Directory group" Required="true" Help="Full DN (CN=Servora Admins,OU=Groups,DC=corp,DC=example,DC=com) or the group's common name (Servora Admins).">
+                <input class="input mono" @bind="_mapping.DirectoryGroup" placeholder="CN=Servora Admins,OU=Groups,DC=corp,DC=example,DC=com" />
+            </FormField>
+            <FormField Label="Role" Help="Granted to members while they belong to the directory group.">
+                <select class="select" value="@(_mapping.RoleId?.ToString() ?? string.Empty)" @onchange="e => _mapping.RoleId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null">
+                    <option value="">No role</option>
+                    @foreach (var role in _roles)
+                    {
+                        <option value="@role.Id">@role.Label</option>
+                    }
+                </select>
+            </FormField>
+            <FormField Label="Local group" Help="Members are added to this Servora group (directory-managed membership).">
+                <GroupPicker Value="_mapping.GroupId" ValueChanged="v => _mapping.GroupId = v" Placeholder="Search groups…" />
+            </FormField>
+            <FormField Label="Description">
+                <input class="input" @bind="_mapping.Description" />
+            </FormField>
+            <Switch @bind-Value="_mapping.IsActive" Label="Active" />
+            <div class="alert alert-info"><Icon Name="info" Size="18" /><div class="small">Changes apply at the next sign-in or synchronisation of each user. You can only map roles whose permissions you hold.</div></div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _mappingOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveMappingAsync"><Icon Name="save" Size="15" /> Save mapping</button>
+    </Footer>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_confirmDeleteMapping" Title="Delete mapping?" Danger="true" ConfirmText="Delete"
+               Message="@($"Members of '{_pendingMapping?.DirectoryGroup}' lose the mapped role and group at their next sign-in or synchronisation.")"
+               OnConfirm="DeleteMappingAsync" />
+
+@code {
+    private static readonly IReadOnlyList<TabItem> s_tabs =
+    [
+        new("connection", "Connection", "server"),
+        new("users", "Users & attributes", "user"),
+        new("mappings", "Group mappings", "git-branch"),
+        new("sync", "Synchronisation", "refresh"),
+        new("windows", "Windows SSO", "monitor"),
+    ];
+
+    private DirectoryOverview? _overview;
+    private DirectorySettings? _settings;
+    private IReadOnlyList<DirectoryMappingItem>? _mappings;
+    private IReadOnlyList<DirectorySyncSummary>? _history;
+    private IReadOnlyList<RoleOption> _roles = [];
+    private DirectoryTestResult? _testResult;
+    private DirectoryUserPreview? _preview;
+    private DirectorySyncSummary? _lastSync;
+    private DirectoryMappingEdit _mapping = new();
+    private DirectoryMappingItem? _pendingMapping;
+    private string _tab = "connection";
+    private string? _bindPassword;
+    private string? _lookupName;
+    private string? _lookupError;
+    private bool _saving;
+    private bool _testing;
+    private bool _lookingUp;
+    private bool _syncing;
+    private bool _mappingOpen;
+    private bool _confirmDeleteMapping;
+
+    private DirectorySyncSummary? LastRun => _history?.FirstOrDefault() ?? _overview?.LastRun;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _roles = (await Roles.GetOptionsAsync()).Value ?? [];
+        await LoadAsync();
+    }
+
+    private static string SyncTone(DirectorySyncStatus status) => status switch
+    {
+        DirectorySyncStatus.Succeeded => "success",
+        DirectorySyncStatus.CompletedWithWarnings => "warning",
+        DirectorySyncStatus.Failed => "danger",
+        _ => "primary",
+    };
+
+    private async Task LoadAsync()
+    {
+        var overview = await Directory.GetOverviewAsync();
+        if (!overview.Succeeded)
+        {
+            Toasts.Error("Could not load the directory settings", overview.Error);
+            return;
+        }
+
+        _overview = overview.Value;
+        _settings = _overview!.Settings with { };
+        _lastSync ??= _overview.LastRun;
+        _mappings = (await Directory.ListMappingsAsync()).Value;
+        _history = (await Directory.GetSyncHistoryAsync(15)).Value;
+    }
+
+    private void OnSecurityChanged(ChangeEventArgs e)
+    {
+        if (_settings is null || !Enum.TryParse<LdapSecurityMode>(e.Value?.ToString(), out var mode))
+        {
+            return;
+        }
+
+        // Suggest the conventional port when the current one is the default of the previous mode.
+        if (mode == LdapSecurityMode.Ldaps && _settings.Port == 389)
+        {
+            _settings.Port = 636;
+        }
+        else if (mode != LdapSecurityMode.Ldaps && _settings.Port == 636)
+        {
+            _settings.Port = 389;
+        }
+
+        _settings.Security = mode;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var result = await Directory.SaveSettingsAsync(_settings, string.IsNullOrEmpty(_bindPassword) ? null : _bindPassword);
+            if (Toasts.FromResult(result, "Directory settings saved"))
+            {
+                _bindPassword = null;
+                await LoadAsync();
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task TestConnectionAsync()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _testing = true;
+        _testResult = null;
+        try
+        {
+            var result = await Directory.TestConnectionAsync(_settings, string.IsNullOrEmpty(_bindPassword) ? null : _bindPassword);
+            if (result.Succeeded)
+            {
+                _testResult = result.Value;
+            }
+            else
+            {
+                Toasts.Error("Connection test not possible", result.Error);
+            }
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private async Task LookupAsync()
+    {
+        if (_settings is null || string.IsNullOrWhiteSpace(_lookupName))
+        {
+            return;
+        }
+
+        _lookingUp = true;
+        _preview = null;
+        _lookupError = null;
+        try
+        {
+            var result = await Directory.TestUserLookupAsync(_settings, string.IsNullOrEmpty(_bindPassword) ? null : _bindPassword, _lookupName);
+            if (result.Succeeded)
+            {
+                _preview = result.Value;
+            }
+            else
+            {
+                _lookupError = result.Error;
+            }
+        }
+        finally
+        {
+            _lookingUp = false;
+        }
+    }
+
+    private async Task OnLookupKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await LookupAsync();
+        }
+    }
+
+    private async Task SyncNowAsync()
+    {
+        _syncing = true;
+        try
+        {
+            var result = await Directory.SyncNowAsync();
+            if (result.Succeeded)
+            {
+                _lastSync = result.Value;
+                if (result.Value!.Status == DirectorySyncStatus.Failed)
+                {
+                    Toasts.Error("Synchronisation failed", result.Value.Message);
+                }
+                else
+                {
+                    Toasts.Success("Synchronisation finished", result.Value.Message);
+                }
+
+                await LoadAsync();
+            }
+            else
+            {
+                Toasts.Error("Synchronisation not started", result.Error);
+            }
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private void OpenMapping(DirectoryMappingItem? item)
+    {
+        _mapping = item is null
+            ? new DirectoryMappingEdit()
+            : new DirectoryMappingEdit { Id = item.Id, DirectoryGroup = item.DirectoryGroup, RoleId = item.RoleId, GroupId = item.GroupId, Description = item.Description, IsActive = item.IsActive };
+        _mappingOpen = true;
+    }
+
+    private async Task SaveMappingAsync()
+    {
+        _saving = true;
+        try
+        {
+            if (Toasts.FromResult(await Directory.SaveMappingAsync(_mapping), "Mapping saved"))
+            {
+                _mappingOpen = false;
+                _mappings = (await Directory.ListMappingsAsync()).Value;
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void AskDeleteMapping(DirectoryMappingItem item)
+    {
+        _pendingMapping = item;
+        _confirmDeleteMapping = true;
+    }
+
+    private async Task DeleteMappingAsync()
+    {
+        if (_pendingMapping is not null && Toasts.FromResult(await Directory.DeleteMappingAsync(_pendingMapping.Id), "Mapping deleted"))
+        {
+            _mappings = (await Directory.ListMappingsAsync()).Value;
+        }
+    }
+}

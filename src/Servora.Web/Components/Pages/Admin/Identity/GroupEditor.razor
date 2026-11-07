@@ -1,0 +1,467 @@
+@page "/admin/groups/new"
+@page "/admin/groups/{Id:guid}"
+@attribute [RequirePermission(Permissions.Identity.ReadUsers)]
+@* Group record page: settings form, members (add / remove), roles granted by the group and directory mappings. *@
+@inject IGroupAdminService Groups
+@inject IRoleAdminService Roles
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(IsNew ? "New group" : _detail?.Name ?? "Group") · Servora</PageTitle>
+
+@if (_loading)
+{
+    <div class="card"><div class="card-body"><Skeleton Lines="8" Height="18px" /></div></div>
+}
+else if (!IsNew && _detail is null)
+{
+    <div class="card">
+        <EmptyState Icon="users" Title="Group not found" Text="The group does not exist or was deleted.">
+            <a class="btn btn-secondary" href="/admin/groups">Back to groups</a>
+        </EmptyState>
+    </div>
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New group" : _detail!.Name)" Icon="users">
+        <Breadcrumbs>
+            <a href="/admin/groups">Groups</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New" : _detail!.Name)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (IsNew)
+            {
+                <div class="subtitle">Assignment groups receive work, approval groups decide on changes and requests, security groups only grant roles.</div>
+            }
+            else
+            {
+                <div class="flex items-center gap-2 flex-wrap mt-1">
+                    <GroupTypeBadge Type="_detail!.Type" />
+                    <StatusPill Text="@(_detail.IsActive ? "Active" : "Inactive")" />
+                    @if (_detail.Source != UserSource.Local)
+                    {
+                        <SourceBadge Source="_detail.Source" />
+                    }
+                    <span class="small muted">@_detail.MemberCount member@(_detail.MemberCount == 1 ? string.Empty : "s")</span>
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (!IsNew && _canManage)
+            {
+                <button class="btn btn-outline-danger" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete</button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <div class="grid grid-sidebar">
+        <div class="stack">
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="settings" Size="16" /> Group settings</div>
+                        <div class="form-grid">
+                            <FormField Label="Name" Required="true">
+                                <input class="input" @bind="_model.Name" disabled="@(!_canManage)" placeholder="e.g. Service Desk" />
+                            </FormField>
+                            <FormField Label="Type">
+                                <select class="select" @bind="_model.Type" disabled="@(!_canManage)">
+                                    @foreach (var type in Enum.GetValues<GroupType>())
+                                    {
+                                        <option value="@type">@type</option>
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Description" Class="span-2">
+                                <textarea class="textarea" rows="3" @bind="_model.Description" disabled="@(!_canManage)"></textarea>
+                            </FormField>
+                            <FormField Label="Group e-mail" Help="Shared mailbox used for group notifications.">
+                                <input class="input" type="email" @bind="_model.Email" disabled="@(!_canManage)" />
+                            </FormField>
+                            <FormField Label="Manager">
+                                <UserPicker Value="_model.ManagerId" ValueChanged="v => _model.ManagerId = v" Disabled="!_canManage" Placeholder="Search manager…" />
+                            </FormField>
+                            <FormField Label="Parent group" Help="Optional hierarchy, e.g. a regional desk under the global service desk.">
+                                <GroupPicker Value="_model.ParentId" ValueChanged="v => _model.ParentId = v" Disabled="!_canManage" Placeholder="Search parent group…" />
+                            </FormField>
+                            <FormField Label="Status">
+                                <Switch @bind-Value="_model.IsActive" Disabled="!_canManage" Label="@(_model.IsActive ? "Active – grants roles and receives work" : "Inactive – grants no roles")" />
+                            </FormField>
+                        </div>
+                    </div>
+                    @if (_canManage)
+                    {
+                        <div class="form-actions">
+                            <a class="btn btn-secondary" href="/admin/groups">Cancel</a>
+                            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+                                @if (_busy)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                <Icon Name="save" Size="16" /> @(IsNew ? "Create group" : "Save changes")
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (!IsNew)
+            {
+                <Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+                @if (_tab == "members")
+                {
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <h3><Icon Name="users" Size="16" /> Members</h3>
+                                <div class="card-subtitle">Members receive all roles granted by this group.</div>
+                            </div>
+                            @if (_canManage)
+                            {
+                                <div class="flex gap-2 items-center">
+                                    <div style="min-width:260px"><UserPicker Value="_userToAdd" ValueChanged="v => _userToAdd = v" Placeholder="Add a member…" /></div>
+                                    <button class="btn btn-primary" disabled="@(_userToAdd is null || _busy)" @onclick="AddMemberAsync"><Icon Name="user-plus" Size="15" /> Add</button>
+                                </div>
+                            }
+                        </div>
+                        @if (_detail!.Members.Count == 0)
+                        {
+                            <EmptyState Icon="users" Title="No members yet" Text="Add the people who work in this team." />
+                        }
+                        else
+                        {
+                            <div class="table-wrap">
+                                <table class="table">
+                                    <thead><tr><th>Member</th><th>Title</th><th>Source</th><th>Membership</th><th class="text-right"></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var member in _detail.Members)
+                                        {
+                                            <tr class="clickable" @onclick="@(() => Nav.NavigateTo($"/admin/users/{member.UserId}"))">
+                                                <td>
+                                                    <div class="person">
+                                                        <Avatar Name="@member.DisplayName" Size="sm" ShowTitle="false" />
+                                                        <div style="min-width:0">
+                                                            <div class="person-name">@member.DisplayName @(member.UserId == _detail.ManagerId ? "★" : null)</div>
+                                                            <div class="cell-sub">@(member.Email ?? member.UserName)</div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td class="muted">@member.Title</td>
+                                                <td><SourceBadge Source="member.Source" /></td>
+                                                <td>
+                                                    @if (!member.IsActive)
+                                                    {
+                                                        <StatusPill Text="Inactive" />
+                                                    }
+                                                    else if (member.IsFromDirectory)
+                                                    {
+                                                        <span class="pill pill-info no-dot"><Icon Name="id-card" Size="12" /> Directory</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="pill pill-neutral no-dot">Manual</span>
+                                                    }
+                                                </td>
+                                                <td class="text-right" @onclick:stopPropagation="true">
+                                                    @if (_canManage)
+                                                    {
+                                                        <button class="btn btn-ghost btn-sm" @onclick="() => AskRemoveMember(member)"><Icon Name="trash" Size="14" /> Remove</button>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            @if (_detail.MemberCount > _detail.Members.Count)
+                            {
+                                <div class="card-footer small muted">Showing @_detail.Members.Count of @_detail.MemberCount members.</div>
+                            }
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <h3><Icon Name="shield" Size="16" /> Roles granted to members</h3>
+                                <div class="card-subtitle">You can only grant roles whose permissions you hold yourself.</div>
+                            </div>
+                            @if (_canManage)
+                            {
+                                <div class="flex gap-2">
+                                    <select class="select" style="width:auto;min-width:220px" @bind="_roleToAdd">
+                                        <option value="">Select a role…</option>
+                                        @foreach (var role in _roles.Where(r => _detail!.Roles.All(x => x.RoleId != r.Id)))
+                                        {
+                                            <option value="@role.Id">@role.Label</option>
+                                        }
+                                    </select>
+                                    <button class="btn btn-primary" disabled="@(string.IsNullOrEmpty(_roleToAdd) || _busy)" @onclick="AddRoleAsync"><Icon Name="plus" Size="15" /> Grant</button>
+                                </div>
+                            }
+                        </div>
+                        @if (_detail!.Roles.Count == 0)
+                        {
+                            <EmptyState Icon="shield" Title="No roles granted" Text="Members of this group receive no permissions through it." />
+                        }
+                        else
+                        {
+                            <div class="table-wrap">
+                                <table class="table">
+                                    <thead><tr><th>Role</th><th>Technical name</th><th class="num">Permissions</th><th class="text-right"></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var role in _detail.Roles)
+                                        {
+                                            <tr>
+                                                <td class="cell-primary"><a class="cell-link" href="/admin/roles/@role.RoleId">@role.Label</a> @if (role.IsSystem) { <span class="tag" style="margin-left:6px">system</span> }</td>
+                                                <td class="mono small muted">@role.Name</td>
+                                                <td class="num">@role.PermissionCount</td>
+                                                <td class="text-right">
+                                                    @if (_canManage)
+                                                    {
+                                                        <button class="btn btn-ghost btn-sm" @onclick="() => AskRemoveRole(role)"><Icon Name="trash" Size="14" /> Revoke</button>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+
+        <aside class="stack sticky-top">
+            @if (!IsNew)
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="info" Size="16" /> Key facts</h3></div>
+                    <div class="card-body">
+                        <dl class="kv">
+                            <dt>Members</dt><dd>@_detail!.MemberCount</dd>
+                            <dt>Roles</dt><dd>@_detail.Roles.Count</dd>
+                            <dt>Parent</dt>
+                            <dd>
+                                @if (_detail.ParentId is { } parentId)
+                                {
+                                    <a class="cell-link" href="/admin/groups/@parentId">@_detail.ParentName</a>
+                                }
+                                else
+                                {
+                                    <span class="faint">—</span>
+                                }
+                            </dd>
+                            <dt>Created</dt><dd><RelativeTime Value="_detail.CreatedAt" /> <span class="faint small">by @_detail.CreatedBy</span></dd>
+                            <dt>Updated</dt><dd><RelativeTime Value="_detail.UpdatedAt" /> <span class="faint small">by @_detail.UpdatedBy</span></dd>
+                            @if (!string.IsNullOrEmpty(_detail.DistinguishedName))
+                            {
+                                <dt>DN</dt><dd class="mono small">@_detail.DistinguishedName</dd>
+                            }
+                        </dl>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="id-card" Size="16" /> Directory mappings</h3></div>
+                    <div class="card-body">
+                        @if (_detail.DirectoryMappings.Count == 0)
+                        {
+                            <p class="small muted" style="margin:0">No directory group adds members automatically.</p>
+                        }
+                        else
+                        {
+                            <div class="stack" style="gap:8px">
+                                @foreach (var mapping in _detail.DirectoryMappings)
+                                {
+                                    <span class="tag mono truncate" title="@mapping">@mapping</span>
+                                }
+                            </div>
+                        }
+                        <PermissionView Permission="@Permissions.Identity.ManageDirectory">
+                            <a class="btn btn-ghost btn-sm mt-3" href="/admin/directory"><Icon Name="external-link" Size="14" /> Manage mappings</a>
+                        </PermissionView>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="lightbulb" Size="16" /> Group types</h3></div>
+                    <div class="card-body small muted stack" style="gap:10px">
+                        <div><GroupTypeBadge Type="GroupType.Assignment" /> Work (incidents, tasks) can be assigned to the group.</div>
+                        <div><GroupTypeBadge Type="GroupType.Approval" /> Approves changes and requests, e.g. the Change Advisory Board.</div>
+                        <div><GroupTypeBadge Type="GroupType.Security" /> Only grants roles – ideal for directory group mappings.</div>
+                    </div>
+                </div>
+            }
+        </aside>
+    </div>
+}
+
+<ConfirmDialog @bind-Open="_confirmDelete" Title="Delete group?" Danger="true" ConfirmText="Delete group"
+               Message="@($"'{_detail?.Name}' will be deleted with {_detail?.MemberCount} memberships and {_detail?.Roles.Count} role grants. Members lose roles granted by the group. This cannot be undone.")"
+               OnConfirm="DeleteAsync" />
+<ConfirmDialog @bind-Open="_confirmRemoveMember" Title="Remove member?" Danger="true" ConfirmText="Remove"
+               Message="@($"Remove {_pendingMember?.DisplayName} from '{_detail?.Name}'?{(_pendingMember?.IsFromDirectory == true ? " The membership is directory-managed and may be re-added at the next sign-in." : string.Empty)}")"
+               OnConfirm="RemoveMemberAsync" />
+<ConfirmDialog @bind-Open="_confirmRemoveRole" Title="Revoke role?" Danger="true" ConfirmText="Revoke"
+               Message="@($"Members of '{_detail?.Name}' will no longer receive the role '{_pendingRole?.Label}' through this group.")"
+               OnConfirm="RemoveRoleAsync" />
+
+@code {
+    private GroupEditModel _model = new();
+    private GroupDetail? _detail;
+    private IReadOnlyList<RoleOption> _roles = [];
+    private bool _loading = true;
+    private bool _busy;
+    private bool _canManage;
+    private string _tab = "members";
+    private Guid? _userToAdd;
+    private string? _roleToAdd;
+    private bool _confirmDelete;
+    private bool _confirmRemoveMember;
+    private bool _confirmRemoveRole;
+    private GroupMemberItem? _pendingMember;
+    private GroupRoleItem? _pendingRole;
+
+    /// <summary>Gets or sets the group identifier (absent for a new group).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool IsNew => Id is null;
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("members", "Members", "users", _detail?.MemberCount),
+        new("roles", "Roles", "shield", _detail?.Roles.Count),
+    ];
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Identity.ManageGroups);
+        _roles = (await Roles.GetOptionsAsync()).Value ?? [];
+        if (IsNew)
+        {
+            _detail = null;
+            _model = new GroupEditModel();
+        }
+        else
+        {
+            await ReloadAsync();
+        }
+
+        _loading = false;
+    }
+
+    private async Task ReloadAsync()
+    {
+        var result = await Groups.GetAsync(Id!.Value);
+        _detail = result.Value;
+        if (_detail is null)
+        {
+            if (result.ErrorKind != ResultErrorKind.NotFound)
+            {
+                Toasts.Error("Could not load the group", result.Error);
+            }
+
+            return;
+        }
+
+        _model = new GroupEditModel
+        {
+            Name = _detail.Name,
+            Description = _detail.Description,
+            Email = _detail.Email,
+            Type = _detail.Type,
+            ManagerId = _detail.ManagerId,
+            ParentId = _detail.ParentId,
+            IsActive = _detail.IsActive,
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (IsNew)
+            {
+                var created = await Groups.CreateAsync(_model);
+                if (Toasts.FromResult(created, "Group created"))
+                {
+                    Nav.NavigateTo($"/admin/groups/{created.Value}");
+                }
+            }
+            else if (Toasts.FromResult(await Groups.UpdateAsync(Id!.Value, _model, _detail!.Version), "Changes saved"))
+            {
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RunAsync(Func<Task<Result>> action, string success)
+    {
+        _busy = true;
+        try
+        {
+            if (Toasts.FromResult(await action(), success))
+            {
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task AddMemberAsync()
+    {
+        if (_userToAdd is { } userId)
+        {
+            await RunAsync(async () => await Groups.AddMembersAsync(Id!.Value, [userId]), "Member added");
+            _userToAdd = null;
+        }
+    }
+
+    private void AskRemoveMember(GroupMemberItem member)
+    {
+        _pendingMember = member;
+        _confirmRemoveMember = true;
+    }
+
+    private Task RemoveMemberAsync() => _pendingMember is null ? Task.CompletedTask : RunAsync(() => Groups.RemoveMemberAsync(Id!.Value, _pendingMember.UserId), "Member removed");
+
+    private async Task AddRoleAsync()
+    {
+        if (Guid.TryParse(_roleToAdd, out var roleId))
+        {
+            await RunAsync(() => Groups.AddRoleAsync(Id!.Value, roleId), "Role granted");
+            _roleToAdd = null;
+        }
+    }
+
+    private void AskRemoveRole(GroupRoleItem role)
+    {
+        _pendingRole = role;
+        _confirmRemoveRole = true;
+    }
+
+    private Task RemoveRoleAsync() => _pendingRole is null ? Task.CompletedTask : RunAsync(() => Groups.RemoveRoleAsync(Id!.Value, _pendingRole.RoleId), "Role revoked");
+
+    private async Task DeleteAsync()
+    {
+        if (Toasts.FromResult(await Groups.DeleteAsync(Id!.Value), "Group deleted"))
+        {
+            Nav.NavigateTo("/admin/groups");
+        }
+    }
+}
