@@ -38,7 +38,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | ✅ Done |
 | T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | ✅ Done |
 | T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | ✅ Done |
-| T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | 🔨 In Progress |
+| T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ✅ Done |
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
@@ -466,7 +466,7 @@ input validation, orchestrator delegation with a fake provider.
 
 ---
 
-## T-11 Self-Service Portal 🔨 (wave 2 – T-04/T-05/T-06 merged)
+## T-11 Self-Service Portal ✅ (wave 2 – T-04/T-05/T-06 merged)
 
 **Owned paths:** `*/Portal/**`, `Components/Pages/Portal/**`, `Components/Portal/**`, `PortalModule.cs`,
 `PortalEndpoints.cs`, `PortalWebModule.cs`, `Permissions.Portal.cs`, `docs/modules/portal.md`.
@@ -476,6 +476,10 @@ my open requests/incidents, announcements), catalog browsing & item order form r
 issue" (creates incident as caller), my requests & incidents (status timeline, comments as caller via
 `ActivityStream` without work notes), knowledge reader, approvals for approvers. Users with only `portal.access`
 can use it fully; data access restricted to own records.
+
+**Result (validated by orchestrator, merged `c8dcc55`):** `/portal` with own `PortalLayout`, hero search (knowledge, catalog, own items), home with announcements and KPIs, catalog ordering via `ICatalogOrderService`, report an issue (caller = user, KB suggestions, attachments), my items with status timelines, accept/reopen, cancel, comment-only conversation, knowledge reader with votes, approvals, announcements admin (`portal.manage`).
+**Evidence:** 105 files in owned paths; build 0/0; tests 741 passed (34 portal tests proving a `portal.access`-only user cannot see or act on other users' records). Merged main: build 0/0, **1298 tests passed**, smoke healthy.
+**Open follow-ups:** knowledge search/vote logic duplicated (portal users lack `knowledge.read`); portal-only users landing on `/` see access denied until the redirect is added (T-13).
 
 ---
 
@@ -546,6 +550,11 @@ automatically with pre-migration backup (T-15). Document "adding a migration" in
   has to change its password); unauthenticated JSON POST to `/api/v1/table` returned 400 content-type (T-07 report).
 - Migrations must also include the T-07 entities (CustomTable … TaskSla) and the 9 T-10 tables.
 - Migrations must also include the 10 T-08 tables (`automation_*`, `int_*`).
+- Portal (T-11): redirect `portal.access`-only users from `/` to `/portal` (`Home.razor`); nav entry
+  `/portal/admin/announcements` (`portal.manage`); consider `portal.manage` for `config_admin`; let knowledge services
+  accept `portal.access` to remove the duplicated portal search; `portal_announcement` migration.
+- Kernel / T-14: record-level authorization for `IAttachmentService` and `/attachments/{id}` (portal already uses its
+  own checked endpoint).
 - Backup (T-15): generated migrations must keep designer files (`TargetModel`); run one backup → restore round trip
   on SQL Server and PostgreSQL; verify the update path with a real migration (pre-migration backup + auto-restore on a
   failing migration); consider raising the installer `--health-timeout` default; optionally move `AddBackupWeb()` into
@@ -626,3 +635,4 @@ build green, tests pass.
 | 2026-11-07 | T-07, T-10 validated and merged (✅). |
 | 2026-11-07 | T-08 validated and merged (✅). |
 | 2026-11-07 | T-15 validated (incl. orchestrator end-to-end backup/restore on the full schema) and merged (✅). |
+| 2026-11-07 | T-11 validated and merged (✅). All implementation tasks done; next: T-13 integration. |
