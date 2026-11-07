@@ -1,0 +1,74 @@
+@* SLA timers of a task record (from ISlaService) with progress bars, stage and due time. *@
+@using Servora.Application.Sla
+@inject ISlaService Sla
+
+@if (_timers is null)
+{
+    <Skeleton Lines="2" Height="18px" />
+}
+else if (_timers.Count == 0)
+{
+    <div class="flex items-center gap-3">
+        <div class="activity-icon"><Icon Name="timer" Size="15" /></div>
+        <div>
+            <div class="small" style="font-weight:600">No SLA timers</div>
+            <div class="tiny faint">Timers appear when an SLA definition matches this record.</div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="stack" style="gap:14px">
+        @foreach (var timer in _timers)
+        {
+            var percent = Math.Clamp(timer.PercentElapsed, 0, 100);
+            var tone = timer.Breached || timer.PercentElapsed >= 100 ? "danger" : timer.PercentElapsed >= 75 ? "warning" : "success";
+            <div>
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <span class="small truncate" style="font-weight:600">@timer.Name</span>
+                    <StatusPill Text="@(timer.Breached ? "Breached" : Humanize(timer.Stage))" Tone="@(timer.Breached ? "danger" : null)" />
+                </div>
+                <div class="progress @tone"><span style="width:@(percent.ToString("0", System.Globalization.CultureInfo.InvariantCulture))%"></span></div>
+                <div class="flex justify-between tiny faint mt-1">
+                    <span>@timer.PercentElapsed.ToString("0")% elapsed</span>
+                    @if (timer.DueAt is { } due)
+                    {
+                        <span>@(timer.Breached ? "Breached" : "Due") <RelativeTime Value="due" /></span>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<TaskSlaInfo>? _timers;
+    private Guid _loadedFor;
+    private long _loadedRevision = -1;
+
+    /// <summary>Gets or sets the technical table name.</summary>
+    [Parameter, EditorRequired] public string Table { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the record identifier.</summary>
+    [Parameter, EditorRequired] public Guid RecordId { get; set; }
+
+    /// <summary>Gets or sets a value that forces a reload when it changes (for example the record version).</summary>
+    [Parameter] public long Revision { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor != RecordId || _loadedRevision != Revision)
+        {
+            _loadedFor = RecordId;
+            _loadedRevision = Revision;
+            _timers = await Sla.GetForRecordAsync(Table, RecordId);
+        }
+    }
+
+    private static string Humanize(string stage) => stage switch
+    {
+        "InProgress" => "In Progress",
+        _ => stage,
+    };
+}

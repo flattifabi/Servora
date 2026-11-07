@@ -1,0 +1,39 @@
+@* Visual impact × urgency matrix highlighting the resulting priority (PriorityMatrix). *@
+<div>
+    <div style="display:grid;grid-template-columns:72px repeat(3, minmax(0, 1fr));gap:6px;align-items:center">
+        <span class="tiny faint" style="text-align:right;padding-right:4px">Impact ↓</span>
+        @foreach (var urgency in s_urgencies)
+        {
+            <span class="tiny faint text-center" style="font-weight:600">@Short(urgency)</span>
+        }
+        @foreach (var impact in s_impacts)
+        {
+            <span class="tiny faint" style="text-align:right;padding-right:4px;font-weight:600">@ShortImpact(impact)</span>
+            @foreach (var urgency in s_urgencies)
+            {
+                var priority = PriorityMatrix.Calculate(impact, urgency);
+                var selected = impact == Impact && urgency == Urgency;
+                <span class="prio prio-@((int)priority)"
+                      style="justify-content:center;height:30px;padding:0;border-radius:8px;@(selected ? "outline:2px solid var(--primary);outline-offset:2px;box-shadow:var(--glow)" : "opacity:.55")">
+                    P@((int)priority)
+                </span>
+            }
+        }
+    </div>
+    <div class="tiny faint mt-3 text-center">Urgency →</div>
+</div>
+
+@code {
+    private static readonly Impact[] s_impacts = [Impact.High, Impact.Medium, Impact.Low];
+    private static readonly Urgency[] s_urgencies = [Urgency.High, Urgency.Medium, Urgency.Low];
+
+    /// <summary>Gets or sets the selected impact.</summary>
+    [Parameter] public Impact Impact { get; set; }
+
+    /// <summary>Gets or sets the selected urgency.</summary>
+    [Parameter] public Urgency Urgency { get; set; }
+
+    private static string Short(Urgency urgency) => urgency.ToString();
+
+    private static string ShortImpact(Impact impact) => impact.ToString();
+}

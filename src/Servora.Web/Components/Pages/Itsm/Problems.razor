@@ -1,0 +1,238 @@
+@page "/problems"
+@* Problem list: KPI row, saved quick filters, server-side paged/sorted/searchable table and bulk assignment. *@
+@attribute [RequirePermission(Permissions.Problems.Read)]
+@inject IProblemService ProblemService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Problems Â· Servora</PageTitle>
+<PickerLayerFix />
+
+<PageHeader Title="Problems" Subtitle="Find root causes, document known errors and eliminate recurring incidents." Icon="lightbulb">
+    <Actions>
+        <button class="btn btn-secondary" @onclick="RefreshAsync" disabled="@_loading"><Icon Name="refresh" Size="16" /> Refresh</button>
+        <PermissionView Permission="@Permissions.Problems.Create">
+            <a class="btn btn-primary" href="/problems/new"><Icon Name="plus" Size="16" /> New problem</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_stats is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Open problems" Value="@_stats.Open.ToString("N0")" Icon="lightbulb" Tone="primary" Caption="under investigation"
+                  OnClick="() => SetFilterAsync(ProblemQuickFilter.AllActive)" />
+        <StatCard Label="High priority" Value="@_stats.HighPriority.ToString("N0")" Icon="flame" Tone="danger" Caption="P1 and P2"
+                  OnClick="() => SetFilterAsync(ProblemQuickFilter.HighPriority)" />
+        <StatCard Label="Known errors" Value="@_stats.KnownErrors.ToString("N0")" Icon="book-open" Tone="accent" Caption="with documented workaround"
+                  OnClick="() => SetFilterAsync(ProblemQuickFilter.KnownErrors)" />
+        <StatCard Label="Linked open incidents" Value="@_stats.LinkedOpenIncidents.ToString("N0")" Icon="alert-triangle" Tone="info"
+                  Caption="@($"{_stats.Unassigned} problem{(_stats.Unassigned == 1 ? "" : "s")} unassigned")" />
+    }
+</div>
+
+<DataTable TItem="ProblemListItem" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync"
+           OnRowClick="@(r => Nav.NavigateTo($"/problems/{r.Id}"))" Selectable="_canWrite" @bind-SelectedItems="_selected"
+           SearchPlaceholder="Search number, summary, category or coordinatorâ€¦" EmptyIcon="lightbulb"
+           EmptyTitle="@(string.IsNullOrWhiteSpace(_search) ? "No problems here" : "No matching problems")"
+           EmptyText="No problems match the current filter and search.">
+    <Toolbar>
+        <div class="segmented" style="flex-wrap:wrap">
+            @foreach (var (filter, label) in s_filters)
+            {
+                <button class="@(_filter == filter ? "active" : null)" @onclick="() => SetFilterAsync(filter)">@label</button>
+            }
+        </div>
+    </Toolbar>
+    <BulkActions>
+        <button class="btn btn-secondary btn-sm" @onclick="AssignSelectedToMeAsync" disabled="@_bulkBusy"><Icon Name="user-check" Size="14" /> Assign to me</button>
+        <button class="btn btn-primary btn-sm" @onclick="() => _assignOpen = true"><Icon Name="users" Size="14" /> Assignâ€¦</button>
+        <button class="btn btn-ghost btn-sm" @onclick="() => _selected = []">Clear</button>
+    </BulkActions>
+    <EmptyContent>
+        <PermissionView Permission="@Permissions.Problems.Create">
+            <a class="btn btn-primary" href="/problems/new"><Icon Name="plus" Size="16" /> New problem</a>
+        </PermissionView>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="ProblemListItem" Title="Number" SortKey="Number" Width="130px">
+            <Template><span class="cell-link">@context.Number</span></Template>
+        </DataColumn>
+        <DataColumn TItem="ProblemListItem" Title="Priority" SortKey="Priority" Width="115px">
+            <Template><PriorityBadge Priority="context.Priority" /></Template>
+        </DataColumn>
+        <DataColumn TItem="ProblemListItem" Title="State" SortKey="State" Width="170px">
+            <Template><StatusPill Text="@context.StateLabel" /></Template>
+        </DataColumn>
+        <DataColumn TItem="ProblemListItem" Title="Short description" SortKey="ShortDescription">
+            <Template>
+                <span class="cell-primary truncate" style="display:block;max-width:min(400px, 24vw)" title="@context.ShortDescription">@context.ShortDescription</span>
+                <span class="cell-sub">
+                    @(context.Category ?? "Uncategorized")
+                    @if (context.IsKnownError)
+                    {
+                        <span class="pill pill-accent no-dot" style="height:18px;font-size:10.5px;margin-left:6px">Known error</span>
+                    }
+                </span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ProblemListItem" Title="Incidents" Align="right" Width="90px">
+            <Template><span class="badge @(context.IncidentCount > 0 ? "badge-primary" : null)">@context.IncidentCount</span></Template>
+        </DataColumn>
+        <DataColumn TItem="ProblemListItem" Title="Coordinator">
+            <Template>
+                <PersonCell Name="@context.AssignedToName" />
+                @if (context.AssignmentGroupName is not null)
+                {
+                    <span class="cell-sub">@context.AssignmentGroupName</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ProblemListItem" Title="Updated" SortKey="UpdatedAt" Width="120px">
+            <Template><RelativeTime Value="context.UpdatedAt" Class="small muted" /></Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<BulkAssignDialog @bind-Open="_assignOpen" Count="_selected.Count" RecordLabel="problem" OnAssign="AssignSelectedAsync" />
+
+@code {
+    private static readonly (ProblemQuickFilter Filter, string Label)[] s_filters =
+    [
+        (ProblemQuickFilter.AllActive, "All active"),
+        (ProblemQuickFilter.MyOpen, "My open"),
+        (ProblemQuickFilter.Unassigned, "Unassigned"),
+        (ProblemQuickFilter.HighPriority, "P1 / P2"),
+        (ProblemQuickFilter.KnownErrors, "Known errors"),
+        (ProblemQuickFilter.Resolved, "Resolved"),
+        (ProblemQuickFilter.All, "All"),
+    ];
+
+    private PagedResult<ProblemListItem> _page = PagedResult<ProblemListItem>.Empty();
+    private ProblemStats? _stats;
+    private HashSet<ProblemListItem> _selected = [];
+    private ProblemQuickFilter _filter = ProblemQuickFilter.AllActive;
+    private string _sort = "Priority";
+    private bool _desc;
+    private string? _search;
+    private int _pageNumber = 1;
+    private bool _loading = true;
+    private bool _canWrite;
+    private bool _assignOpen;
+    private bool _bulkBusy;
+
+    /// <summary>Gets or sets the initial quick filter from the query string (<c>my</c>, <c>unassigned</c>, <c>high</c>, <c>known</c>, <c>resolved</c>, <c>all</c>).</summary>
+    [SupplyParameterFromQuery(Name = "filter")] public string? FilterParameter { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _filter = FilterParameter?.ToLowerInvariant() switch
+        {
+            "my" => ProblemQuickFilter.MyOpen,
+            "unassigned" => ProblemQuickFilter.Unassigned,
+            "high" => ProblemQuickFilter.HighPriority,
+            "known" => ProblemQuickFilter.KnownErrors,
+            "resolved" => ProblemQuickFilter.Resolved,
+            "all" => ProblemQuickFilter.All,
+            _ => ProblemQuickFilter.AllActive,
+        };
+        _canWrite = await CurrentUser.HasPermissionAsync(Permissions.Problems.Write);
+        await Task.WhenAll(LoadAsync(), LoadStatsAsync());
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await ProblemService.ListAsync(_filter, new PageRequest { Page = _pageNumber, PageSize = 25, SortBy = _sort, SortDescending = _desc, Search = _search });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Could not load problems", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        var result = await ProblemService.GetStatsAsync();
+        if (result.Succeeded)
+        {
+            _stats = result.Value;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadAsync();
+        await LoadStatsAsync();
+    }
+
+    private async Task SetFilterAsync(ProblemQuickFilter filter)
+    {
+        _filter = filter;
+        _pageNumber = 1;
+        _selected = [];
+        await LoadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task<bool> AssignSelectedAsync(Guid? groupId, Guid? userId)
+    {
+        var result = await ProblemService.AssignAsync(_selected.Select(s => s.Id).ToList(), groupId, userId);
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Assignment failed", result.Error);
+            return false;
+        }
+
+        Toasts.Success($"{result.Value} problem{(result.Value == 1 ? "" : "s")} assigned");
+        _selected = [];
+        await RefreshAsync();
+        return true;
+    }
+
+    private async Task AssignSelectedToMeAsync()
+    {
+        if (CurrentUser.UserId is not { } me)
+        {
+            return;
+        }
+
+        _bulkBusy = true;
+        await AssignSelectedAsync(null, me);
+        _bulkBusy = false;
+    }
+}

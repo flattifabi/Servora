@@ -1,4 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
+using Servora.Application.Common;
+using Servora.Application.Events;
+using Servora.Application.Itsm;
+using Servora.Infrastructure.Itsm;
 
 namespace Servora.Infrastructure.Modules;
 
@@ -11,6 +15,11 @@ public static class ItsmModule
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddItsmModule(this IServiceCollection services)
     {
+        services.AddScoped<IIncidentService, IncidentService>();
+        services.AddScoped<IProblemService, ProblemService>();
+        services.AddScoped<IMyWorkService, MyWorkService>();
+        services.AddScoped<IRecordSavingHook, ItsmSavingHook>();
+        services.AddScoped<IDataSeeder, ItsmDataSeeder>();
         return services;
     }
 }

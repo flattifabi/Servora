@@ -1,0 +1,17 @@
+@* Avatar plus name of a person for table cells and cards; renders a muted placeholder when no person is set. *@
+@if (string.IsNullOrEmpty(Name))
+{
+    <span class="faint">@Placeholder</span>
+}
+else
+{
+    <span class="person"><Avatar Name="@Name" Size="sm" ShowTitle="false" /><span class="person-name">@Name</span></span>
+}
+
+@code {
+    /// <summary>Gets or sets the person's display name.</summary>
+    [Parameter] public string? Name { get; set; }
+
+    /// <summary>Gets or sets the text shown when no person is set.</summary>
+    [Parameter] public string Placeholder { get; set; } = "Unassigned";
+}
