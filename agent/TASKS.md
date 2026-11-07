@@ -24,17 +24,17 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | ID | Task | Owner (agent) | Depends on | Status |
 |----|------|---------------|-----------|--------|
 | T-01 | Kernel: solution, architecture, persistence, auth pipeline, design system, contracts | Orchestrator | – | ✅ Done |
-| T-02 | Identity & Access: users, groups, roles, LDAP/AD, Windows SSO, profile | Identity Agent | T-01 | ⏳ Planned |
-| T-03 | Setup wizard, system settings, branding, SMTP e-mail, secrets admin, database admin | Configuration Agent | T-01 | ⏳ Planned |
-| T-04 | Incident & Problem Management + "My Work" workspace | ITSM Agent | T-01 | ⏳ Planned |
-| T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | ⏳ Planned |
-| T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | ⏳ Planned |
-| T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | ⏳ Planned |
-| T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | ⏳ Planned |
-| T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | ⏳ Planned |
-| T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | ⏳ Planned |
+| T-02 | Identity & Access: users, groups, roles, LDAP/AD, Windows SSO, profile | Identity Agent | T-01 | 🔨 In Progress |
+| T-03 | Setup wizard, system settings, branding, SMTP e-mail, secrets admin, database admin | Configuration Agent | T-01 | 🔨 In Progress |
+| T-04 | Incident & Problem Management + "My Work" workspace | ITSM Agent | T-01 | 🔨 In Progress |
+| T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | 🔨 In Progress |
+| T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | 🔨 In Progress |
+| T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | 🔨 In Progress |
+| T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | 🔨 In Progress |
+| T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | 🔨 In Progress |
+| T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | 🔨 In Progress |
 | T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ⏳ Planned |
-| T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ⏳ Planned |
+| T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | 🔨 In Progress |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
 
@@ -76,7 +76,7 @@ admin/admin → forced password change (policy rejects weak / user-name password
 
 ---
 
-## T-02 Identity & Access ⏳
+## T-02 Identity & Access 🔨
 
 **Owned paths:** `*/Identity/**` (Domain additions, Application, Infrastructure, Configurations), `Components/Pages/Admin/Identity/**`,
 `Components/Pages/Account/**` (may restyle/extend Login, ChangePassword), `Components/Pages/Profile/**`,
@@ -114,7 +114,7 @@ unit tests for LDAP filter escaping, group→role mapping and escalation guard.
 
 ---
 
-## T-03 Setup, Configuration & Secrets ⏳
+## T-03 Setup, Configuration & Secrets 🔨
 
 **Owned paths:** `*/Configuration/**`, `Components/Pages/Setup/**`, `Components/Pages/Admin/Configuration/**`,
 `src/Servora.Web/Setup/**` (except `SetupGuardMiddleware`, `SetupState` which you may extend), `ConfigurationModule.cs`,
@@ -148,7 +148,7 @@ unit tests for settings typing/defaults and SMTP option validation.
 
 ---
 
-## T-04 Incident & Problem Management + My Work ⏳
+## T-04 Incident & Problem Management + My Work 🔨
 
 **Owned paths:** `*/Itsm/**` (excluding kernel files `TaskRecord.cs`, `Priority*.cs`, `Impact.cs`, `Urgency.cs`,
 `TaskRecordConfigurationExtensions.cs` – read-only), `Components/Pages/Itsm/**`, `Components/Itsm/**`,
@@ -180,7 +180,7 @@ calculated; activity/attachments work; unit tests for state machine and priority
 
 ---
 
-## T-05 Change, Catalog, Requests & Approvals ⏳
+## T-05 Change, Catalog, Requests & Approvals 🔨
 
 **Owned paths:** `*/Changes/**`, `*/Catalog/**`, `*/Approvals/**` (Application `Approvals` contract files are
 read-only, implement them), `Components/Pages/Changes/**`, `Components/Pages/Catalog/**`,
@@ -215,7 +215,7 @@ state machine and variable validation.
 
 ---
 
-## T-06 Knowledge, CMDB & Assets ⏳
+## T-06 Knowledge, CMDB & Assets 🔨
 
 **Owned paths:** `*/Knowledge/**`, `*/Cmdb/**` (kernel `ConfigurationItem.cs`, `OperationalStatus.cs` may be
 extended additively), `*/Assets/**`, `Components/Pages/Knowledge/**`, `Components/Pages/Cmdb/**`,
@@ -248,7 +248,7 @@ navigates, asset lifecycle works; unit tests for Markdown renderer safety, graph
 
 ---
 
-## T-07 Platform Engine ⏳
+## T-07 Platform Engine 🔨
 
 **Owned paths:** `*/Platform/**` (replace kernel `ReflectionTableRegistry` usage by registering your own registry;
 you may subclass it), `*/Conditions/**` implementations (contract files read-only), `*/Tables/**` implementations,
@@ -291,7 +291,7 @@ rendered; comprehensive unit tests for the condition evaluator (in-memory and EF
 
 ---
 
-## T-08 Automation & Integration ⏳
+## T-08 Automation & Integration 🔨
 
 **Owned paths:** `*/Automation/**` (contract files read-only, implement them), `*/Integration/**` (contracts
 read-only), `Components/Pages/Automation/**`, `Components/Pages/Integration/**`, `Components/Automation/**`,
@@ -333,7 +333,7 @@ engine step sequencing.
 
 ---
 
-## T-09 Observability & Analytics ⏳
+## T-09 Observability & Analytics 🔨
 
 **Owned paths:** `*/Observability/**` (kernel `AuditService`, `AuditEvent` may be extended additively),
 `*/Analytics/**`, `Components/Pages/Observability/**`, `Components/Pages/Analytics/**`, `Components/Analytics/**`,
@@ -367,7 +367,7 @@ builder saves and renders a grouped chart.
 
 ---
 
-## T-10 API, MCP & AI ⏳
+## T-10 API, MCP & AI 🔨
 
 **Owned paths:** `*/Api/**`, `*/Mcp/**`, `*/Ai/**`, `Components/Pages/Api/**`, `Components/Pages/Mcp/**`,
 `Components/Pages/Ai/**`, `Components/Ai/**`, `ApiMcpAiModule.cs`, `ApiMcpAiEndpoints.cs`, `ApiMcpAiWebModule.cs`,
@@ -427,7 +427,7 @@ can use it fully; data access restricted to own records.
 
 ---
 
-## T-12 Installer, Windows Service & Release ⏳
+## T-12 Installer, Windows Service & Release 🔨
 
 **Owned paths:** `src/Servora.Installer/**` (new console project – request orchestrator to add it to the solution
 if you cannot), `.github/workflows/**`, `build/**`, `docs/operations/**`.
