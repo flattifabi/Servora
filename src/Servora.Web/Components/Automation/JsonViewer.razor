@@ -1,0 +1,20 @@
+@* Read-only, pretty-printed JSON / text viewer with a bounded height. Content is rendered as encoded text. *@
+@if (string.IsNullOrWhiteSpace(Json))
+{
+    <div class="small faint">@Placeholder</div>
+}
+else
+{
+    <pre class="json-viewer" style="max-height:@MaxHeight">@FlowUi.PrettyJson(Json)</pre>
+}
+
+@code {
+    /// <summary>Gets or sets the JSON or text to show.</summary>
+    [Parameter] public string? Json { get; set; }
+
+    /// <summary>Gets or sets the maximum height (CSS).</summary>
+    [Parameter] public string MaxHeight { get; set; } = "320px";
+
+    /// <summary>Gets or sets the placeholder for empty content.</summary>
+    [Parameter] public string Placeholder { get; set; } = "No data";
+}

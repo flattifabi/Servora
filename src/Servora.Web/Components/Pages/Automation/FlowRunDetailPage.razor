@@ -1,0 +1,253 @@
+@page "/automation/runs/{Id:guid}"
+@* Run detail: status header with cancel / re-run, state flow, step timeline with redacted snapshots, run data and key facts. *@
+@attribute [RequirePermission(Permissions.Automation.Read)]
+@implements IDisposable
+@inject IFlowRunService RunService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Run @FlowUi.Short(Id) · Servora</PageTitle>
+
+@if (_notFound)
+{
+    <div class="card">
+        <EmptyState Icon="search" Title="Run not found" Text="The run does not exist or was removed by the retention policy.">
+            <a class="btn btn-primary" href="/automation/runs"><Icon Name="arrow-left" Size="16" /> Back to executions</a>
+        </EmptyState>
+    </div>
+}
+else if (_detail is null)
+{
+    <div class="stack">
+        <Skeleton Lines="2" Height="28px" Width="40%" />
+        <div class="grid grid-sidebar">
+            <div class="card card-body"><Skeleton Lines="8" Height="44px" /></div>
+            <div class="card card-body"><Skeleton Lines="8" Height="18px" /></div>
+        </div>
+    </div>
+}
+else
+{
+    var run = _detail.Run;
+    var active = run.Status is FlowRunStatus.Queued or FlowRunStatus.Running or FlowRunStatus.Waiting;
+    <PageHeader Title="@run.FlowName" Icon="activity">
+        <Breadcrumbs>
+            <a href="/automation/runs">Executions</a> <Icon Name="chevron-right" Size="12" /> <span class="mono">@FlowUi.Short(run.Id)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            <div class="flex items-center gap-2 flex-wrap mt-1">
+                <StatusPill Text="@run.Status.ToString()" Tone="@FlowUi.RunTone(run.Status)" />
+                @if (run.IsTest)
+                {
+                    <span class="pill pill-purple no-dot">Test run</span>
+                }
+                @if (active)
+                {
+                    <span class="live-dot" title="Refreshing automatically"></span>
+                }
+                <span class="tag"><Icon Name="@FlowUi.TriggerIcon(run.TriggerType)" Size="12" /> @FlowUi.TriggerLabel(run.TriggerType)</span>
+                <span class="small faint">@(run.TriggerSummary) · queued <RelativeTime Value="run.QueuedAt" /></span>
+            </div>
+        </SubtitleContent>
+        <Actions>
+            <a class="btn btn-ghost" href="/automation/flows/@run.FlowId"><Icon Name="workflow" Size="16" /> Open flow</a>
+            @if (active && _canCancel)
+            {
+                <button class="btn btn-outline-danger" disabled="@(_busy || _detail.CancelRequested)" @onclick="() => _cancelOpen = true">
+                    <Icon Name="x-circle" Size="16" /> @(_detail.CancelRequested ? "Cancelling…" : "Cancel run")
+                </button>
+            }
+            @if (!active && _canExecute)
+            {
+                <button class="btn btn-primary" disabled="@_busy" @onclick="RerunAsync"><Icon Name="refresh" Size="16" /> Run again</button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <div class="card card-body mb-6">
+        <StateFlow States="StatesFor(run.Status)" Current="@run.Status.ToString()" />
+    </div>
+
+    @if (run.Error is { } error)
+    {
+        <div class="alert alert-danger mb-6"><Icon Name="alert-octagon" Size="18" /><div><strong>The run failed.</strong> @error</div></div>
+    }
+    else if (run.Status == FlowRunStatus.Waiting)
+    {
+        <div class="alert alert-warning mb-6">
+            <Icon Name="pause" Size="18" />
+            <div><strong>Waiting.</strong> @run.WaitReason @if (_detail.ResumeAt is { } resume) { <span> · next check <RelativeTime Value="resume" /></span> }</div>
+        </div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="card">
+            <div class="card-header" style="padding-bottom:0">
+                <Tabs Items="s_tabs" @bind-ActiveKey="_tab" />
+            </div>
+            <div class="card-body">
+                @if (_tab == "timeline")
+                {
+                    <RunTimeline Steps="_detail.Steps" EmptyText="@(active ? "The run is queued and will start shortly." : "The run finished without executing steps.")" />
+                }
+                else
+                {
+                    <p class="small muted mb-3">Trigger data, inputs, variables and step outputs available to data pills. Sensitive values are masked.</p>
+                    <JsonViewer Json="@_detail.ContextJson" MaxHeight="620px" />
+                }
+            </div>
+        </div>
+
+        <div class="sticky-top stack">
+            <div class="card">
+                <div class="card-header"><h3>Key facts</h3></div>
+                <div class="card-body">
+                    <dl class="kv">
+                        <dt>Run id</dt><dd class="mono small">@run.Id</dd>
+                        <dt>Flow version</dt><dd><span class="tag mono">@($"v{_detail.FlowVersion}")</span></dd>
+                        <dt>Started by</dt><dd>@(_detail.StartedBy ?? "system")</dd>
+                        <dt>Queued</dt><dd><RelativeTime Value="run.QueuedAt" /></dd>
+                        <dt>Started</dt><dd><RelativeTime Value="run.StartedAt" Placeholder="Not yet" /></dd>
+                        <dt>Completed</dt><dd><RelativeTime Value="run.CompletedAt" Placeholder="—" /></dd>
+                        <dt>Duration</dt><dd class="mono">@FlowUi.Duration(run.DurationMs)</dd>
+                        <dt>Steps executed</dt><dd>@run.StepCount</dd>
+                    </dl>
+                </div>
+            </div>
+            @if (_detail.ParentRunId is not null || _detail.ChildRunIds.Count > 0)
+            {
+                <div class="card">
+                    <div class="card-header"><h3>Related runs</h3></div>
+                    <div class="card-body stack">
+                        @if (_detail.ParentRunId is { } parent)
+                        {
+                            <a class="related-run" href="/automation/runs/@parent"><Icon Name="arrow-up-right" Size="14" /> Parent run <span class="mono faint">@FlowUi.Short(parent)</span></a>
+                        }
+                        @foreach (var child in _detail.ChildRunIds)
+                        {
+                            <a class="related-run" href="/automation/runs/@child"><Icon Name="workflow" Size="14" /> Sub-flow run <span class="mono faint">@FlowUi.Short(child)</span></a>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <ConfirmDialog @bind-Open="_cancelOpen" Title="Cancel this run?" Danger="true" ConfirmText="Cancel run" CancelText="Keep running" OnConfirm="CancelAsync"
+                   Message="The current step is stopped, waiting sub-flows are cancelled and remaining steps are skipped. Completed steps are not rolled back." />
+}
+
+@code {
+    private static readonly IReadOnlyList<TabItem> s_tabs = [new("timeline", "Timeline", "activity"), new("data", "Run data", "braces")];
+
+    private FlowRunDetail? _detail;
+    private CancellationTokenSource? _refreshCts;
+    private string _tab = "timeline";
+    private bool _notFound;
+    private bool _canCancel;
+    private bool _canExecute;
+    private bool _cancelOpen;
+    private bool _busy;
+
+    /// <summary>Gets or sets the run identifier from the route.</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _canExecute = await CurrentUser.HasPermissionAsync(Permissions.Automation.Execute);
+        _canCancel = _canExecute || await CurrentUser.HasPermissionAsync(Permissions.Automation.Manage);
+        _detail = null;
+        _notFound = false;
+        await LoadAsync();
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = new CancellationTokenSource();
+        _ = RefreshLoopAsync(_refreshCts.Token);
+    }
+
+    private static IReadOnlyList<string> StatesFor(FlowRunStatus status) => status switch
+    {
+        FlowRunStatus.Failed => ["Queued", "Running", "Failed"],
+        FlowRunStatus.Cancelled => ["Queued", "Running", "Cancelled"],
+        FlowRunStatus.Waiting => ["Queued", "Running", "Waiting", "Succeeded"],
+        _ => ["Queued", "Running", "Succeeded"],
+    };
+
+    private async Task LoadAsync()
+    {
+        var result = await RunService.GetAsync(Id);
+        if (result.Succeeded)
+        {
+            _detail = result.Value;
+        }
+        else
+        {
+            _notFound = result.ErrorKind == ResultErrorKind.NotFound;
+            if (!_notFound)
+            {
+                Toasts.Error("Could not load the run", result.Error);
+            }
+        }
+    }
+
+    private async Task RefreshLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_detail is null || _detail.Run.Status is FlowRunStatus.Succeeded or FlowRunStatus.Failed or FlowRunStatus.Cancelled)
+                {
+                    continue;
+                }
+
+                await InvokeAsync(async () =>
+                {
+                    await LoadAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Page left.
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        _busy = true;
+        var result = await RunService.CancelAsync(Id);
+        _busy = false;
+        if (Toasts.FromResult(result, "Cancellation requested"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task RerunAsync()
+    {
+        _busy = true;
+        var result = await RunService.RerunAsync(Id);
+        _busy = false;
+        if (result.Succeeded)
+        {
+            Toasts.Success("New run started");
+            Nav.NavigateTo($"/automation/runs/{result.Value}");
+        }
+        else
+        {
+            Toasts.Error("Could not start the run", result.Error);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+    }
+}

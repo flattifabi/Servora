@@ -1,0 +1,80 @@
+@* Vertical timeline of the step executions of a flow run with expandable (redacted) input / output snapshots. *@
+@if (Steps.Count == 0)
+{
+    <EmptyState Icon="activity" Title="No steps executed yet" Text="@EmptyText" />
+}
+else
+{
+    <ol class="run-timeline">
+        @foreach (var step in Steps)
+        {
+            var expanded = _expanded.Contains(step.Id);
+            <li class="rt-item rt-@FlowUi.StepTone(step.Status)" @key="step.Id">
+                <div class="rt-marker">
+                    @if (step.Status == FlowStepStatus.Running)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="@FlowUi.StepIcon(step.Status)" Size="14" StrokeWidth="2.6" />
+                    }
+                </div>
+                <div class="rt-body">
+                    <button type="button" class="rt-head" @onclick="() => Toggle(step.Id)">
+                        <span class="rt-title">
+                            <span class="rt-seq">#@step.Sequence</span>
+                            <span class="rt-name">@step.StepName</span>
+                            <span class="tag mono">@step.ActionType</span>
+                            @if (step.Attempt > 1)
+                            {
+                                <span class="pill pill-warning no-dot">attempt @step.Attempt</span>
+                            }
+                        </span>
+                        <span class="rt-meta">
+                            <StatusPill Text="@step.Status.ToString()" Tone="@FlowUi.StepTone(step.Status)" />
+                            <span class="mono small muted">@FlowUi.Duration(step.DurationMs)</span>
+                            <Icon Name="@(expanded ? "chevron-up" : "chevron-down")" Size="14" Class="faint" />
+                        </span>
+                    </button>
+                    @if (!string.IsNullOrEmpty(step.Error))
+                    {
+                        <div class="alert alert-danger mt-2"><Icon Name="alert-circle" Size="16" /><div>@step.Error</div></div>
+                    }
+                    @if (expanded)
+                    {
+                        <div class="rt-details">
+                            <div>
+                                <div class="eyebrow mb-2">Input</div>
+                                <JsonViewer Json="@step.InputJson" MaxHeight="260px" Placeholder="No input" />
+                            </div>
+                            <div>
+                                <div class="eyebrow mb-2">Output</div>
+                                <JsonViewer Json="@step.OutputJson" MaxHeight="260px" Placeholder="No output" />
+                            </div>
+                            <div class="small faint span-all">Started <RelativeTime Value="step.StartedAt" /> · key <span class="mono">@step.StepKey</span> · sensitive values are masked.</div>
+                        </div>
+                    }
+                </div>
+            </li>
+        }
+    </ol>
+}
+
+@code {
+    private readonly HashSet<Guid> _expanded = [];
+
+    /// <summary>Gets or sets the step executions.</summary>
+    [Parameter] public IReadOnlyList<FlowRunStepItem> Steps { get; set; } = [];
+
+    /// <summary>Gets or sets the empty state text.</summary>
+    [Parameter] public string EmptyText { get; set; } = "The run is queued and will start shortly.";
+
+    private void Toggle(Guid id)
+    {
+        if (!_expanded.Remove(id))
+        {
+            _expanded.Add(id);
+        }
+    }
+}

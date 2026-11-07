@@ -1,0 +1,209 @@
+@page "/automation/schedules"
+@* Scheduled jobs: scheduled flows, data source polls and imports with next-run preview, enable switch, run now and a cron playground. *@
+@attribute [RequirePermission(Permissions.Automation.Read)]
+@inject IScheduleService ScheduleService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Schedules · Servora</PageTitle>
+
+<PageHeader Title="Schedules" Subtitle="Time-based flows, data source polls and scheduled imports – all in one timeline." Icon="calendar-clock">
+    <Actions>
+        <button class="btn btn-secondary" disabled="@_loading" @onclick="LoadAsync"><Icon Name="refresh" Size="16" /> Refresh</button>
+        <button class="btn btn-secondary" @onclick="() => _playgroundOpen = true"><Icon Name="code" Size="16" /> Cron playground</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_items is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Scheduled jobs" Value="@_items.Count.ToString("N0")" Icon="calendar-clock" Tone="primary" Caption="@($"{_items.Count(i => i.Enabled)} enabled")" OnClick="() => SetKind(null)" />
+        <StatCard Label="Flows" Value="@_items.Count(i => i.Kind == ScheduleKind.Flow).ToString("N0")" Icon="workflow" Tone="accent" Caption="cron triggered" OnClick="() => SetKind(ScheduleKind.Flow)" />
+        <StatCard Label="Data source polls" Value="@_items.Count(i => i.Kind == ScheduleKind.DataSourcePoll).ToString("N0")" Icon="plug" Tone="info" Caption="change detection" OnClick="() => SetKind(ScheduleKind.DataSourcePoll)" />
+        <StatCard Label="Due in 24 h" Value="@_items.Count(i => i.Enabled && i.NextRunAt is { } n && n <= DateTimeOffset.UtcNow.AddHours(24)).ToString("N0")" Icon="timer" Tone="warning"
+                  Caption="@(NextDue is { } next ? $"next: {next.Name}" : "nothing due")" />
+    }
+</div>
+
+<DataTable TItem="ScheduleItem" Items="Visible" TotalCount="Visible.Count" PageSize="Math.Max(1, Visible.Count)" Loading="_loading" ShowPager="false"
+           OnSearch="term => _search = term" SearchPlaceholder="Search jobs…" EmptyIcon="calendar-clock" EmptyTitle="No scheduled jobs"
+           EmptyText="Create a flow with a schedule or data source poll trigger, or schedule an import set.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_kind is null ? "active" : null)" @onclick="() => SetKind(null)">All</button>
+            <button class="@(_kind == ScheduleKind.Flow ? "active" : null)" @onclick="() => SetKind(ScheduleKind.Flow)">Flows</button>
+            <button class="@(_kind == ScheduleKind.DataSourcePoll ? "active" : null)" @onclick="() => SetKind(ScheduleKind.DataSourcePoll)">Polls</button>
+            <button class="@(_kind == ScheduleKind.Import ? "active" : null)" @onclick="() => SetKind(ScheduleKind.Import)">Imports</button>
+        </div>
+    </Toolbar>
+    <EmptyContent>
+        <a class="btn btn-primary" href="/automation/flows"><Icon Name="workflow" Size="16" /> Open Flow Designer</a>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="ScheduleItem" Title="Job">
+            <Template>
+                <a class="flex items-center gap-3" href="@context.Link" style="text-decoration:none">
+                    <span class="sched-icon sched-@context.Kind.ToString().ToLowerInvariant()"><Icon Name="@KindIcon(context.Kind)" Size="16" /></span>
+                    <span>
+                        <span class="cell-primary">@context.Name</span>
+                        <span class="cell-sub">@KindLabel(context.Kind)</span>
+                    </span>
+                </a>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ScheduleItem" Title="Schedule" Width="200px">
+            <Template>
+                <span class="mono small">@(context.CronExpression ?? "—")</span>
+                <span class="cell-sub">@(string.IsNullOrWhiteSpace(context.TimeZoneId) ? "UTC" : context.TimeZoneId)</span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ScheduleItem" Title="Next run" Width="210px">
+            <Template>
+                @if (context.Enabled && context.NextRunAt is { } next)
+                {
+                    <span class="small">@next.ToLocalTime().ToString("ddd, d MMM · HH:mm")</span>
+                    <span class="cell-sub"><RelativeTime Value="next" /></span>
+                }
+                else
+                {
+                    <span class="faint small">@(context.Enabled ? "Not scheduled" : "Paused")</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ScheduleItem" Title="Last run" Width="130px">
+            <Template><RelativeTime Value="context.LastRunAt" Placeholder="Never" Class="small muted" /></Template>
+        </DataColumn>
+        <DataColumn TItem="ScheduleItem" Title="Enabled" Width="100px">
+            <Template>
+                <span @onclick:stopPropagation="true">
+                    <Switch Value="context.Enabled" ValueChanged="v => SetEnabledAsync(context, v)" Disabled="@(!CanManage(context.Kind) || _busy)" />
+                </span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ScheduleItem" Title="" Width="120px" Align="right">
+            <Template>
+                @if (CanRun(context.Kind))
+                {
+                    <button class="btn btn-secondary btn-sm" disabled="@_busy" @onclick:stopPropagation="true" @onclick="() => RunNowAsync(context)"><Icon Name="play" Size="13" /> Run now</button>
+                }
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<Modal @bind-Open="_playgroundOpen" Title="Cron playground" Subtitle="@PlaygroundHelp" Icon="code" Size="lg">
+    <ChildContent>
+        <CronPreview @bind-Expression="_playgroundCron" @bind-TimeZoneId="_playgroundZone" />
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-primary" @onclick="() => _playgroundOpen = false">Close</button>
+    </Footer>
+</Modal>
+
+@code {
+    private const string PlaygroundHelp = "Five fields: minute hour day-of-month month day-of-week. Supports *, lists, ranges, steps, names (MON, JAN) and macros such as @daily.";
+
+    private IReadOnlyList<ScheduleItem>? _items;
+    private ScheduleKind? _kind;
+    private string? _search;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _playgroundOpen;
+    private string? _playgroundCron = "0 8 * * 1-5";
+    private string? _playgroundZone;
+    private bool _canManageFlows;
+    private bool _canExecuteFlows;
+    private bool _canManageImports;
+
+    private IReadOnlyList<ScheduleItem> Visible => (_items ?? [])
+        .Where(i => _kind is null || i.Kind == _kind)
+        .Where(i => string.IsNullOrWhiteSpace(_search) || i.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || (i.CronExpression ?? string.Empty).Contains(_search, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    private ScheduleItem? NextDue => _items?.Where(i => i.Enabled && i.NextRunAt is not null).OrderBy(i => i.NextRunAt).FirstOrDefault();
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canManageFlows = await CurrentUser.HasPermissionAsync(Permissions.Automation.Manage);
+        _canExecuteFlows = await CurrentUser.HasPermissionAsync(Permissions.Automation.Execute);
+        _canManageImports = await CurrentUser.HasPermissionAsync(Permissions.Integration.ManageImports);
+        await LoadAsync();
+    }
+
+    private static string KindIcon(ScheduleKind kind) => kind switch
+    {
+        ScheduleKind.DataSourcePoll => "plug",
+        ScheduleKind.Import => "download",
+        _ => "workflow",
+    };
+
+    private static string KindLabel(ScheduleKind kind) => kind switch
+    {
+        ScheduleKind.DataSourcePoll => "Flow · data source poll",
+        ScheduleKind.Import => "Import set",
+        _ => "Flow · schedule",
+    };
+
+    private bool CanManage(ScheduleKind kind) => kind == ScheduleKind.Import ? _canManageImports : _canManageFlows;
+
+    private bool CanRun(ScheduleKind kind) => kind == ScheduleKind.Import ? _canManageImports : _canExecuteFlows;
+
+    private void SetKind(ScheduleKind? kind) => _kind = kind;
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await ScheduleService.ListAsync();
+        if (result.Succeeded)
+        {
+            _items = result.Value;
+        }
+        else
+        {
+            _items = [];
+            Toasts.Error("Could not load schedules", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task SetEnabledAsync(ScheduleItem item, bool enabled)
+    {
+        _busy = true;
+        var result = await ScheduleService.SetEnabledAsync(item.Kind, item.Id, enabled);
+        _busy = false;
+        Toasts.FromResult(result, enabled ? $"'{item.Name}' enabled" : $"'{item.Name}' paused");
+        await LoadAsync();
+    }
+
+    private async Task RunNowAsync(ScheduleItem item)
+    {
+        _busy = true;
+        var result = await ScheduleService.RunNowAsync(item.Kind, item.Id);
+        _busy = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Could not start the job", result.Error);
+            return;
+        }
+
+        Toasts.Success($"'{item.Name}' started");
+        if (item.Kind != ScheduleKind.Import)
+        {
+            Nav.NavigateTo($"/automation/runs/{result.Value}");
+        }
+        else
+        {
+            await LoadAsync();
+        }
+    }
+}

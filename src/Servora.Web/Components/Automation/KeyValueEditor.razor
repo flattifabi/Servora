@@ -1,0 +1,102 @@
+@* Name / value pair editor stored as a JSON object (parameters, sub-flow inputs). Values may contain data pills. *@
+<div class="kv-editor">
+    @foreach (var row in _rows)
+    {
+        <div class="kv-row" @key="row">
+            <input class="input mono" list="@_listId" placeholder="name" value="@row.Name" @onchange="e => SetName(row, e.Value?.ToString())" />
+            @if (ShowPills)
+            {
+                <PillInput Value="@row.Value" ValueChanged="v => SetValue(row, v)" Pills="Pills" Placeholder="value or {{data pill}}" />
+            }
+            else
+            {
+                <input class="input" placeholder="value" value="@row.Value" @onchange="e => SetValue(row, e.Value?.ToString())" />
+            }
+            <button type="button" class="icon-btn" title="Remove" @onclick="() => Remove(row)"><Icon Name="x" Size="15" /></button>
+        </div>
+    }
+    <datalist id="@_listId">
+        @foreach (var name in SuggestedNames)
+        {
+            <option value="@name"></option>
+        }
+    </datalist>
+    <div class="flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-ghost btn-sm" @onclick="() => Add(null)"><Icon Name="plus" Size="14" /> Add</button>
+        @foreach (var name in SuggestedNames.Where(n => _rows.All(r => !string.Equals(r.Name, n, StringComparison.OrdinalIgnoreCase))))
+        {
+            <button type="button" class="tag kv-suggest" @onclick="() => Add(name)"><Icon Name="plus" Size="12" /> @name</button>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string _listId = "kv-" + Guid.NewGuid().ToString("N")[..8];
+    private List<KeyValueRow> _rows = [];
+    private string? _lastJson;
+
+    /// <summary>Gets or sets the JSON object value.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Raised when the value changes.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets suggested names (for example the endpoint's parameters).</summary>
+    [Parameter] public IReadOnlyList<string> SuggestedNames { get; set; } = [];
+
+    /// <summary>Gets or sets the available data pills.</summary>
+    [Parameter] public IReadOnlyList<FlowDataPill> Pills { get; set; } = [];
+
+    /// <summary>Gets or sets a value indicating whether values support data pills.</summary>
+    [Parameter] public bool ShowPills { get; set; } = true;
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Value == _lastJson)
+        {
+            return;
+        }
+
+        _lastJson = Value;
+        var parsed = FlowJson.TryDeserialize<Dictionary<string, string?>>(Value) ?? [];
+        _rows = parsed.Select(p => new KeyValueRow { Name = p.Key, Value = p.Value }).ToList();
+    }
+
+    private Task Add(string? name)
+    {
+        _rows.Add(new KeyValueRow { Name = name ?? string.Empty });
+        return NotifyAsync();
+    }
+
+    private Task Remove(KeyValueRow row)
+    {
+        _rows.Remove(row);
+        return NotifyAsync();
+    }
+
+    private Task SetName(KeyValueRow row, string? name)
+    {
+        row.Name = name?.Trim() ?? string.Empty;
+        return NotifyAsync();
+    }
+
+    private Task SetValue(KeyValueRow row, string? value)
+    {
+        row.Value = value;
+        return NotifyAsync();
+    }
+
+    private async Task NotifyAsync()
+    {
+        var dictionary = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in _rows.Where(r => !string.IsNullOrWhiteSpace(r.Name)))
+        {
+            dictionary[row.Name] = row.Value;
+        }
+
+        _lastJson = dictionary.Count == 0 && _rows.Count == 0 ? null : JsonSerializer.Serialize(dictionary);
+        Value = _lastJson;
+        await ValueChanged.InvokeAsync(_lastJson);
+    }
+}

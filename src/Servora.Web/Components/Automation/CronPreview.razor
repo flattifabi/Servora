@@ -1,0 +1,107 @@
+@* Cron expression and time zone editor with live validation and a preview of the next occurrences. *@
+@inject IScheduleService Schedules
+
+<div class="form-grid">
+    <FormField Label="Cron expression" Required="true" Help="minute hour day-of-month month day-of-week · e.g. */15 * * * * or 0 8 * * 1-5" Error="@_error">
+        <input class="input mono" value="@Expression" @oninput="OnExpressionChanged" placeholder="0 8 * * 1-5" disabled="@Disabled" />
+    </FormField>
+    <FormField Label="Time zone" Help="IANA or Windows id; empty = UTC">
+        <input class="input" list="cron-timezones" value="@TimeZoneId" @onchange="OnZoneChanged" placeholder="UTC" disabled="@Disabled" />
+        <datalist id="cron-timezones">
+            @foreach (var zone in s_zones)
+            {
+                <option value="@zone"></option>
+            }
+        </datalist>
+    </FormField>
+</div>
+<div class="flex flex-wrap gap-2 mt-3">
+    @foreach (var preset in s_presets)
+    {
+        <button type="button" class="tag cron-preset" disabled="@Disabled" @onclick="() => ApplyPreset(preset.Expression)">@preset.Label</button>
+    }
+</div>
+@if (_next.Count > 0)
+{
+    <div class="cron-next mt-4">
+        <div class="eyebrow mb-2">Next runs</div>
+        @foreach (var occurrence in _next)
+        {
+            <div class="cron-occurrence">
+                <Icon Name="calendar-clock" Size="14" />
+                <span>@occurrence.ToLocalTime().ToString("ddd, d MMM yyyy · HH:mm")</span>
+                <RelativeTime Value="occurrence" Class="faint small" />
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private static readonly (string Label, string Expression)[] s_presets =
+    [
+        ("Every 15 min", "*/15 * * * *"),
+        ("Hourly", "0 * * * *"),
+        ("Daily 08:00", "0 8 * * *"),
+        ("Weekdays 07:00", "0 7 * * 1-5"),
+        ("Mondays 09:00", "0 9 * * MON"),
+        ("Monthly (1st)", "0 6 1 * *"),
+    ];
+
+    private static readonly string[] s_zones = ["UTC", "Europe/Berlin", "Europe/Zurich", "Europe/London", "America/New_York", "America/Chicago", "America/Los_Angeles", "Asia/Tokyo", "Asia/Singapore", "Australia/Sydney"];
+
+    private IReadOnlyList<DateTimeOffset> _next = [];
+    private string? _error;
+
+    /// <summary>Gets or sets the cron expression.</summary>
+    [Parameter] public string? Expression { get; set; }
+
+    /// <summary>Raised when the expression changes.</summary>
+    [Parameter] public EventCallback<string?> ExpressionChanged { get; set; }
+
+    /// <summary>Gets or sets the time zone identifier.</summary>
+    [Parameter] public string? TimeZoneId { get; set; }
+
+    /// <summary>Raised when the time zone changes.</summary>
+    [Parameter] public EventCallback<string?> TimeZoneIdChanged { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether editing is disabled.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet() => Refresh();
+
+    private async Task OnExpressionChanged(ChangeEventArgs e)
+    {
+        Expression = e.Value?.ToString();
+        Refresh();
+        await ExpressionChanged.InvokeAsync(Expression);
+    }
+
+    private async Task OnZoneChanged(ChangeEventArgs e)
+    {
+        TimeZoneId = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString();
+        Refresh();
+        await TimeZoneIdChanged.InvokeAsync(TimeZoneId);
+    }
+
+    private async Task ApplyPreset(string expression)
+    {
+        Expression = expression;
+        Refresh();
+        await ExpressionChanged.InvokeAsync(Expression);
+    }
+
+    private void Refresh()
+    {
+        if (string.IsNullOrWhiteSpace(Expression))
+        {
+            _next = [];
+            _error = null;
+            return;
+        }
+
+        var preview = Schedules.Preview(Expression, TimeZoneId, 5);
+        _next = preview.Succeeded ? preview.Value! : [];
+        _error = preview.Succeeded ? null : preview.Error;
+    }
+}

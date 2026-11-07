@@ -1,0 +1,5 @@
+.pill-input { position: relative; display: flex; align-items: stretch; }
+.pill-input .input, .pill-input .textarea { padding-right: 42px; width: 100%; }
+.pill-input .mono-pills { font-family: var(--font-mono); font-size: 12.5px; }
+.pill-btn { all: unset; position: absolute; right: 6px; top: 6px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--r-xs); color: var(--accent); background: var(--accent-soft); cursor: pointer; transition: transform var(--speed) var(--ease); }
+.pill-btn:hover { transform: scale(1.06); }

@@ -1,0 +1,8 @@
+.scp { display: flex; flex-direction: column; gap: 4px; }
+.scp-head { display: flex; gap: 14px; align-items: center; padding: 14px; margin-bottom: 8px; border-radius: var(--r); background: linear-gradient(135deg, var(--tone-soft), transparent 70%); border: 1px solid var(--border); }
+.scp-icon { flex: none; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--tone); background: var(--tone-soft); border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent); }
+.scp-type { font-weight: 700; font-size: 15px; color: var(--text); }
+.min-w-0 { min-width: 0; }
+.scp-outputs { display: flex; flex-direction: column; gap: 6px; }
+.scp-output { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.scp-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-full); font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border: 1px solid rgba(34, 211, 238, .3); }

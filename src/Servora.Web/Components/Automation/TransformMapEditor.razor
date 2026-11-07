@@ -1,0 +1,109 @@
+@* Transform map editor of an import set: source column / JSON path → target field with transform and default; marks the coalesce field. *@
+
+<div class="tm">
+    <div class="tm-head">
+        <span>Source column / JSON path</span>
+        <span></span>
+        <span>Target field</span>
+        <span>Transform</span>
+        <span>Default</span>
+        <span></span>
+    </div>
+    @if (Maps.Count == 0)
+    {
+        <div class="tm-empty">No mappings yet. Add one per @(SourceSuggestions.Count > 0 ? "target field or map all detected columns automatically." : "target field.")</div>
+    }
+    @foreach (var map in Maps)
+    {
+        var coalesce = !string.IsNullOrEmpty(map.TargetField) && string.Equals(map.TargetField, CoalesceField, StringComparison.OrdinalIgnoreCase);
+        <div class="tm-row @(coalesce ? "coalesce" : null)" @key="map">
+            <input class="input mono" list="@_listId" placeholder="email or address.city" value="@map.SourcePath" disabled="@ReadOnly" @onchange="e => Set(() => map.SourcePath = e.Value?.ToString()?.Trim() ?? string.Empty)" />
+            <span class="tm-arrow"><Icon Name="arrow-right" Size="14" /></span>
+            <select class="select" value="@map.TargetField" disabled="@ReadOnly" @onchange="e => Set(() => map.TargetField = e.Value?.ToString() ?? string.Empty)">
+                <option value="">— Field —</option>
+                @foreach (var field in TargetFields.Where(f => !f.IsReadOnly).OrderBy(f => f.Label))
+                {
+                    <option value="@field.Name">@(field.IsRequired ? field.Label + " *" : field.Label)</option>
+                }
+            </select>
+            <select class="select" value="@map.Transform" disabled="@ReadOnly" @onchange="e => Set(() => map.Transform = TransformOf(e))">
+                <option value="none">None</option>
+                <option value="trim">Trim</option>
+                <option value="upper">UPPER</option>
+                <option value="lower">lower</option>
+            </select>
+            <input class="input" placeholder="—" value="@map.DefaultValue" disabled="@ReadOnly" @onchange="e => Set(() => map.DefaultValue = string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString())" />
+            <span class="flex items-center gap-1">
+                @if (coalesce)
+                {
+                    <span class="pill pill-accent no-dot" title="Coalesce key: existing records with this value are updated">Key</span>
+                }
+                @if (!ReadOnly)
+                {
+                    <button type="button" class="icon-btn" title="Remove" @onclick="() => Set(() => Maps.Remove(map))"><Icon Name="x" Size="15" /></button>
+                }
+            </span>
+        </div>
+    }
+    <datalist id="@_listId">
+        @foreach (var source in SourceSuggestions)
+        {
+            <option value="@source"></option>
+        }
+    </datalist>
+    @if (!ReadOnly)
+    {
+        <div class="flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => Set(() => Maps.Add(new ImportFieldMap()))"><Icon Name="plus" Size="14" /> Add mapping</button>
+            @if (SourceSuggestions.Count > 0)
+            {
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="AutoMap"><Icon Name="wand" Size="14" /> Auto-map matching names</button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private readonly string _listId = "tm-" + Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>Gets or sets the field maps (edited in place).</summary>
+    [Parameter, EditorRequired] public List<ImportFieldMap> Maps { get; set; } = [];
+
+    /// <summary>Gets or sets the fields of the target table.</summary>
+    [Parameter] public IReadOnlyList<FieldDefinition> TargetFields { get; set; } = [];
+
+    /// <summary>Gets or sets detected source columns (CSV headers or JSON property names).</summary>
+    [Parameter] public IReadOnlyList<string> SourceSuggestions { get; set; } = [];
+
+    /// <summary>Gets or sets the coalesce field (highlighted).</summary>
+    [Parameter] public string? CoalesceField { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether editing is disabled.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Raised after a mapping changed.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private static string TransformOf(ChangeEventArgs e) => e.Value?.ToString() is { Length: > 0 } value ? value : "none";
+
+    private Task Set(Action change)
+    {
+        change();
+        return OnChanged.InvokeAsync();
+    }
+
+    private Task AutoMap() => Set(() =>
+    {
+        foreach (var source in SourceSuggestions)
+        {
+            var normalized = Normalize(source);
+            var field = TargetFields.FirstOrDefault(f => !f.IsReadOnly && (Normalize(f.Name) == normalized || Normalize(f.Label) == normalized));
+            if (field is not null && Maps.All(m => !string.Equals(m.TargetField, field.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                Maps.Add(new ImportFieldMap { SourcePath = source, TargetField = field.Name });
+            }
+        }
+    });
+
+    private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+}

@@ -1,0 +1,135 @@
+@* Editor of a data pill condition ("If" step): AND/OR over rules of the form {{left}} operator {{right}}. Stored as JSON. *@
+
+<div class="fce">
+    <div class="flex items-center gap-3 flex-wrap">
+        <div class="segmented">
+            <button type="button" class="@(!_condition.MatchAny ? "active" : null)" @onclick="() => SetMatchAnyAsync(false)">All (AND)</button>
+            <button type="button" class="@(_condition.MatchAny ? "active" : null)" @onclick="() => SetMatchAnyAsync(true)">Any (OR)</button>
+        </div>
+        <span class="small faint">of the following rules must match</span>
+    </div>
+
+    @if (_condition.Rules.Count == 0)
+    {
+        <div class="fce-empty">No rules yet – the condition is always <strong>true</strong>.</div>
+    }
+
+    @foreach (var rule in _condition.Rules)
+    {
+        <div class="fce-row" @key="rule">
+            <PillInput Value="@rule.Left" ValueChanged="v => SetLeftAsync(rule, v)" Pills="Pills" Placeholder="{{trigger.record.Priority}}" />
+            <select class="select" value="@rule.Operator" @onchange="e => SetOperatorAsync(rule, e.Value?.ToString())">
+                @foreach (var op in Enum.GetValues<FlowConditionOperator>())
+                {
+                    <option value="@op">@OperatorLabel(op)</option>
+                }
+            </select>
+            @if (rule.Operator is FlowConditionOperator.IsEmpty or FlowConditionOperator.IsNotEmpty)
+            {
+                <span class="small faint fce-none">no value needed</span>
+            }
+            else
+            {
+                <PillInput Value="@rule.Right" ValueChanged="v => SetRightAsync(rule, v)" Pills="Pills" Placeholder="@(rule.Operator is FlowConditionOperator.In or FlowConditionOperator.NotIn ? "a, b, c" : "value or {{pill}}")" />
+            }
+            <button type="button" class="icon-btn" title="Remove rule" @onclick="() => RemoveAsync(rule)"><Icon Name="x" Size="15" /></button>
+        </div>
+    }
+
+    <div>
+        <button type="button" class="btn btn-ghost btn-sm" @onclick="AddAsync"><Icon Name="plus" Size="14" /> Add rule</button>
+    </div>
+</div>
+
+@code {
+    private FlowCondition _condition = new();
+    private string? _lastJson;
+
+    /// <summary>Gets or sets the condition as JSON.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Raised when the condition changes.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets the available data pills.</summary>
+    [Parameter] public IReadOnlyList<FlowDataPill> Pills { get; set; } = [];
+
+    /// <summary>Gets the display label of an operator.</summary>
+    /// <param name="op">The operator.</param>
+    /// <returns>The label.</returns>
+    public static string OperatorLabel(FlowConditionOperator op) => op switch
+    {
+        FlowConditionOperator.Equals => "is",
+        FlowConditionOperator.NotEquals => "is not",
+        FlowConditionOperator.Contains => "contains",
+        FlowConditionOperator.NotContains => "does not contain",
+        FlowConditionOperator.StartsWith => "starts with",
+        FlowConditionOperator.EndsWith => "ends with",
+        FlowConditionOperator.GreaterThan => "greater than",
+        FlowConditionOperator.GreaterOrEqual => "greater or equal",
+        FlowConditionOperator.LessThan => "less than",
+        FlowConditionOperator.LessOrEqual => "less or equal",
+        FlowConditionOperator.IsEmpty => "is empty",
+        FlowConditionOperator.IsNotEmpty => "is not empty",
+        FlowConditionOperator.In => "is one of",
+        FlowConditionOperator.NotIn => "is none of",
+        _ => op.ToString(),
+    };
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Value != _lastJson)
+        {
+            _condition = FlowJson.TryDeserialize<FlowCondition>(Value) ?? new FlowCondition();
+            _lastJson = Value;
+        }
+    }
+
+    private Task SetMatchAnyAsync(bool any)
+    {
+        _condition.MatchAny = any;
+        return NotifyAsync();
+    }
+
+    private Task AddAsync()
+    {
+        _condition.Rules.Add(new FlowConditionRule());
+        return NotifyAsync();
+    }
+
+    private Task RemoveAsync(FlowConditionRule rule)
+    {
+        _condition.Rules.Remove(rule);
+        return NotifyAsync();
+    }
+
+    private Task SetLeftAsync(FlowConditionRule rule, string? value)
+    {
+        rule.Left = value ?? string.Empty;
+        return NotifyAsync();
+    }
+
+    private Task SetRightAsync(FlowConditionRule rule, string? value)
+    {
+        rule.Right = value;
+        return NotifyAsync();
+    }
+
+    private Task SetOperatorAsync(FlowConditionRule rule, string? value)
+    {
+        if (Enum.TryParse<FlowConditionOperator>(value, out var op))
+        {
+            rule.Operator = op;
+        }
+
+        return NotifyAsync();
+    }
+
+    private async Task NotifyAsync()
+    {
+        _lastJson = FlowJson.Serialize(_condition);
+        Value = _lastJson;
+        await ValueChanged.InvokeAsync(_lastJson);
+    }
+}

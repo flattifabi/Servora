@@ -1,0 +1,45 @@
+@* Searchable dropdown of data pills grouped by source (trigger, inputs, variables, earlier steps). *@
+<div class="click-catcher" @onclick="() => OnClose.InvokeAsync()"></div>
+<div class="pill-menu" @onclick:stopPropagation="true">
+    <div class="pill-menu-search input-icon">
+        <Icon Name="search" Size="14" />
+        <input class="input" placeholder="Search data pills…" @bind="_term" @bind:event="oninput" @bind:after="StateHasChanged" />
+    </div>
+    <div class="pill-menu-list">
+        @{
+            var filtered = Filtered();
+        }
+        @if (filtered.Count == 0)
+        {
+            <div class="pill-menu-empty">No data pills available here.</div>
+        }
+        @foreach (var group in filtered.GroupBy(p => p.Group))
+        {
+            <div class="pill-menu-group">@group.Key</div>
+            @foreach (var pill in group)
+            {
+                <button type="button" class="pill-menu-item" @onclick="() => OnPick.InvokeAsync(pill)">
+                    <span class="data-pill">@pill.Label</span>
+                    <span class="mono tiny faint truncate">@pill.Path</span>
+                </button>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private string _term = string.Empty;
+
+    /// <summary>Gets or sets the available pills.</summary>
+    [Parameter] public IReadOnlyList<FlowDataPill> Pills { get; set; } = [];
+
+    /// <summary>Raised when a pill is picked.</summary>
+    [Parameter] public EventCallback<FlowDataPill> OnPick { get; set; }
+
+    /// <summary>Raised when the menu should close.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<FlowDataPill> Filtered() => string.IsNullOrWhiteSpace(_term)
+        ? Pills.Take(300).ToList()
+        : Pills.Where(p => p.Label.Contains(_term, StringComparison.OrdinalIgnoreCase) || p.Path.Contains(_term, StringComparison.OrdinalIgnoreCase) || p.Group.Contains(_term, StringComparison.OrdinalIgnoreCase)).Take(300).ToList();
+}

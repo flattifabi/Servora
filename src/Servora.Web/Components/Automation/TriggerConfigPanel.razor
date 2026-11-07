@@ -1,0 +1,174 @@
+@* Trigger configuration of a flow (drawer body): trigger type cards plus record, schedule, webhook and poll settings. *@
+@inject NavigationManager Nav
+
+<div class="tcp">
+    <div class="form-section">
+        <div class="form-section-title">What starts this flow?</div>
+        <div class="tcp-types">
+            @foreach (var type in Enum.GetValues<FlowTriggerType>())
+            {
+                <button type="button" class="tcp-type @(Model.TriggerType == type ? "active" : null)" disabled="@ReadOnly" @onclick="() => SetAsync(() => Model.TriggerType = type)">
+                    <Icon Name="@FlowUi.TriggerIcon(type)" Size="18" />
+                    <span>@FlowUi.TriggerLabel(type)</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    @switch (Model.TriggerType)
+    {
+        case FlowTriggerType.RecordCreated:
+        case FlowTriggerType.RecordUpdated:
+        case FlowTriggerType.RecordCreatedOrUpdated:
+            <div class="form-section">
+                <div class="form-section-title">Record trigger</div>
+                <FormField Label="Table" Required="true" Help="The flow starts when a record of this table is saved.">
+                    <select class="select" value="@Model.TriggerTable" disabled="@ReadOnly" @onchange="OnTableChanged">
+                        <option value="">— Select a table —</option>
+                        @foreach (var table in Tables.OrderBy(t => t.Label))
+                        {
+                            <option value="@table.Name">@table.Label (@table.Name)</option>
+                        }
+                    </select>
+                </FormField>
+                @if (TriggerFields.Count > 0)
+                {
+                    <div class="mt-4">
+                        <div class="eyebrow mb-2">Run only when</div>
+                        <ConditionBuilder Condition="Model.TriggerCondition" ConditionChanged="g => SetAsync(() => Model.TriggerCondition = g)" Fields="TriggerFields"
+                                          AllowChangeOperators="Model.TriggerType != FlowTriggerType.RecordCreated" />
+                        <div class="tiny faint mt-2">Leave empty to run for every matching change. Changes made by this flow never re-trigger it.</div>
+                    </div>
+                }
+            </div>
+            break;
+        case FlowTriggerType.Schedule:
+            <div class="form-section">
+                <div class="form-section-title">Schedule</div>
+                <CronPreview Expression="@Model.CronExpression" ExpressionChanged="v => SetAsync(() => Model.CronExpression = v)"
+                             TimeZoneId="@Model.TimeZoneId" TimeZoneIdChanged="v => SetAsync(() => Model.TimeZoneId = v)" Disabled="ReadOnly" />
+            </div>
+            break;
+        case FlowTriggerType.Webhook:
+            <div class="form-section">
+                <div class="form-section-title">Inbound webhook</div>
+                <FormField Label="Endpoint (POST)">
+                    <div class="code-block">
+                        <input class="input mono" readonly value="@WebhookUrl" />
+                    </div>
+                </FormField>
+                <div class="alert @(Model.HasWebhookSecret ? "alert-success" : "alert-warning") mt-3">
+                    <Icon Name="@(Model.HasWebhookSecret ? "shield-check" : "alert-triangle")" Size="16" />
+                    <div>
+                        @if (Model.HasWebhookSecret)
+                        {
+                            <span>A secret is configured. Callers send it in <span class="mono">X-Servora-Webhook-Secret</span> or sign the body with HMAC-SHA256 in <span class="mono">X-Servora-Signature: sha256=&lt;hex&gt;</span>.</span>
+                        }
+                        else
+                        {
+                            <span>No secret yet – the webhook rejects every call until you generate one.</span>
+                        }
+                    </div>
+                </div>
+                @if (!ReadOnly && OnRotateSecret.HasDelegate)
+                {
+                    <button type="button" class="btn btn-secondary btn-sm mt-3" @onclick="() => OnRotateSecret.InvokeAsync()"><Icon Name="key" Size="14" /> @(Model.HasWebhookSecret ? "Rotate secret" : "Generate secret")</button>
+                }
+                <div class="tiny faint mt-3">Body: JSON up to 256 KB, available as <span class="mono">{{trigger.body.…}}</span>. Optional <span class="mono">Idempotency-Key</span> header prevents duplicate runs. 60 calls per minute per client.</div>
+            </div>
+            break;
+        case FlowTriggerType.DataSourcePoll:
+            <div class="form-section">
+                <div class="form-section-title">Data source poll</div>
+                <div class="form-grid">
+                    <FormField Label="Data source" Required="true">
+                        <select class="select" value="@Model.PollDataSourceId" disabled="@ReadOnly" @onchange="e => SetAsync(() => { Model.PollDataSourceId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null; Model.PollEndpointKey = null; })">
+                            <option value="">— Select —</option>
+                            @foreach (var source in DataSources.OrderBy(s => s.Name))
+                            {
+                                <option value="@source.Id">@source.Name</option>
+                            }
+                        </select>
+                    </FormField>
+                    <FormField Label="Endpoint" Required="true">
+                        <select class="select" value="@Model.PollEndpointKey" disabled="@(ReadOnly || PollSource is null)" @onchange="e => SetAsync(() => Model.PollEndpointKey = e.Value?.ToString())">
+                            <option value="">— Select —</option>
+                            @if (PollSource is not null)
+                            {
+                                @foreach (var endpoint in PollSource.Endpoints)
+                                {
+                                    <option value="@endpoint.Key">@endpoint.Method @endpoint.Name</option>
+                                }
+                            }
+                        </select>
+                    </FormField>
+                </div>
+                <div class="mt-4">
+                    <div class="eyebrow mb-2">Parameters</div>
+                    <KeyValueEditor Value="@PollParametersJson" ValueChanged="SetPollParametersAsync" ShowPills="false"
+                                    SuggestedNames="@(PollSource?.Endpoints.FirstOrDefault(e => e.Key == Model.PollEndpointKey)?.Parameters ?? [])" />
+                </div>
+                <div class="mt-4">
+                    <Switch Value="Model.PollOnlyOnChange" ValueChanged="v => SetAsync(() => Model.PollOnlyOnChange = v)" Label="Start the flow only when the response changed" Disabled="ReadOnly" />
+                </div>
+                <div class="mt-4">
+                    <CronPreview Expression="@Model.CronExpression" ExpressionChanged="v => SetAsync(() => Model.CronExpression = v)"
+                                 TimeZoneId="@Model.TimeZoneId" TimeZoneIdChanged="v => SetAsync(() => Model.TimeZoneId = v)" Disabled="ReadOnly" />
+                </div>
+            </div>
+            break;
+        default:
+            <div class="alert alert-info">
+                <Icon Name="info" Size="16" />
+                <div>Manual flows are started from the Flow Designer, business rules, the REST API, MCP tools or as a sub-flow of another flow. Define inputs in the flow properties.</div>
+            </div>
+            break;
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the flow definition (edited in place).</summary>
+    [Parameter, EditorRequired] public FlowDefinitionModel Model { get; set; } = default!;
+
+    /// <summary>Gets or sets the tables of the instance.</summary>
+    [Parameter] public IReadOnlyList<TableDefinition> Tables { get; set; } = [];
+
+    /// <summary>Gets or sets the accessible data sources.</summary>
+    [Parameter] public IReadOnlyList<DataSourceSummary> DataSources { get; set; } = [];
+
+    /// <summary>Gets or sets a value indicating whether editing is disabled.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Raised after the trigger changed.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>Raised when the user wants to create or rotate the webhook secret.</summary>
+    [Parameter] public EventCallback OnRotateSecret { get; set; }
+
+    private IReadOnlyList<FieldDefinition> TriggerFields =>
+        Tables.FirstOrDefault(t => string.Equals(t.Name, Model.TriggerTable, StringComparison.OrdinalIgnoreCase))?.Fields ?? [];
+
+    private DataSourceSummary? PollSource => DataSources.FirstOrDefault(s => s.Id == Model.PollDataSourceId);
+
+    private string WebhookUrl => Nav.BaseUri.TrimEnd('/') + Model.WebhookPath;
+
+    private string? PollParametersJson => Model.PollParameters.Count == 0 ? null : JsonSerializer.Serialize(Model.PollParameters);
+
+    private Task OnTableChanged(ChangeEventArgs e) => SetAsync(() =>
+    {
+        Model.TriggerTable = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString();
+        Model.TriggerCondition = new ConditionGroup();
+    });
+
+    private Task SetPollParametersAsync(string? json) => SetAsync(() =>
+    {
+        var parsed = FlowJson.TryDeserialize<Dictionary<string, string?>>(json) ?? [];
+        Model.PollParameters = parsed.Where(p => p.Value is not null).ToDictionary(p => p.Key, p => p.Value!, StringComparer.OrdinalIgnoreCase);
+    });
+
+    private Task SetAsync(Action change)
+    {
+        change();
+        return OnChanged.InvokeAsync();
+    }
+}

@@ -1,0 +1,160 @@
+@* "Test endpoint" panel: parameter values, SSRF-guarded execution and a response viewer (status, timing, headers, body, mapped part). *@
+@inject IDataSourceAdminService DataSources
+
+<div class="stack">
+    <div class="et-request">
+        <span class="et-method">@Endpoint.Method</span>
+        <span class="mono truncate">@BaseUrl.TrimEnd('/')@Endpoint.PathTemplate</span>
+    </div>
+
+    @if (Endpoint.Parameters.Count > 0)
+    {
+        <div class="form-grid">
+            @foreach (var parameter in Endpoint.Parameters)
+            {
+                <FormField Label="@parameter.Name" Required="parameter.Required" Help="@($"{parameter.Location} · {parameter.Type}{(parameter.Description is null ? null : " · " + parameter.Description)}")" @key="parameter.Name">
+                    @if (parameter.Type == EndpointParameterType.Enum && parameter.AllowedValues.Count > 0)
+                    {
+                        <select class="select" value="@Value(parameter)" @onchange="e => _values[parameter.Name] = e.Value?.ToString() ?? string.Empty">
+                            <option value="">—</option>
+                            @foreach (var option in parameter.AllowedValues)
+                            {
+                                <option value="@option">@option</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="input" value="@Value(parameter)" placeholder="@parameter.DefaultValue" @onchange="e => _values[parameter.Name] = e.Value?.ToString() ?? string.Empty" />
+                    }
+                </FormField>
+            }
+        </div>
+    }
+
+    <div class="flex items-center gap-3">
+        <button class="btn btn-primary" disabled="@(_running || !CanExecute)" @onclick="SendAsync">
+            @if (_running) { <span class="spinner"></span> } else { <Icon Name="send" Size="16" /> }
+            Send request
+        </button>
+        @if (!CanExecute)
+        {
+            <span class="small faint">Requires the permission to execute data sources.</span>
+        }
+        else
+        {
+            <span class="small faint">Private, loopback and metadata addresses are blocked unless allow-listed.</span>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger"><Icon Name="shield" Size="16" /><div>@_error</div></div>
+    }
+
+    @if (_result is { } r)
+    {
+        <div class="et-response">
+            <div class="et-stats">
+                <span class="pill @(r.StatusCode is >= 200 and < 300 ? "pill-success" : r.StatusCode >= 400 ? "pill-danger" : "pill-warning")">HTTP @r.StatusCode</span>
+                <span class="tag"><Icon Name="timer" Size="12" /> @FlowUi.Duration(r.DurationMs)</span>
+                <span class="tag"><Icon Name="hard-drive" Size="12" /> @FlowUi.Bytes(r.ResponseBytes)</span>
+                @if (r.Attempts > 1)
+                {
+                    <span class="tag"><Icon Name="refresh" Size="12" /> @r.Attempts attempts</span>
+                }
+                @if (r.Truncated)
+                {
+                    <span class="pill pill-warning no-dot">Truncated at size limit</span>
+                }
+                @if (r.Host is not null)
+                {
+                    <span class="tag mono">@r.Host</span>
+                }
+                @if (r.ContentType is not null)
+                {
+                    <span class="tag mono">@r.ContentType</span>
+                }
+            </div>
+            <Tabs Items="Tabs()" @bind-ActiveKey="_tab" />
+            <div class="mt-3">
+                @switch (_tab)
+                {
+                    case "mapped":
+                        <JsonViewer Json="@r.MappedBody" MaxHeight="420px" Placeholder="The response path matched nothing." />
+                        break;
+                    case "headers":
+                        @if (r.Headers.Count == 0)
+                        {
+                            <div class="small faint">No whitelisted headers in the response.</div>
+                        }
+                        else
+                        {
+                            <dl class="kv">
+                                @foreach (var header in r.Headers)
+                                {
+                                    <dt class="mono small">@header.Key</dt>
+                                    <dd class="mono small">@header.Value</dd>
+                                }
+                            </dl>
+                        }
+
+                        break;
+                    default:
+                        <JsonViewer Json="@r.Body" MaxHeight="420px" Placeholder="Empty response body." />
+                        break;
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
+    private DataSourceInvocationResult? _result;
+    private string? _error;
+    private string _tab = "body";
+    private bool _running;
+
+    /// <summary>Gets or sets the data source identifier.</summary>
+    [Parameter, EditorRequired] public Guid DataSourceId { get; set; }
+
+    /// <summary>Gets or sets the base URL of the data source (display only).</summary>
+    [Parameter] public string BaseUrl { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the saved endpoint to test.</summary>
+    [Parameter, EditorRequired] public DataSourceEndpointModel Endpoint { get; set; } = default!;
+
+    /// <summary>Gets or sets a value indicating whether the current user may execute data sources.</summary>
+    [Parameter] public bool CanExecute { get; set; }
+
+    /// <summary>Raised after a request was executed (to refresh the execution log).</summary>
+    [Parameter] public EventCallback OnExecuted { get; set; }
+
+    private string Value(EndpointParameterDefinition parameter) => _values.GetValueOrDefault(parameter.Name) ?? string.Empty;
+
+    private IReadOnlyList<TabItem> Tabs() => _result?.MappedBody is null
+        ? [new("body", "Body", "file-text"), new("headers", "Headers", "list")]
+        : [new("body", "Body", "file-text"), new("mapped", "Mapped", "braces"), new("headers", "Headers", "list")];
+
+    private async Task SendAsync()
+    {
+        _running = true;
+        _error = null;
+        _result = null;
+        var parameters = _values.Where(v => !string.IsNullOrEmpty(v.Value)).ToDictionary(v => v.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+        var result = await DataSources.TestEndpointAsync(DataSourceId, Endpoint.Key, parameters);
+        _running = false;
+        if (result.Succeeded)
+        {
+            _result = result.Value;
+            _tab = _result!.MappedBody is null ? "body" : "mapped";
+        }
+        else
+        {
+            _error = result.Error;
+        }
+
+        await OnExecuted.InvokeAsync();
+    }
+}

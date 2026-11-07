@@ -1,0 +1,583 @@
+@page "/integration/imports/new"
+@page "/integration/imports/{Id:guid}"
+@* Import set record: source (data source endpoint or CSV), target table with coalesce key, transform map, schedule, run now / CSV upload and run history with row results. *@
+@attribute [RequirePermission(Permissions.Integration.ManageImports)]
+@inject IImportSetService ImportService
+@inject IDataSourceExecutor DataSourceExecutor
+@inject ITableRegistry TableRegistry
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(IsNew ? "New import set" : _model?.Name ?? "Import set") · Servora</PageTitle>
+
+@if (_notFound)
+{
+    <div class="card">
+        <EmptyState Icon="download" Title="Import set not found" Text="The import set does not exist or was deleted.">
+            <a class="btn btn-primary" href="/integration/imports"><Icon Name="arrow-left" Size="16" /> Back to import sets</a>
+        </EmptyState>
+    </div>
+}
+else if (_model is null)
+{
+    <div class="stack">
+        <Skeleton Lines="2" Height="28px" Width="40%" />
+        <div class="grid grid-sidebar">
+            <div class="card card-body"><Skeleton Lines="8" Height="38px" /></div>
+            <div class="card card-body"><Skeleton Lines="6" Height="18px" /></div>
+        </div>
+    </div>
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New import set" : _model.Name)" Icon="download">
+        <Breadcrumbs>
+            <a href="/integration/imports">Import Sets</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New" : _model.Name)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (IsNew)
+            {
+                <div class="subtitle">Rows are staged first, then written through the record service – business rules, audit and flows apply.</div>
+            }
+            else
+            {
+                <div class="flex items-center gap-2 flex-wrap mt-1">
+                    <span class="tag"><Icon Name="@(_model.SourceType == ImportSourceType.CsvUpload ? "file-text" : "plug")" Size="12" /> @(_model.SourceType == ImportSourceType.CsvUpload ? "CSV upload" : "Data source")</span>
+                    <span class="tag mono"><Icon Name="table" Size="12" /> @_model.TargetTable</span>
+                    @if (_model.ScheduleEnabled)
+                    {
+                        <span class="pill pill-info no-dot"><Icon Name="calendar-clock" Size="11" /> next <RelativeTime Value="_model.NextRunAt" /></span>
+                    }
+                    <span class="small faint">last run <RelativeTime Value="_model.LastRunAt" Placeholder="never" /></span>
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (!IsNew)
+            {
+                <button class="btn btn-ghost" @onclick="() => _deleteOpen = true"><Icon Name="trash" Size="16" /> Delete</button>
+                @if (_model.SourceType == ImportSourceType.DataSource)
+                {
+                    <button class="btn btn-secondary" disabled="@(_busy || IsDirty)" title="@(IsDirty ? "Save first" : null)" @onclick="RunNowAsync"><Icon Name="play" Size="16" /> Run now</button>
+                }
+            }
+            <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                @(IsNew ? "Create import set" : "Save")
+            </button>
+        </Actions>
+    </PageHeader>
+
+    <div class="grid grid-sidebar">
+        <div class="card">
+            <div class="card-body">
+                <div class="form-section">
+                    <div class="form-section-title">General</div>
+                    <div class="form-grid">
+                        <FormField Label="Name" Required="true">
+                            <input class="input" @bind="_model.Name" placeholder="HR employee import" />
+                        </FormField>
+                        <FormField Label="Description">
+                            <input class="input" @bind="_model.Description" />
+                        </FormField>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Source</div>
+                    <div class="source-types">
+                        <button type="button" class="source-type @(_model.SourceType == ImportSourceType.CsvUpload ? "active" : null)" @onclick="() => _model.SourceType = ImportSourceType.CsvUpload">
+                            <Icon Name="file-text" Size="20" />
+                            <span><strong>CSV upload</strong><span class="small muted">Comma, semicolon or tab separated, header row, up to 5 MB / 5 000 rows</span></span>
+                        </button>
+                        <button type="button" class="source-type @(_model.SourceType == ImportSourceType.DataSource ? "active" : null)" @onclick="() => _model.SourceType = ImportSourceType.DataSource">
+                            <Icon Name="plug" Size="20" />
+                            <span><strong>Data source endpoint</strong><span class="small muted">JSON array from an approved REST endpoint, on demand or scheduled</span></span>
+                        </button>
+                    </div>
+                    @if (_model.SourceType == ImportSourceType.DataSource)
+                    {
+                        <div class="form-grid mt-4">
+                            <FormField Label="Data source" Required="true">
+                                <select class="select" value="@_model.DataSourceId" @onchange="SetDataSource">
+                                    <option value="">— Select —</option>
+                                    @foreach (var source in _dataSources)
+                                    {
+                                        <option value="@source.Id">@source.Name</option>
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Endpoint" Required="true">
+                                <select class="select" @bind="_model.EndpointKey" disabled="@(SelectedSource is null)">
+                                    <option value="">— Select —</option>
+                                    @if (SelectedSource is not null)
+                                    {
+                                        @foreach (var endpoint in SelectedSource.Endpoints)
+                                        {
+                                            <option value="@endpoint.Key">@endpoint.Method @endpoint.Name</option>
+                                        }
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Records path" Help="JSON path of the array, e.g. data.items (empty = the response itself)">
+                                <input class="input mono" @bind="_model.RecordsPath" placeholder="data.items" />
+                            </FormField>
+                        </div>
+                        <div class="mt-4">
+                            <div class="eyebrow mb-2">Endpoint parameters</div>
+                            <KeyValueEditor Value="@ParametersJson" ValueChanged="SetParameters" ShowPills="false"
+                                            SuggestedNames="@(SelectedSource?.Endpoints.FirstOrDefault(e => e.Key == _model.EndpointKey)?.Parameters ?? [])" />
+                        </div>
+                        @if (_dataSources.Count == 0)
+                        {
+                            <div class="alert alert-info mt-3"><Icon Name="info" Size="16" /><div>No data sources available to you. <a href="/integration/datasources">Configure one</a> or ask for the execute permission.</div></div>
+                        }
+                    }
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Target</div>
+                    <div class="form-grid">
+                        <FormField Label="Target table" Required="true">
+                            <select class="select" @bind="_model.TargetTable">
+                                <option value="">— Select a table —</option>
+                                @foreach (var table in _tables.OrderBy(t => t.Label))
+                                {
+                                    <option value="@table.Name">@table.Label (@table.Name)</option>
+                                }
+                            </select>
+                        </FormField>
+                        <FormField Label="Coalesce field" Help="Rows with an existing value in this field update that record instead of inserting a new one.">
+                            <select class="select" @bind="_model.CoalesceField">
+                                <option value="">— Insert only —</option>
+                                @foreach (var map in _model.FieldMaps.Where(m => !string.IsNullOrWhiteSpace(m.TargetField)))
+                                {
+                                    <option value="@map.TargetField">@(TargetFields.FirstOrDefault(f => f.Name == map.TargetField)?.Label ?? map.TargetField)</option>
+                                }
+                            </select>
+                        </FormField>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Transform map</div>
+                    <TransformMapEditor Maps="_model.FieldMaps" TargetFields="TargetFields" SourceSuggestions="_sourceColumns" CoalesceField="@_model.CoalesceField" />
+                </div>
+
+                @if (_model.SourceType == ImportSourceType.DataSource)
+                {
+                    <div class="form-section">
+                        <div class="form-section-title">Schedule</div>
+                        <Switch @bind-Value="_model.ScheduleEnabled" Label="Run automatically" />
+                        @if (_model.ScheduleEnabled)
+                        {
+                            <div class="mt-4">
+                                <CronPreview @bind-Expression="_model.CronExpression" @bind-TimeZoneId="_model.TimeZoneId" />
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="sticky-top stack">
+            @if (!IsNew && _model.SourceType == ImportSourceType.CsvUpload)
+            {
+                <div class="card">
+                    <div class="card-header"><h3>Upload CSV</h3></div>
+                    <div class="card-body stack">
+                        <label class="dropzone upload-zone">
+                            <InputFile OnChange="OnFileSelected" accept=".csv,.txt,text/csv" />
+                            <Icon Name="upload" Size="22" />
+                            <span class="small"><strong>Choose a CSV file</strong></span>
+                            <span class="tiny faint">Max. 5 MB · UTF-8</span>
+                        </label>
+                        @if (_csv is not null)
+                        {
+                            <div class="small"><Icon Name="file-text" Size="14" /> <strong>@_csvName</strong> · @FlowUi.Bytes(_csvBytes!.Length) · @_csv.Headers.Count columns · delimiter <span class="mono">@(_csv.Delimiter == '\t' ? "TAB" : _csv.Delimiter.ToString())</span></div>
+                            <div class="csv-preview">
+                                <table class="table">
+                                    <thead><tr>@foreach (var header in _csv.Headers.Take(6)) { <th class="mono">@header</th> }</tr></thead>
+                                    <tbody>
+                                        @foreach (var row in _csv.Rows.Take(5))
+                                        {
+                                            <tr>@foreach (var cell in row.Take(6)) { <td class="small truncate" style="max-width:120px">@cell</td> }</tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <button class="btn btn-primary" disabled="@(_busy || IsDirty)" title="@(IsDirty ? "Save the import set first" : null)" @onclick="RunCsvAsync">
+                                @if (_busy) { <span class="spinner"></span> } else { <Icon Name="play" Size="16" /> }
+                                Import file
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+            @if (_latestRun is { } latest)
+            {
+                <div class="card">
+                    <div class="card-header"><h3>Latest run</h3><StatusPill Text="@FlowUi.ImportLabel(latest.Status)" Tone="@FlowUi.ImportTone(latest.Status)" /></div>
+                    <div class="card-body">
+                        <div class="run-counters">
+                            <div><span class="counter-value text-success">@latest.Inserted</span><span class="tiny faint">inserted</span></div>
+                            <div><span class="counter-value text-info">@latest.Updated</span><span class="tiny faint">updated</span></div>
+                            <div><span class="counter-value">@latest.Skipped</span><span class="tiny faint">skipped</span></div>
+                            <div><span class="counter-value text-danger">@latest.Errors</span><span class="tiny faint">errors</span></div>
+                        </div>
+                        @if (latest.TotalRows > 0)
+                        {
+                            <div class="progress mt-3 @(latest.Errors > 0 ? "warning" : "success")"><span style="width:@(Percent(latest))%"></span></div>
+                        }
+                        <div class="small faint mt-3"><RelativeTime Value="latest.StartedAt" /> · @latest.TotalRows rows · @(latest.StartedBy ?? "system")</div>
+                        @if (latest.Error is not null)
+                        {
+                            <div class="alert alert-danger mt-3"><Icon Name="alert-circle" Size="16" /><div>@latest.Error</div></div>
+                        }
+                    </div>
+                </div>
+            }
+            <div class="alert alert-info">
+                <Icon Name="shield" Size="16" />
+                <div>Imports write through the table service with your permissions – read-only and non-exposed fields cannot be set.</div>
+            </div>
+        </div>
+    </div>
+
+    @if (!IsNew)
+    {
+        <div class="card mt-6">
+            <div class="card-header"><h3>Run history</h3><button class="btn btn-ghost btn-sm" @onclick="LoadRunsAsync"><Icon Name="refresh" Size="14" /> Refresh</button></div>
+            <DataTable TItem="ImportRunItem" Items="_runs.Items" TotalCount="_runs.TotalCount" PageNumber="_runs.Page" PageSize="_runs.PageSize" ShowSearch="false"
+                       OnPageChanged="RunPageAsync" OnRowClick="OpenRunAsync" Compact="true" EmptyIcon="activity" EmptyTitle="No runs yet"
+                       EmptyText="@(_model.SourceType == ImportSourceType.CsvUpload ? "Upload a CSV file to run the import." : "Run the import now or enable the schedule.")">
+                <Columns>
+                    <DataColumn TItem="ImportRunItem" Title="Status" Width="170px">
+                        <Template><StatusPill Text="@FlowUi.ImportLabel(context.Status)" Tone="@FlowUi.ImportTone(context.Status)" /></Template>
+                    </DataColumn>
+                    <DataColumn TItem="ImportRunItem" Title="Source">
+                        <Template>
+                            <span class="small">@(context.SourceDescription ?? "—")</span>
+                            @if (context.Error is not null)
+                            {
+                                <span class="cell-sub text-danger">@context.Error</span>
+                            }
+                        </Template>
+                    </DataColumn>
+                    <DataColumn TItem="ImportRunItem" Title="Rows" Width="90px" Align="right"><Template><span class="mono">@context.TotalRows</span></Template></DataColumn>
+                    <DataColumn TItem="ImportRunItem" Title="Inserted" Width="90px" Align="right"><Template><span class="mono text-success">@context.Inserted</span></Template></DataColumn>
+                    <DataColumn TItem="ImportRunItem" Title="Updated" Width="90px" Align="right"><Template><span class="mono text-info">@context.Updated</span></Template></DataColumn>
+                    <DataColumn TItem="ImportRunItem" Title="Errors" Width="80px" Align="right"><Template><span class="mono @(context.Errors > 0 ? "text-danger" : null)">@context.Errors</span></Template></DataColumn>
+                    <DataColumn TItem="ImportRunItem" Title="Started" Width="150px">
+                        <Template><RelativeTime Value="context.StartedAt" Class="small muted" /><span class="cell-sub">@context.StartedBy</span></Template>
+                    </DataColumn>
+                </Columns>
+            </DataTable>
+        </div>
+    }
+
+    <Drawer Open="_selectedRun is not null" OpenChanged="v => { if (!v) _selectedRun = null; }" Size="lg" Title="Import run" Subtitle="@(_selectedRun is null ? null : $"{_selectedRun.StartedAt.ToLocalTime():g} · {_selectedRun.TotalRows} rows")">
+        <ChildContent>
+            @if (_selectedRun is not null)
+            {
+                <div class="segmented mb-4" style="flex-wrap:wrap">
+                    <button class="@(_rowStatus is null ? "active" : null)" @onclick="() => FilterRowsAsync(null)">All</button>
+                    @foreach (var status in Enum.GetValues<ImportRowStatus>())
+                    {
+                        <button class="@(_rowStatus == status ? "active" : null)" @onclick="() => FilterRowsAsync(status)">@status</button>
+                    }
+                </div>
+                <DataTable TItem="ImportRowItem" Items="_rows.Items" TotalCount="_rows.TotalCount" PageNumber="_rows.Page" PageSize="_rows.PageSize" ShowSearch="false" ShowToolbar="false"
+                           OnPageChanged="RowPageAsync" Compact="true" EmptyIcon="list" EmptyTitle="No rows" EmptyText="No staged rows match the filter.">
+                    <Columns>
+                        <DataColumn TItem="ImportRowItem" Title="#" Width="60px"><Template><span class="mono small">@context.RowNumber</span></Template></DataColumn>
+                        <DataColumn TItem="ImportRowItem" Title="Result" Width="110px">
+                            <Template><StatusPill Text="@context.Status.ToString()" Tone="@RowTone(context.Status)" /></Template>
+                        </DataColumn>
+                        <DataColumn TItem="ImportRowItem" Title="Data">
+                            <Template>
+                                <span class="mono tiny truncate" style="display:block;max-width:420px" title="@context.DataJson">@context.DataJson</span>
+                                @if (context.Message is not null)
+                                {
+                                    <span class="cell-sub @(context.Status == ImportRowStatus.Error ? "text-danger" : null)">@context.Message</span>
+                                }
+                            </Template>
+                        </DataColumn>
+                        <DataColumn TItem="ImportRowItem" Title="Record" Width="110px">
+                            <Template>
+                                @if (context.TargetRecordId is { } target)
+                                {
+                                    <span class="mono tiny" title="@target">@FlowUi.Short(target)</span>
+                                }
+                            </Template>
+                        </DataColumn>
+                    </Columns>
+                </DataTable>
+            }
+        </ChildContent>
+    </Drawer>
+
+    <ConfirmDialog @bind-Open="_deleteOpen" Title="Delete import set?" Danger="true" ConfirmText="Delete" OnConfirm="DeleteAsync"
+                   Message="@($"'{_model.Name}' and its run history (staged rows) are deleted. Imported records stay untouched.")" />
+}
+
+@code {
+    private ImportSetModel? _model;
+    private string _savedFingerprint = string.Empty;
+    private IReadOnlyList<DataSourceSummary> _dataSources = [];
+    private IReadOnlyList<TableDefinition> _tables = [];
+    private IReadOnlyList<string> _sourceColumns = [];
+    private PagedResult<ImportRunItem> _runs = PagedResult<ImportRunItem>.Empty();
+    private PagedResult<ImportRowItem> _rows = PagedResult<ImportRowItem>.Empty();
+    private ImportRunItem? _latestRun;
+    private ImportRunItem? _selectedRun;
+    private ImportRowStatus? _rowStatus;
+    private CsvDocument? _csv;
+    private byte[]? _csvBytes;
+    private string? _csvName;
+    private int _runPage = 1;
+    private int _rowPage = 1;
+    private bool _notFound;
+    private bool _saving;
+    private bool _busy;
+    private bool _deleteOpen;
+
+    /// <summary>Gets or sets the import set identifier from the route (empty for new sets).</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    private bool IsNew => Id == Guid.Empty;
+
+    private bool IsDirty => _model is not null && !IsNew && FlowJson.Serialize(_model) != _savedFingerprint;
+
+    private DataSourceSummary? SelectedSource => _dataSources.FirstOrDefault(s => s.Id == _model?.DataSourceId);
+
+    private IReadOnlyList<FieldDefinition> TargetFields =>
+        _tables.FirstOrDefault(t => string.Equals(t.Name, _model?.TargetTable, StringComparison.OrdinalIgnoreCase))?.Fields ?? [];
+
+    private string? ParametersJson => _model is null || _model.Parameters.Count == 0 ? null : JsonSerializer.Serialize(_model.Parameters);
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _tables = await TableRegistry.GetTablesAsync();
+        _dataSources = await DataSourceExecutor.ListAccessibleAsync();
+        if (IsNew)
+        {
+            _model = new ImportSetModel();
+            return;
+        }
+
+        await LoadAsync();
+        await LoadRunsAsync();
+    }
+
+    private static string RowTone(ImportRowStatus status) => status switch
+    {
+        ImportRowStatus.Inserted => "success",
+        ImportRowStatus.Updated => "info",
+        ImportRowStatus.Error => "danger",
+        ImportRowStatus.Skipped => "neutral",
+        _ => "warning",
+    };
+
+    private static int Percent(ImportRunItem run) => run.TotalRows == 0 ? 0 : (int)Math.Round((run.Inserted + run.Updated) * 100.0 / run.TotalRows);
+
+    private async Task LoadAsync()
+    {
+        var result = await ImportService.GetAsync(Id);
+        if (!result.Succeeded)
+        {
+            _notFound = result.ErrorKind == ResultErrorKind.NotFound;
+            if (!_notFound)
+            {
+                Toasts.Error("Could not load the import set", result.Error);
+            }
+
+            return;
+        }
+
+        _model = result.Value;
+        _savedFingerprint = FlowJson.Serialize(_model);
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        var result = await ImportService.ListRunsAsync(Id, new PageRequest { Page = _runPage, PageSize = 10 });
+        if (result.Succeeded)
+        {
+            _runs = result.Value!;
+            if (_runPage == 1)
+            {
+                _latestRun = _runs.Items.FirstOrDefault();
+            }
+        }
+    }
+
+    private async Task RunPageAsync(int page)
+    {
+        _runPage = page;
+        await LoadRunsAsync();
+    }
+
+    private void SetDataSource(ChangeEventArgs e)
+    {
+        _model!.DataSourceId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        _model.EndpointKey = null;
+    }
+
+    private void SetParameters(string? json)
+    {
+        var parsed = FlowJson.TryDeserialize<Dictionary<string, string?>>(json) ?? [];
+        _model!.Parameters = parsed.Where(p => p.Value is not null).ToDictionary(p => p.Key, p => p.Value!, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        _saving = true;
+        var result = await ImportService.SaveAsync(_model);
+        _saving = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Could not save", result.Error);
+            return;
+        }
+
+        if (IsNew)
+        {
+            Toasts.Success("Import set created");
+            Nav.NavigateTo($"/integration/imports/{result.Value}");
+        }
+        else
+        {
+            Toasts.Success("Import set saved");
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await ImportService.DeleteAsync(Id);
+        if (Toasts.FromResult(result, "Import set deleted"))
+        {
+            Nav.NavigateTo("/integration/imports");
+        }
+    }
+
+    private async Task RunNowAsync()
+    {
+        _busy = true;
+        var result = await ImportService.RunNowAsync(Id);
+        _busy = false;
+        if (result.Succeeded)
+        {
+            Toasts.Success("Import finished", "See the run history for row results.");
+        }
+        else
+        {
+            Toasts.Error("Import failed", result.Error);
+        }
+
+        await LoadAsync();
+        await LoadRunsAsync();
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _csv = null;
+        _csvBytes = null;
+        if (e.File.Size > ImportProcessor.MaxCsvBytes)
+        {
+            Toasts.Error("File too large", $"The maximum is {ImportProcessor.MaxCsvBytes / 1024 / 1024} MB.");
+            return;
+        }
+
+        try
+        {
+            await using var stream = e.File.OpenReadStream(ImportProcessor.MaxCsvBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            _csvBytes = buffer.ToArray();
+        }
+        catch (IOException ex)
+        {
+            Toasts.Error("Could not read the file", ex.Message);
+            return;
+        }
+
+        _csvName = e.File.Name;
+        using var previewStream = new MemoryStream(_csvBytes);
+        var preview = await ImportService.PreviewCsvAsync(previewStream);
+        if (!preview.Succeeded)
+        {
+            Toasts.Error("Invalid CSV", preview.Error);
+            _csvBytes = null;
+            return;
+        }
+
+        _csv = preview.Value;
+        _sourceColumns = _csv!.Headers;
+    }
+
+    private async Task RunCsvAsync()
+    {
+        if (_csvBytes is null || _csvName is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        using var stream = new MemoryStream(_csvBytes);
+        var result = await ImportService.RunCsvAsync(Id, _csvName, stream);
+        _busy = false;
+        if (result.Succeeded)
+        {
+            Toasts.Success("CSV imported", "See the run history for row results.");
+            _csv = null;
+            _csvBytes = null;
+        }
+        else
+        {
+            Toasts.Error("Import failed", result.Error);
+        }
+
+        await LoadAsync();
+        await LoadRunsAsync();
+    }
+
+    private async Task OpenRunAsync(ImportRunItem run)
+    {
+        _selectedRun = run;
+        _rowStatus = run.Errors > 0 ? ImportRowStatus.Error : null;
+        _rowPage = 1;
+        await LoadRowsAsync();
+    }
+
+    private async Task FilterRowsAsync(ImportRowStatus? status)
+    {
+        _rowStatus = status;
+        _rowPage = 1;
+        await LoadRowsAsync();
+    }
+
+    private async Task RowPageAsync(int page)
+    {
+        _rowPage = page;
+        await LoadRowsAsync();
+    }
+
+    private async Task LoadRowsAsync()
+    {
+        if (_selectedRun is null)
+        {
+            return;
+        }
+
+        var result = await ImportService.ListRowsAsync(_selectedRun.Id, _rowStatus, new PageRequest { Page = _rowPage, PageSize = 25 });
+        _rows = result.Succeeded ? result.Value! : PagedResult<ImportRowItem>.Empty();
+    }
+}

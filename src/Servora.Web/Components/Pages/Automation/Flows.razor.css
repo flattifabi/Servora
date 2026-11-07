@@ -1,0 +1,10 @@
+.flow-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--text-muted); background: var(--surface-3); border: 1px solid var(--border); }
+.flow-icon.on { color: var(--primary); background: var(--primary-soft); border-color: rgba(124, 108, 255, .35); box-shadow: 0 0 18px -6px rgba(124, 108, 255, .6); }
+.trigger-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.trigger-option { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: var(--r); cursor: pointer; background: var(--surface-2); border: 1px solid var(--border); transition: all var(--speed) var(--ease); }
+.trigger-option:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.trigger-option.active { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px var(--primary-soft); }
+.trigger-option-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--primary); background: var(--primary-soft); }
+.trigger-option.active .trigger-option-icon { color: #fff; background: var(--gradient); }
+.trigger-option-name { font-weight: 650; font-size: 13.5px; color: var(--text); }
+.trigger-option-desc { font-size: 12px; color: var(--text-muted); }

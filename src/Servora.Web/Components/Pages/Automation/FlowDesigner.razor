@@ -1,0 +1,748 @@
+@page "/automation/flows/{Id:guid}"
+@* Flow Designer: vertical canvas (trigger card, step cards, branch lanes), configuration drawer with data pills, live test runs, versioned saves and activation. *@
+@attribute [RequirePermission(Permissions.Automation.Read)]
+@implements IDisposable
+@inject IFlowService FlowService
+@inject IFlowRunService RunService
+@inject ITableRegistry TableRegistry
+@inject IDataSourceExecutor DataSourceExecutor
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(_model?.Name ?? "Flow") · Flow Designer · Servora</PageTitle>
+
+@if (_notFound)
+{
+    <div class="card">
+        <EmptyState Icon="workflow" Title="Flow not found" Text="The flow does not exist or was deleted.">
+            <a class="btn btn-primary" href="/automation/flows"><Icon Name="arrow-left" Size="16" /> Back to flows</a>
+        </EmptyState>
+    </div>
+}
+else if (_model is null)
+{
+    <div class="stack">
+        <Skeleton Lines="2" Height="28px" Width="40%" />
+        <div class="grid grid-sidebar">
+            <div class="card card-body"><Skeleton Lines="10" Height="54px" /></div>
+            <div class="card card-body"><Skeleton Lines="6" Height="18px" /></div>
+        </div>
+    </div>
+}
+else
+{
+    var dirty = IsDirty;
+    <PageHeader Title="@_model.Name" Icon="workflow">
+        <Breadcrumbs>
+            <a href="/automation/flows">Flow Designer</a> <Icon Name="chevron-right" Size="12" /> <span>@_model.Name</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (!string.IsNullOrWhiteSpace(_model.Description))
+            {
+                <div class="subtitle" style="max-width:760px">@_model.Description</div>
+            }
+            <div class="flex items-center gap-2 flex-wrap mt-2">
+                <StatusPill Text="@(_model.IsActive ? "Active" : "Inactive")" Tone="@(_model.IsActive ? "success" : "neutral")" />
+                <span class="tag"><Icon Name="@FlowUi.TriggerIcon(_model.TriggerType)" Size="12" /> @FlowUi.TriggerLabel(_model.TriggerType)</span>
+                <span class="tag mono">@($"v{_model.DefinitionVersion}")</span>
+                @if (dirty)
+                {
+                    <span class="pill pill-warning no-dot"><Icon Name="edit" Size="11" /> Unsaved changes</span>
+                }
+                <span class="small faint">@(_model.VersionNote) · updated <RelativeTime Value="_model.UpdatedAt" /> by @(_model.UpdatedBy ?? "system")</span>
+            </div>
+        </SubtitleContent>
+        <Actions>
+            <a class="btn btn-ghost" href="@($"/automation/runs?flow={_model.Id}")"><Icon Name="activity" Size="16" /> Executions</a>
+            @if (_canManage)
+            {
+                <button class="btn btn-secondary" disabled="@_busy" @onclick="OpenTest"><Icon Name="play" Size="16" /> Test run</button>
+                <button class="btn @(_model.IsActive ? "btn-secondary" : "btn-success")" disabled="@_busy" @onclick="ToggleActiveAsync">
+                    <Icon Name="@(_model.IsActive ? "pause" : "zap")" Size="16" /> @(_model.IsActive ? "Deactivate" : "Activate")
+                </button>
+                <button class="btn btn-primary" disabled="@(_busy || !dirty)" @onclick="OpenSave">
+                    @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                    Save
+                </button>
+                <button class="icon-btn" title="Duplicate flow" disabled="@_busy" @onclick="DuplicateAsync"><Icon Name="copy" Size="18" /></button>
+                <button class="icon-btn" title="Delete flow" disabled="@_busy" @onclick="() => _deleteOpen = true"><Icon Name="trash" Size="18" /></button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <div class="fd-layout">
+        <div class="fd-canvas card">
+            <div class="fd-canvas-toolbar">
+                <span class="eyebrow">Canvas</span>
+                <span class="small faint">@(StepCount == 1 ? "1 step" : $"{StepCount} steps") · click a card to configure it</span>
+                @if (_issues.Count > 0)
+                {
+                    <span class="pill pill-danger no-dot" style="margin-left:auto"><Icon Name="alert-circle" Size="11" /> @(_issues.Count == 1 ? "1 issue" : $"{_issues.Count} issues")</span>
+                }
+                else
+                {
+                    <span class="pill pill-success no-dot" style="margin-left:auto"><Icon Name="check" Size="11" /> Valid</span>
+                }
+            </div>
+            <div class="fd-canvas-body">
+                <button type="button" class="fd-trigger @(_triggerSelected && _drawerOpen ? "selected" : null)" @onclick="SelectTrigger">
+                    <span class="fd-trigger-badge">When</span>
+                    <span class="fd-trigger-icon"><Icon Name="@FlowUi.TriggerIcon(_model.TriggerType)" Size="20" /></span>
+                    <span class="fd-trigger-text">
+                        <span class="fd-trigger-title">@FlowUi.TriggerLabel(_model.TriggerType)</span>
+                        <span class="fd-trigger-detail">@TriggerDetail</span>
+                    </span>
+                    <Icon Name="settings" Size="16" Class="faint" />
+                </button>
+                <FlowCanvas Steps="_model.Steps" Descriptors="_descriptors" SelectedStepId="@(_drawerOpen && !_triggerSelected ? _selectedStepId : null)"
+                            Results="_results" ReadOnly="!_canManage" OnSelect="SelectStep" OnAdd="OpenPalette" OnRemove="AskRemove" OnChanged="OnTreeChanged" />
+            </div>
+        </div>
+
+        <div class="fd-side sticky-top">
+            <div class="card">
+                <div class="card-header"><h3>Properties</h3></div>
+                <div class="card-body stack">
+                    <FormField Label="Name" Required="true">
+                        <input class="input" value="@_model.Name" disabled="@(!_canManage)" @onchange="e => Change(() => _model.Name = e.Value?.ToString() ?? string.Empty)" />
+                    </FormField>
+                    <FormField Label="Description">
+                        <textarea class="textarea" rows="3" disabled="@(!_canManage)" @onchange="e => Change(() => _model.Description = e.Value?.ToString())">@_model.Description</textarea>
+                    </FormField>
+                    <div>
+                        <div class="eyebrow mb-2">Inputs</div>
+                        <FlowInputsEditor Inputs="_model.Inputs" ReadOnly="!_canManage" OnChanged="OnTreeChanged" />
+                    </div>
+                    <dl class="kv">
+                        <dt>Next run</dt>
+                        <dd>@if (_model.NextRunAt is { } next) { <RelativeTime Value="next" /> } else { <span class="faint">—</span> }</dd>
+                        <dt>Last triggered</dt>
+                        <dd><RelativeTime Value="_model.LastTriggeredAt" Placeholder="Never" /></dd>
+                        <dt>Flow id</dt>
+                        <dd class="mono small">@_model.Id</dd>
+                    </dl>
+                </div>
+            </div>
+
+            @if (_issues.Count > 0)
+            {
+                <div class="card mt-4">
+                    <div class="card-header"><h3>Validation</h3></div>
+                    <div class="card-body">
+                        <ul class="fd-issues">
+                            @foreach (var issue in _issues.Take(12))
+                            {
+                                <li><Icon Name="alert-circle" Size="14" /> <span>@issue</span></li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+            }
+
+            @if (_testRunId is { } runId)
+            {
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h3 class="flex items-center gap-2">
+                            @if (_testDetail is { } live && live.Run.Status is FlowRunStatus.Queued or FlowRunStatus.Running)
+                            {
+                                <span class="live-dot"></span>
+                            }
+                            Test run
+                        </h3>
+                        <a class="btn btn-ghost btn-sm" href="/automation/runs/@runId">Open <Icon Name="external-link" Size="13" /></a>
+                    </div>
+                    <div class="card-body">
+                        @if (_testDetail is null)
+                        {
+                            <Skeleton Lines="4" Height="20px" />
+                        }
+                        else
+                        {
+                            <div class="flex items-center gap-2 mb-4 flex-wrap">
+                                <StatusPill Text="@_testDetail.Run.Status.ToString()" Tone="@FlowUi.RunTone(_testDetail.Run.Status)" />
+                                <span class="mono small muted">@FlowUi.Duration(_testDetail.Run.DurationMs)</span>
+                                @if (_testDetail.Run.WaitReason is { } wait && _testDetail.Run.Status == FlowRunStatus.Waiting)
+                                {
+                                    <span class="small muted truncate" title="@wait">@wait</span>
+                                }
+                            </div>
+                            @if (_testDetail.Run.Error is { } error)
+                            {
+                                <div class="alert alert-danger mb-4"><Icon Name="alert-circle" Size="16" /><div>@error</div></div>
+                            }
+                            <RunTimeline Steps="_testDetail.Steps" />
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <Drawer Open="_drawerOpen" OpenChanged="v => _drawerOpen = v" Size="lg" Title="@DrawerTitle" Subtitle="@DrawerSubtitle">
+        <ChildContent>
+            @if (_triggerSelected)
+            {
+                <TriggerConfigPanel Model="_model" Tables="_tables" DataSources="_dataSources" ReadOnly="!_canManage" OnChanged="OnTreeChanged" OnRotateSecret="RotateSecretAsync" />
+            }
+            else if (SelectedStep is { } step)
+            {
+                <StepConfigPanel Step="step" Descriptor="_descriptors.FirstOrDefault(d => d.Type == step.Type)" Pills="PillsFor(step.Id)" Tables="_tables"
+                                 DataSources="_dataSources" Flows="_flows" CurrentFlowId="_model.Id" ReadOnly="!_canManage" OnChanged="OnStepChanged" />
+            }
+        </ChildContent>
+        <Footer>
+            @if (!_triggerSelected && SelectedStep is not null && _canManage)
+            {
+                <button class="btn btn-outline-danger" @onclick="RemoveSelected"><Icon Name="trash" Size="16" /> Delete step</button>
+            }
+            <button class="btn btn-primary" style="margin-left:auto" @onclick="() => _drawerOpen = false"><Icon Name="check" Size="16" /> Done</button>
+        </Footer>
+    </Drawer>
+
+    <StepPalette @bind-Open="_paletteOpen" Descriptors="_descriptors" OnPick="AddStep" />
+
+    <ConfirmDialog @bind-Open="_removeOpen" Title="Delete step?" Danger="true" ConfirmText="Delete step" OnConfirm="ConfirmRemove"
+                   Message="@RemoveMessage" />
+
+    <ConfirmDialog @bind-Open="_deleteOpen" Title="Delete flow?" Danger="true" ConfirmText="Delete flow" OnConfirm="DeleteAsync"
+                   Message="@($"'{_model.Name}' and its webhook secret are deleted permanently. The execution history is kept.")" />
+
+    <Modal @bind-Open="_saveOpen" Title="Save new version" Subtitle="@($"Creates version {_model.DefinitionVersion + 1}. Running flows finish with the version they started with.")" Icon="save">
+        <ChildContent>
+            <FormField Label="Version note" Help="What changed and why?">
+                <input class="input" @bind="_versionNote" placeholder="e.g. Notify the assignment group on P1" />
+            </FormField>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _saveOpen = false">Cancel</button>
+            <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                Save version
+            </button>
+        </Footer>
+    </Modal>
+
+    <Modal @bind-Open="_testOpen" Title="Test run" Subtitle="Runs the saved version now – also when the flow is inactive. Side effects (records, e-mails, calls) are real." Icon="play" Size="lg">
+        <ChildContent>
+            <div class="stack">
+                @if (_model.Inputs.Count > 0)
+                {
+                    <div class="form-grid">
+                        @foreach (var input in _model.Inputs)
+                        {
+                            <FormField Label="@(string.IsNullOrWhiteSpace(input.Label) ? input.Name : input.Label)" Required="input.Required" Help="@($"{{{{inputs.{input.Name}}}}} · {input.Type}")" @key="input.Name">
+                                <input class="input" value="@(_testInputs.GetValueOrDefault(input.Name) ?? input.DefaultValue)" @onchange="e => _testInputs[input.Name] = e.Value?.ToString() ?? string.Empty" />
+                            </FormField>
+                        }
+                    </div>
+                }
+                @if (_model.TriggerType is FlowTriggerType.RecordCreated or FlowTriggerType.RecordUpdated or FlowTriggerType.RecordCreatedOrUpdated)
+                {
+                    <FormField Label="@($"Trigger record ({_model.TriggerTable})")" Help="The record id used as trigger.record. Leave empty to run without a record.">
+                        <input class="input mono" @bind="_testRecordId" placeholder="00000000-0000-0000-0000-000000000000" />
+                    </FormField>
+                }
+                @if (_model.TriggerType is FlowTriggerType.Webhook or FlowTriggerType.DataSourcePoll)
+                {
+                    <FormField Label="Sample payload (JSON)" Help="@(_model.TriggerType == FlowTriggerType.Webhook ? "Available as {{trigger.body}}." : "Available as {{trigger.response.json}}.")">
+                        <textarea class="textarea mono" rows="8" @bind="_testPayload" placeholder="{ &quot;id&quot;: 42 }"></textarea>
+                    </FormField>
+                }
+                @if (_model.Inputs.Count == 0 && _model.TriggerType is FlowTriggerType.Manual or FlowTriggerType.Schedule)
+                {
+                    <div class="alert alert-info"><Icon Name="info" Size="16" /><div>This flow needs no test data. Start the run to watch the steps execute live.</div></div>
+                }
+            </div>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _testOpen = false">Cancel</button>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="StartTestAsync"><Icon Name="play" Size="16" /> Start test run</button>
+        </Footer>
+    </Modal>
+
+    <Modal @bind-Open="_secretOpen" Title="Webhook secret" Subtitle="Copy the secret now – it is shown only once." Icon="key">
+        <ChildContent>
+            <div class="secret-reveal"><input class="input mono" readonly value="@_secret" /></div>
+            <div class="small muted mt-3">Send it as <span class="mono">X-Servora-Webhook-Secret</span> header or use it as HMAC-SHA256 key for <span class="mono">X-Servora-Signature</span>. The previous secret stopped working.</div>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-primary" @onclick="() => { _secretOpen = false; _secret = null; }">Done</button>
+        </Footer>
+    </Modal>
+}
+
+@code {
+    private FlowDefinitionModel? _model;
+    private string _savedFingerprint = string.Empty;
+    private IReadOnlyList<FlowActionDescriptor> _descriptors = [];
+    private IReadOnlyList<TableDefinition> _tables = [];
+    private Dictionary<string, TableDefinition> _tableMap = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<DataSourceSummary> _dataSources = [];
+    private IReadOnlyList<FlowSummary> _flows = [];
+    private IReadOnlyList<string> _issues = [];
+    private Dictionary<string, FlowStepStatus> _results = [];
+    private Dictionary<string, string> _testInputs = [];
+    private CancellationTokenSource? _pollCts;
+    private FlowRunDetail? _testDetail;
+    private Guid? _testRunId;
+    private StepInsertPoint? _insertPoint;
+    private StepInsertPoint? _removePoint;
+    private string? _selectedStepId;
+    private string? _versionNote;
+    private string? _testRecordId;
+    private string? _testPayload;
+    private string? _secret;
+    private bool _notFound;
+    private bool _canManage;
+    private bool _triggerSelected;
+    private bool _drawerOpen;
+    private bool _paletteOpen;
+    private bool _removeOpen;
+    private bool _deleteOpen;
+    private bool _saveOpen;
+    private bool _testOpen;
+    private bool _secretOpen;
+    private bool _saving;
+    private bool _busy;
+
+    /// <summary>Gets or sets the flow identifier from the route.</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    private bool IsDirty => _model is not null && Fingerprint(_model) != _savedFingerprint;
+
+    private int StepCount => _model is null ? 0 : FlowJson.Flatten(_model.Steps).Count();
+
+    private FlowStepDefinition? SelectedStep => _model is null || _selectedStepId is null ? null : FlowJson.Flatten(_model.Steps).FirstOrDefault(s => s.Id == _selectedStepId);
+
+    private string DrawerTitle => _triggerSelected ? "Trigger" : SelectedStep?.Name ?? "Step";
+
+    private string? DrawerSubtitle => _triggerSelected ? "Define when the flow starts." : SelectedStep is { } step ? $"steps.{step.Key} · {step.Type}" : null;
+
+    private string RemoveMessage
+    {
+        get
+        {
+            if (_removePoint is null || _removePoint.Index >= _removePoint.Steps.Count)
+            {
+                return string.Empty;
+            }
+
+            var step = _removePoint.Steps[_removePoint.Index];
+            var nested = FlowJson.Flatten([step]).Count() - 1;
+            return nested > 0
+                ? $"'{step.Name}' and the {nested} step{(nested == 1 ? "" : "s")} inside its branches are removed. Later steps referencing its data pills must be updated."
+                : $"'{step.Name}' is removed from the flow. Later steps referencing its data pills must be updated.";
+        }
+    }
+
+    private string TriggerDetail
+    {
+        get
+        {
+            var model = _model!;
+            return model.TriggerType switch
+            {
+                FlowTriggerType.RecordCreated or FlowTriggerType.RecordUpdated or FlowTriggerType.RecordCreatedOrUpdated =>
+                    string.IsNullOrWhiteSpace(model.TriggerTable)
+                        ? "Choose a table"
+                        : $"{_tableMap.GetValueOrDefault(model.TriggerTable)?.Label ?? model.TriggerTable}{(model.TriggerCondition.IsEmpty ? " · every change" : $" · {CountRules(model.TriggerCondition)} condition(s)")}",
+                FlowTriggerType.Schedule => string.IsNullOrWhiteSpace(model.CronExpression) ? "Define a schedule" : $"{model.CronExpression} · {model.TimeZoneId ?? "UTC"}",
+                FlowTriggerType.Webhook => model.HasWebhookSecret ? $"POST {model.WebhookPath}" : "Generate a secret to enable the webhook",
+                FlowTriggerType.DataSourcePoll => model.PollDataSourceId is null
+                    ? "Choose a data source endpoint"
+                    : $"{_dataSources.FirstOrDefault(s => s.Id == model.PollDataSourceId)?.Name ?? "Data source"} · {model.PollEndpointKey} · {model.CronExpression}",
+                _ => model.Inputs.Count == 0 ? "Started on demand" : $"Started on demand · {model.Inputs.Count} input(s)",
+            };
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Automation.Manage);
+        _descriptors = FlowService.GetActions();
+        _tables = await TableRegistry.GetTablesAsync();
+        _tableMap = _tables.GroupBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        _dataSources = await DataSourceExecutor.ListAccessibleAsync();
+        _flows = await FlowService.ListAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var result = await FlowService.GetAsync(Id);
+        if (!result.Succeeded)
+        {
+            _notFound = result.ErrorKind == ResultErrorKind.NotFound;
+            if (!_notFound)
+            {
+                Toasts.Error("Could not load the flow", result.Error);
+            }
+
+            return;
+        }
+
+        SetModel(result.Value!);
+    }
+
+    private void SetModel(FlowDefinitionModel model)
+    {
+        _model = model;
+        _issues = FlowService.Validate(model, model.IsActive);
+        _savedFingerprint = Fingerprint(model);
+    }
+
+    private static string Fingerprint(FlowDefinitionModel model) => FlowJson.Serialize(new
+    {
+        model.Name,
+        model.Description,
+        model.TriggerType,
+        model.TriggerTable,
+        Condition = ConditionSerializer.Serialize(model.TriggerCondition),
+        model.CronExpression,
+        model.TimeZoneId,
+        model.PollDataSourceId,
+        model.PollEndpointKey,
+        model.PollParameters,
+        model.PollOnlyOnChange,
+        model.Inputs,
+        model.Steps,
+    });
+
+    private static int CountRules(ConditionGroup group) => group.Rules.Count + group.Groups.Sum(CountRules);
+
+    private IReadOnlyList<FlowDataPill> PillsFor(string? stepId) =>
+        FlowDataPillBuilder.Build(_model!, stepId, _descriptors, name => _tableMap.GetValueOrDefault(name));
+
+    private void Revalidate() => _issues = _model is null ? [] : FlowService.Validate(_model, _model.IsActive);
+
+    private void Change(Action change)
+    {
+        change();
+        Revalidate();
+    }
+
+    private void OnTreeChanged() => Revalidate();
+
+    private void OnStepChanged() => Revalidate();
+
+    private void SelectTrigger()
+    {
+        _triggerSelected = true;
+        _selectedStepId = null;
+        _drawerOpen = true;
+    }
+
+    private void SelectStep(FlowStepDefinition step)
+    {
+        _triggerSelected = false;
+        _selectedStepId = step.Id;
+        _drawerOpen = true;
+    }
+
+    private void OpenPalette(StepInsertPoint point)
+    {
+        _insertPoint = point;
+        _paletteOpen = true;
+    }
+
+    private void AddStep(FlowActionDescriptor descriptor)
+    {
+        if (_model is null || _insertPoint is null)
+        {
+            return;
+        }
+
+        var step = new FlowStepDefinition { Type = descriptor.Type, Name = descriptor.Name };
+        foreach (var field in descriptor.Fields.Where(f => f.DefaultValue is not null))
+        {
+            step.Config[field.Key] = field.DefaultValue;
+        }
+
+        foreach (var branch in descriptor.Branches)
+        {
+            step.Branches.Add(new FlowBranchDefinition { Key = branch.Key, Label = branch.Label });
+        }
+
+        _insertPoint.Steps.Insert(Math.Clamp(_insertPoint.Index, 0, _insertPoint.Steps.Count), step);
+        _insertPoint = null;
+        _paletteOpen = false;
+        Revalidate();
+        SelectStep(step);
+    }
+
+    private void AskRemove(StepInsertPoint point)
+    {
+        _removePoint = point;
+        _removeOpen = true;
+    }
+
+    private void RemoveSelected()
+    {
+        if (_model is null || _selectedStepId is null)
+        {
+            return;
+        }
+
+        var point = FindPoint(_model.Steps, _selectedStepId);
+        if (point is not null)
+        {
+            AskRemove(point);
+        }
+    }
+
+    private static StepInsertPoint? FindPoint(List<FlowStepDefinition> steps, string stepId)
+    {
+        for (var i = 0; i < steps.Count; i++)
+        {
+            if (steps[i].Id == stepId)
+            {
+                return new StepInsertPoint(steps, i);
+            }
+
+            foreach (var branch in steps[i].Branches)
+            {
+                if (FindPoint(branch.Steps, stepId) is { } found)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private void ConfirmRemove()
+    {
+        if (_removePoint is { } point && point.Index < point.Steps.Count)
+        {
+            var removed = point.Steps[point.Index];
+            point.Steps.RemoveAt(point.Index);
+            if (FlowJson.Flatten([removed]).Any(s => s.Id == _selectedStepId))
+            {
+                _drawerOpen = false;
+                _selectedStepId = null;
+            }
+        }
+
+        _removePoint = null;
+        Revalidate();
+    }
+
+    private void OpenSave()
+    {
+        _versionNote = null;
+        _saveOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        _saving = true;
+        var result = await FlowService.SaveAsync(_model, _versionNote);
+        _saving = false;
+        if (result.Succeeded)
+        {
+            SetModel(result.Value!);
+            _saveOpen = false;
+            Toasts.Success($"Version {_model!.DefinitionVersion} saved");
+        }
+        else
+        {
+            Toasts.Error(result.ErrorKind == ResultErrorKind.Conflict ? "Save conflict" : "Could not save", result.Error);
+        }
+    }
+
+    private async Task ToggleActiveAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        if (IsDirty)
+        {
+            Toasts.Warning("Unsaved changes", "Save the flow before changing its activation.");
+            return;
+        }
+
+        if (!_model.IsActive)
+        {
+            var issues = FlowService.Validate(_model, forActivation: true);
+            if (issues.Count > 0)
+            {
+                _issues = issues;
+                Toasts.Error("The flow cannot be activated", string.Join(" ", issues.Take(3)));
+                return;
+            }
+        }
+
+        _busy = true;
+        var activate = !_model.IsActive;
+        var result = await FlowService.SetActiveAsync(_model.Id, activate);
+        _busy = false;
+        if (Toasts.FromResult(result, activate ? "Flow activated" : "Flow deactivated"))
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DuplicateAsync()
+    {
+        _busy = true;
+        var result = await FlowService.DuplicateAsync(Id);
+        _busy = false;
+        if (result.Succeeded)
+        {
+            Toasts.Success("Flow duplicated", "The copy is inactive.");
+            Nav.NavigateTo($"/automation/flows/{result.Value}");
+        }
+        else
+        {
+            Toasts.Error("Could not duplicate", result.Error);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await FlowService.DeleteAsync(Id);
+        if (Toasts.FromResult(result, "Flow deleted"))
+        {
+            Nav.NavigateTo("/automation/flows");
+        }
+    }
+
+    private async Task RotateSecretAsync()
+    {
+        var result = await FlowService.RotateWebhookSecretAsync(Id);
+        if (result.Succeeded)
+        {
+            _secret = result.Value;
+            _secretOpen = true;
+            _model!.HasWebhookSecret = true;
+        }
+        else
+        {
+            Toasts.Error("Could not create the secret", result.Error);
+        }
+    }
+
+    private void OpenTest()
+    {
+        if (IsDirty)
+        {
+            Toasts.Warning("Unsaved changes", "Test runs execute the saved version. Save first.");
+            return;
+        }
+
+        _testOpen = true;
+    }
+
+    private async Task StartTestAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        Guid? recordId = null;
+        if (!string.IsNullOrWhiteSpace(_testRecordId))
+        {
+            if (!Guid.TryParse(_testRecordId.Trim(), out var parsed))
+            {
+                Toasts.Error("Invalid record id", "Enter the record's GUID.");
+                return;
+            }
+
+            recordId = parsed;
+        }
+
+        var inputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var input in _model.Inputs)
+        {
+            var value = _testInputs.GetValueOrDefault(input.Name) ?? input.DefaultValue;
+            if (!string.IsNullOrEmpty(value))
+            {
+                inputs[input.Name] = value;
+            }
+        }
+
+        _busy = true;
+        var result = await FlowService.StartTestRunAsync(_model.Id, new FlowTestRequest { Inputs = inputs, RecordId = recordId, PayloadJson = _testPayload });
+        _busy = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Test run not started", result.Error);
+            return;
+        }
+
+        _testOpen = false;
+        _testRunId = result.Value;
+        _testDetail = null;
+        _results = [];
+        Toasts.Info("Test run started", "Watch the steps execute on the canvas.");
+        StartPolling(result.Value);
+    }
+
+    private void StartPolling(Guid runId)
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = new CancellationTokenSource(TimeSpan.FromMinutes(15));
+        _ = PollAsync(runId, _pollCts.Token);
+    }
+
+    private async Task PollAsync(Guid runId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            do
+            {
+                var result = await RunService.GetAsync(runId, cancellationToken);
+                if (result.Succeeded)
+                {
+                    _testDetail = result.Value;
+                    _results = result.Value!.Steps
+                        .GroupBy(s => s.StepId)
+                        .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Sequence).First().Status);
+                    await InvokeAsync(StateHasChanged);
+                    if (result.Value.Run.Status is FlowRunStatus.Succeeded or FlowRunStatus.Failed or FlowRunStatus.Cancelled)
+                    {
+                        var status = result.Value.Run.Status;
+                        await InvokeAsync(() =>
+                        {
+                            if (status == FlowRunStatus.Succeeded)
+                            {
+                                Toasts.Success("Test run succeeded", FlowUi.Duration(result.Value.Run.DurationMs));
+                            }
+                            else
+                            {
+                                Toasts.Warning($"Test run {status.ToString().ToLowerInvariant()}", result.Value.Run.Error);
+                            }
+                        });
+                        return;
+                    }
+                }
+            }
+            while (await timer.WaitForNextTickAsync(cancellationToken));
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigation away or polling window elapsed.
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+    }
+}

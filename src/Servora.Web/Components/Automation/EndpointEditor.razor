@@ -1,0 +1,143 @@
+@* Editor of a data source endpoint: method, path template, validated parameters, JSON body template and response mapping. *@
+
+<div class="stack">
+    <div class="form-grid">
+        <FormField Label="Name" Required="true">
+            <input class="input" value="@Model.Name" disabled="@ReadOnly" @onchange="e => Model.Name = e.Value?.ToString() ?? string.Empty" placeholder="Get user" />
+        </FormField>
+        <FormField Label="Key" Required="true" Help="Used by flows, imports and MCP tools to call the endpoint.">
+            <input class="input mono" value="@Model.Key" disabled="@ReadOnly" @onchange="e => Model.Key = e.Value?.ToString()?.Trim() ?? string.Empty" placeholder="get_user" />
+        </FormField>
+    </div>
+
+    <FormField Label="Request" Required="true" Help="Path relative to the base URL. {name} placeholders are filled from path parameters (URL-encoded).">
+        <div class="ee-request">
+            <select class="select ee-method" value="@Model.Method" disabled="@ReadOnly" @onchange="SetMethod">
+                @foreach (var method in s_methods)
+                {
+                    <option value="@method">@method</option>
+                }
+            </select>
+            <input class="input mono" value="@Model.PathTemplate" disabled="@ReadOnly" @onchange="SetPath" placeholder="/users/{id}" />
+        </div>
+    </FormField>
+
+    <FormField Label="Description">
+        <input class="input" value="@Model.Description" disabled="@ReadOnly" @onchange="e => Model.Description = e.Value?.ToString()" />
+    </FormField>
+
+    <div>
+        <div class="flex items-center justify-between mb-2">
+            <span class="eyebrow">Allowed parameters</span>
+            @if (!ReadOnly)
+            {
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="AddParameter"><Icon Name="plus" Size="14" /> Add parameter</button>
+            }
+        </div>
+        @if (Model.Parameters.Count == 0)
+        {
+            <div class="ee-empty">No parameters. Callers cannot pass any values – only parameters listed here are accepted and validated.</div>
+        }
+        @foreach (var parameter in Model.Parameters)
+        {
+            var expanded = _expanded.Contains(parameter);
+            <div class="ee-param" @key="parameter">
+                <div class="ee-param-row">
+                    <input class="input mono" placeholder="name" value="@parameter.Name" disabled="@ReadOnly" @onchange="e => parameter.Name = e.Value?.ToString()?.Trim() ?? string.Empty" />
+                    <select class="select" value="@parameter.Location" disabled="@ReadOnly" @onchange="e => parameter.Location = Enum.TryParse<EndpointParameterLocation>(e.Value?.ToString(), out var location) ? location : EndpointParameterLocation.Query">
+                        @foreach (var location in Enum.GetValues<EndpointParameterLocation>())
+                        {
+                            <option value="@location">@location</option>
+                        }
+                    </select>
+                    <select class="select" value="@parameter.Type" disabled="@ReadOnly" @onchange="e => parameter.Type = Enum.TryParse<EndpointParameterType>(e.Value?.ToString(), out var type) ? type : EndpointParameterType.String">
+                        @foreach (var type in Enum.GetValues<EndpointParameterType>())
+                        {
+                            <option value="@type">@type</option>
+                        }
+                    </select>
+                    <label class="checkbox small"><input type="checkbox" checked="@parameter.Required" disabled="@ReadOnly" @onchange="e => parameter.Required = e.Value is true" /> Required</label>
+                    <button type="button" class="icon-btn" title="Validation rules" @onclick="() => Toggle(parameter)"><Icon Name="@(expanded ? "chevron-up" : "sliders")" Size="15" /></button>
+                    @if (!ReadOnly)
+                    {
+                        <button type="button" class="icon-btn" title="Remove" @onclick="() => Model.Parameters.Remove(parameter)"><Icon Name="x" Size="15" /></button>
+                    }
+                </div>
+                @if (expanded)
+                {
+                    <div class="form-grid cols-3 mt-3">
+                        <FormField Label="Max length">
+                            <input class="input" type="number" min="1" max="2000" value="@parameter.MaxLength" disabled="@ReadOnly" @onchange="e => parameter.MaxLength = int.TryParse(e.Value?.ToString(), out var max) ? Math.Clamp(max, 1, 2000) : 200" />
+                        </FormField>
+                        <FormField Label="Pattern (regex)" Help="Whole value must match.">
+                            <input class="input mono" value="@parameter.Pattern" disabled="@ReadOnly" @onchange="e => parameter.Pattern = NullIfEmpty(e.Value)" placeholder="^[0-9]+$" />
+                        </FormField>
+                        <FormField Label="Default value">
+                            <input class="input" value="@parameter.DefaultValue" disabled="@ReadOnly" @onchange="e => parameter.DefaultValue = NullIfEmpty(e.Value)" />
+                        </FormField>
+                        @if (parameter.Type == EndpointParameterType.Enum)
+                        {
+                            <FormField Label="Allowed values" Help="Comma separated." Class="span-2">
+                                <input class="input" value="@string.Join(", ", parameter.AllowedValues)" disabled="@ReadOnly" @onchange="e => parameter.AllowedValues = SplitList(e.Value)" />
+                            </FormField>
+                        }
+                        <FormField Label="Description" Class="@(parameter.Type == EndpointParameterType.Enum ? null : "span-2")">
+                            <input class="input" value="@parameter.Description" disabled="@ReadOnly" @onchange="e => parameter.Description = NullIfEmpty(e.Value)" />
+                        </FormField>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    @if (Model.Method is not "GET" and not "DELETE")
+    {
+        <FormField Label="JSON body template" Help="{{name}} inserts a body/query/path parameter JSON-encoded, e.g. { &quot;title&quot;: {{title}} }.">
+            <textarea class="textarea mono" rows="6" disabled="@ReadOnly" @onchange="e => Model.BodyTemplate = NullIfEmpty(e.Value)">@Model.BodyTemplate</textarea>
+        </FormField>
+    }
+
+    <div class="form-grid">
+        <FormField Label="Response path" Help="Optional JSON path of the useful part, e.g. data.items">
+            <input class="input mono" value="@Model.ResponsePath" disabled="@ReadOnly" @onchange="e => Model.ResponsePath = NullIfEmpty(e.Value)" placeholder="data.items" />
+        </FormField>
+        <div class="field" style="justify-content:flex-end">
+            <Switch Value="Model.IsEnabled" ValueChanged="v => Model.IsEnabled = v" Label="Endpoint enabled" Disabled="ReadOnly" />
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly string[] s_methods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+    private readonly HashSet<EndpointParameterDefinition> _expanded = [];
+
+    /// <summary>Gets or sets the endpoint (edited in place).</summary>
+    [Parameter, EditorRequired] public DataSourceEndpointModel Model { get; set; } = default!;
+
+    /// <summary>Gets or sets a value indicating whether editing is disabled.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private void SetMethod(ChangeEventArgs e) => Model.Method = NullIfEmpty(e.Value) ?? "GET";
+
+    private void SetPath(ChangeEventArgs e) => Model.PathTemplate = NullIfEmpty(e.Value) ?? "/";
+
+    private void AddParameter()
+    {
+        var parameter = new EndpointParameterDefinition { Name = $"param{Model.Parameters.Count + 1}" };
+        Model.Parameters.Add(parameter);
+        _expanded.Add(parameter);
+    }
+
+    private void Toggle(EndpointParameterDefinition parameter)
+    {
+        if (!_expanded.Remove(parameter))
+        {
+            _expanded.Add(parameter);
+        }
+    }
+
+    private static string? NullIfEmpty(object? value) => string.IsNullOrWhiteSpace(value?.ToString()) ? null : value.ToString()!.Trim();
+
+    private static List<string> SplitList(object? value) =>
+        (value?.ToString() ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().Take(100).ToList();
+}

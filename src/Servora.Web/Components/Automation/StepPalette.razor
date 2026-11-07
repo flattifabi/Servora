@@ -1,0 +1,72 @@
+@* Add-step palette: searchable, categorised grid of the registered step types. *@
+
+<Modal Open="Open" OpenChanged="OpenChanged" Title="Add a step" Subtitle="Pick an action, a flow logic element or an integration." Icon="plus" Size="lg">
+    <div class="input-icon mb-4">
+        <Icon Name="search" Size="16" />
+        <input class="input" placeholder="Search steps…" @bind="_term" @bind:event="oninput" />
+    </div>
+    @{
+        var groups = Descriptors
+            .Where(d => string.IsNullOrWhiteSpace(_term) || d.Name.Contains(_term, StringComparison.OrdinalIgnoreCase) || d.Description.Contains(_term, StringComparison.OrdinalIgnoreCase) || d.Category.Contains(_term, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(d => d.Category)
+            .OrderBy(g => CategoryOrder(g.Key))
+            .ToList();
+    }
+    @if (groups.Count == 0)
+    {
+        <EmptyState Icon="search" Title="No matching steps" Text="Try another search term." />
+    }
+    @foreach (var group in groups)
+    {
+        <div class="sp-group">@group.Key</div>
+        <div class="sp-grid">
+            @foreach (var descriptor in group.OrderBy(d => d.Name))
+            {
+                <button type="button" class="sp-item" style="--tone:@FlowUi.ToneColor(descriptor.Tone);--tone-soft:@FlowUi.ToneSoft(descriptor.Tone)" @onclick="() => PickAsync(descriptor)">
+                    <span class="sp-icon"><Icon Name="@descriptor.Icon" Size="18" /></span>
+                    <span class="sp-text">
+                        <span class="sp-name">@descriptor.Name
+                            @if (descriptor.Branches.Count > 0)
+                            {
+                                <span class="tag">@descriptor.Branches.Count lanes</span>
+                            }
+                        </span>
+                        <span class="sp-desc">@descriptor.Description</span>
+                    </span>
+                </button>
+            }
+        </div>
+    }
+</Modal>
+
+@code {
+    private string _term = string.Empty;
+
+    /// <summary>Gets or sets a value indicating whether the palette is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the step type descriptors.</summary>
+    [Parameter] public IReadOnlyList<FlowActionDescriptor> Descriptors { get; set; } = [];
+
+    /// <summary>Raised when a step type is picked.</summary>
+    [Parameter] public EventCallback<FlowActionDescriptor> OnPick { get; set; }
+
+    private static int CategoryOrder(string category) => category switch
+    {
+        "Records" => 0,
+        "Flow logic" => 1,
+        "Approvals" => 2,
+        "Communication" => 3,
+        "Integration" => 4,
+        _ => 5,
+    };
+
+    private async Task PickAsync(FlowActionDescriptor descriptor)
+    {
+        _term = string.Empty;
+        await OnPick.InvokeAsync(descriptor);
+    }
+}

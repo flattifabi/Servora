@@ -1,0 +1,4 @@
+.kv-editor { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.kv-row { display: grid; grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.5fr) 36px; gap: 8px; align-items: start; }
+.kv-suggest { cursor: pointer; }
+.kv-suggest:hover { border-color: var(--primary); color: var(--primary); }

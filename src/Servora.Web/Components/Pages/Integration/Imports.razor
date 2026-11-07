@@ -1,0 +1,134 @@
+@page "/integration/imports"
+@* Import sets: KPIs, server-paged list with source, target table, coalesce key, schedule and latest run status. *@
+@attribute [RequirePermission(Permissions.Integration.ManageImports)]
+@inject IImportSetService ImportService
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Import Sets · Servora</PageTitle>
+
+<PageHeader Title="Import Sets" Subtitle="Load CSV files or JSON from approved REST endpoints into any table – staged, transformed and fully traceable." Icon="download">
+    <Actions>
+        <a class="btn btn-primary" href="/integration/imports/new"><Icon Name="plus" Size="16" /> New import set</a>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_overview is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Import sets" Value="@_overview.ImportSets.ToString("N0")" Icon="download" Tone="primary" Caption="@($"{_overview.Scheduled} scheduled")" />
+        <StatCard Label="Runs (7 days)" Value="@_overview.Runs7d.ToString("N0")" Icon="activity" Tone="accent" Caption="manual and scheduled" />
+        <StatCard Label="Rows imported (7 days)" Value="@_overview.RowsImported7d.ToString("N0")" Icon="database" Tone="success" Caption="inserted + updated" />
+        <StatCard Label="Row errors (7 days)" Value="@_overview.RowErrors7d.ToString("N0")" Icon="alert-triangle" Tone="@(_overview.RowErrors7d > 0 ? "danger" : "success")" Caption="see run history" />
+    }
+</div>
+
+<DataTable TItem="ImportSetListItem" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize" Loading="_loading"
+           OnPageChanged="GoToPageAsync" OnSearch="SearchAsync" OnRowClick="@(r => Nav.NavigateTo($"/integration/imports/{r.Id}"))"
+           SearchPlaceholder="Search name or table…" EmptyIcon="download" EmptyTitle="No import sets yet"
+           EmptyText="Define a source, a target table and a transform map once – then import on demand or on a schedule.">
+    <EmptyContent>
+        <a class="btn btn-primary" href="/integration/imports/new"><Icon Name="plus" Size="16" /> Create an import set</a>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="ImportSetListItem" Title="Import set">
+            <Template>
+                <span class="flex items-center gap-3">
+                    <span class="imp-icon"><Icon Name="@(context.SourceType == ImportSourceType.CsvUpload ? "file-text" : "plug")" Size="16" /></span>
+                    <span>
+                        <span class="cell-primary">@context.Name</span>
+                        <span class="cell-sub">@(context.SourceType == ImportSourceType.CsvUpload ? "CSV upload" : "Data source endpoint")</span>
+                    </span>
+                </span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ImportSetListItem" Title="Target" Width="200px">
+            <Template>
+                <span class="mono small">@context.TargetTable</span>
+                <span class="cell-sub">@(context.CoalesceField is null ? "insert only" : $"coalesce on {context.CoalesceField}")</span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ImportSetListItem" Title="Last run" Width="200px">
+            <Template>
+                @if (context.LastRunStatus is { } status)
+                {
+                    <StatusPill Text="@FlowUi.ImportLabel(status)" Tone="@FlowUi.ImportTone(status)" />
+                    <span class="cell-sub"><RelativeTime Value="context.LastRunAt" /> · @context.LastRunRows rows</span>
+                }
+                else
+                {
+                    <span class="faint small">Never run</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ImportSetListItem" Title="Schedule" Width="170px">
+            <Template>
+                @if (context.ScheduleEnabled)
+                {
+                    <span class="pill pill-info no-dot"><Icon Name="calendar-clock" Size="11" /> Scheduled</span>
+                    <span class="cell-sub">next <RelativeTime Value="context.NextRunAt" /></span>
+                }
+                else
+                {
+                    <span class="faint small">On demand</span>
+                }
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private PagedResult<ImportSetListItem> _page = PagedResult<ImportSetListItem>.Empty();
+    private ImportOverview? _overview;
+    private string? _search;
+    private int _pageNumber = 1;
+    private bool _loading = true;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var overview = await ImportService.GetOverviewAsync();
+        if (overview.Succeeded)
+        {
+            _overview = overview.Value;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await ImportService.ListAsync(new PageRequest { Page = _pageNumber, PageSize = 25, Search = _search, SortBy = "Name" });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Could not load import sets", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+}

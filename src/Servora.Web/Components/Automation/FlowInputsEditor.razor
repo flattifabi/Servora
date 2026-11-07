@@ -1,0 +1,61 @@
+@* Editor of the inputs of a flow (manual starts, test runs, sub-flow calls): name, label, type, required, default. *@
+
+<div class="fie">
+    @if (Inputs.Count == 0)
+    {
+        <div class="small faint">No inputs. Inputs are available as <span class="mono">{{inputs.&lt;name&gt;}}</span>.</div>
+    }
+    @foreach (var input in Inputs)
+    {
+        <div class="fie-row" @key="input">
+            <input class="input mono" placeholder="name" value="@input.Name" disabled="@ReadOnly" @onchange="e => SetAsync(() => input.Name = e.Value?.ToString()?.Trim() ?? string.Empty)" />
+            <input class="input" placeholder="Label" value="@input.Label" disabled="@ReadOnly" @onchange="e => SetAsync(() => input.Label = e.Value?.ToString() ?? string.Empty)" />
+            <select class="select" value="@input.Type" disabled="@ReadOnly" @onchange="e => SetAsync(() => input.Type = TypeOf(e))">
+                <option value="string">Text</option>
+                <option value="number">Number</option>
+                <option value="boolean">Yes / no</option>
+                <option value="record">Record id</option>
+            </select>
+            <input class="input" placeholder="Default" value="@input.DefaultValue" disabled="@ReadOnly" @onchange="e => SetAsync(() => input.DefaultValue = string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString())" />
+            <label class="checkbox" title="Required"><input type="checkbox" checked="@input.Required" disabled="@ReadOnly" @onchange="e => SetAsync(() => input.Required = e.Value is true)" /> Req.</label>
+            <button type="button" class="icon-btn" title="Remove input" disabled="@ReadOnly" @onclick="() => SetAsync(() => Inputs.Remove(input))"><Icon Name="x" Size="15" /></button>
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <div>
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SetAsync(() => Inputs.Add(new FlowInputDefinition { Name = NextName(), Label = string.Empty }))"><Icon Name="plus" Size="14" /> Add input</button>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the inputs (edited in place).</summary>
+    [Parameter, EditorRequired] public List<FlowInputDefinition> Inputs { get; set; } = [];
+
+    /// <summary>Gets or sets a value indicating whether editing is disabled.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Raised after an input changed.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private string NextName()
+    {
+        for (var i = 1; ; i++)
+        {
+            var candidate = $"input{i}";
+            if (Inputs.All(x => !string.Equals(x.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static string TypeOf(ChangeEventArgs e) => e.Value?.ToString() is { Length: > 0 } type ? type : "string";
+
+    private Task SetAsync(Action change)
+    {
+        change();
+        return OnChanged.InvokeAsync();
+    }
+}

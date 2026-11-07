@@ -1,0 +1,299 @@
+@page "/automation/flows"
+@* Flow list: automation KPIs with hourly run trend, filters, server-paged flow table and the "new flow" wizard. *@
+@attribute [RequirePermission(Permissions.Automation.Read)]
+@inject IFlowService FlowService
+@inject ITableRegistry TableRegistry
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Flow Designer · Servora</PageTitle>
+
+<PageHeader Title="Flow Designer" Subtitle="Automate processes with record, schedule, webhook and data source triggers – no code required." Icon="workflow">
+    <Actions>
+        <a class="btn btn-secondary" href="/automation/runs"><Icon Name="activity" Size="16" /> Executions</a>
+        <PermissionView Permission="@Permissions.Automation.Manage">
+            <button class="btn btn-primary" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> New flow</button>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_overview is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Active flows" Value="@_overview.ActiveFlows.ToString("N0")" Icon="zap" Tone="primary"
+                  Caption="@($"of {_overview.TotalFlows:N0} flows")" OnClick="() => SetActiveFilterAsync(true)" />
+        <StatCard Label="Runs (24 h)" Value="@_overview.Runs24h.ToString("N0")" Icon="activity" Tone="accent"
+                  Caption="@($"{_overview.Running} running · {_overview.Waiting} waiting")" Trend="_overview.HourlyRuns" OnClick="@(() => Nav.NavigateTo("/automation/runs"))" />
+        <StatCard Label="Success rate" Value="@($"{_overview.SuccessRate:0.#} %")" Icon="check-circle" Tone="@(_overview.SuccessRate >= 95 || _overview.Runs24h == 0 ? "success" : "warning")"
+                  Caption="@($"avg. {FlowUi.Duration(_overview.AverageDurationMs)}")" />
+        <StatCard Label="Failed (24 h)" Value="@_overview.Failed24h.ToString("N0")" Icon="alert-octagon" Tone="@(_overview.Failed24h > 0 ? "danger" : "success")"
+                  Caption="needs attention" OnClick="@(() => Nav.NavigateTo("/automation/runs?status=Failed"))" />
+    }
+</div>
+
+<DataTable TItem="FlowListItem" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync"
+           OnRowClick="@(r => Nav.NavigateTo($"/automation/flows/{r.Id}"))" SearchPlaceholder="Search name or description…"
+           EmptyIcon="workflow" EmptyTitle="@(_search is { Length: > 0 } ? "No matching flows" : "No flows yet")"
+           EmptyText="Flows react to record changes, schedules, webhooks or data source changes and run steps automatically.">
+    <Toolbar>
+        <div class="segmented">
+            <button class="@(_active is null ? "active" : null)" @onclick="() => SetActiveFilterAsync(null)">All</button>
+            <button class="@(_active == true ? "active" : null)" @onclick="() => SetActiveFilterAsync(true)">Active</button>
+            <button class="@(_active == false ? "active" : null)" @onclick="() => SetActiveFilterAsync(false)">Inactive</button>
+        </div>
+        <select class="select" style="width:auto" value="@(_trigger?.ToString() ?? string.Empty)" @onchange="SetTriggerFilterAsync">
+            <option value="">All triggers</option>
+            @foreach (var type in Enum.GetValues<FlowTriggerType>())
+            {
+                <option value="@type">@FlowUi.TriggerLabel(type)</option>
+            }
+        </select>
+    </Toolbar>
+    <EmptyContent>
+        <PermissionView Permission="@Permissions.Automation.Manage">
+            <button class="btn btn-primary" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> Create your first flow</button>
+        </PermissionView>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="FlowListItem" Title="Flow" SortKey="Name">
+            <Template>
+                <span class="flex items-center gap-3">
+                    <span class="flow-icon @(context.IsActive ? "on" : null)"><Icon Name="@FlowUi.TriggerIcon(context.TriggerType)" Size="16" /></span>
+                    <span style="min-width:0">
+                        <span class="cell-primary truncate" style="display:block;max-width:min(420px, 28vw)">@context.Name</span>
+                        <span class="cell-sub truncate" style="display:block;max-width:min(420px, 28vw)">@(context.Description ?? "No description")</span>
+                    </span>
+                </span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="FlowListItem" Title="Trigger" SortKey="Trigger" Width="230px">
+            <Template>
+                <span class="small">@FlowUi.TriggerLabel(context.TriggerType)</span>
+                <span class="cell-sub mono">@(context.TriggerTable ?? context.CronExpression ?? "—")</span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="FlowListItem" Title="State" Width="110px">
+            <Template><StatusPill Text="@(context.IsActive ? "Active" : "Inactive")" Tone="@(context.IsActive ? "success" : "neutral")" /></Template>
+        </DataColumn>
+        <DataColumn TItem="FlowListItem" Title="Last run" Width="170px">
+            <Template>
+                @if (context.LastRunStatus is { } status)
+                {
+                    <StatusPill Text="@status.ToString()" Tone="@FlowUi.RunTone(status)" />
+                    <span class="cell-sub"><RelativeTime Value="context.LastRunAt" /> · @context.Runs24h in 24 h</span>
+                }
+                else
+                {
+                    <span class="faint small">Never run</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="FlowListItem" Title="Next run" Width="130px">
+            <Template><RelativeTime Value="context.NextRunAt" Class="small muted" /></Template>
+        </DataColumn>
+        <DataColumn TItem="FlowListItem" Title="Version" Width="90px">
+            <Template><span class="tag mono">@($"v{context.DefinitionVersion}")</span></Template>
+        </DataColumn>
+        <DataColumn TItem="FlowListItem" Title="Updated" SortKey="UpdatedAt" Width="140px">
+            <Template>
+                <RelativeTime Value="context.UpdatedAt" Class="small muted" />
+                <span class="cell-sub">@context.UpdatedBy</span>
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<Modal @bind-Open="_createOpen" Title="New flow" Subtitle="Start with a trigger – you add steps in the designer." Icon="workflow" Size="lg">
+    <ChildContent>
+        <div class="stack">
+            <div class="form-grid">
+                <FormField Label="Name" Required="true" Error="@_nameError">
+                    <input class="input" @bind="_name" placeholder="e.g. Escalate P1 incidents" />
+                </FormField>
+                <FormField Label="Description">
+                    <input class="input" @bind="_description" placeholder="What does the flow do?" />
+                </FormField>
+            </div>
+            <div>
+                <div class="eyebrow mb-2">Trigger</div>
+                <div class="trigger-grid">
+                    @foreach (var type in Enum.GetValues<FlowTriggerType>())
+                    {
+                        <button type="button" class="trigger-option @(_newTrigger == type ? "active" : null)" @onclick="() => _newTrigger = type">
+                            <span class="trigger-option-icon"><Icon Name="@FlowUi.TriggerIcon(type)" Size="18" /></span>
+                            <span class="trigger-option-name">@FlowUi.TriggerLabel(type)</span>
+                            <span class="trigger-option-desc">@TriggerDescription(type)</span>
+                        </button>
+                    }
+                </div>
+            </div>
+            @if (_newTrigger is FlowTriggerType.RecordCreated or FlowTriggerType.RecordUpdated or FlowTriggerType.RecordCreatedOrUpdated)
+            {
+                <FormField Label="Table" Required="true">
+                    <select class="select" @bind="_table">
+                        <option value="">— Select a table —</option>
+                        @foreach (var table in _tables.OrderBy(t => t.Label))
+                        {
+                            <option value="@table.Name">@table.Label (@table.Name)</option>
+                        }
+                    </select>
+                </FormField>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _createOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_creating" @onclick="CreateAsync">
+            @if (_creating) { <span class="spinner"></span> } else { <Icon Name="arrow-right" Size="16" /> }
+            Create and open designer
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private PagedResult<FlowListItem> _page = PagedResult<FlowListItem>.Empty();
+    private FlowOverview? _overview;
+    private IReadOnlyList<TableDefinition> _tables = [];
+    private bool? _active;
+    private FlowTriggerType? _trigger;
+    private string _sort = "Name";
+    private bool _desc;
+    private string? _search;
+    private int _pageNumber = 1;
+    private bool _loading = true;
+    private bool _createOpen;
+    private bool _creating;
+    private string? _name;
+    private string? _description;
+    private string? _table;
+    private string? _nameError;
+    private FlowTriggerType _newTrigger = FlowTriggerType.RecordCreated;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(LoadAsync(), LoadOverviewAsync());
+    }
+
+    private static string TriggerDescription(FlowTriggerType type) => type switch
+    {
+        FlowTriggerType.RecordCreated => "A record is inserted",
+        FlowTriggerType.RecordUpdated => "A record is changed",
+        FlowTriggerType.RecordCreatedOrUpdated => "Inserted or changed",
+        FlowTriggerType.Schedule => "Cron schedule",
+        FlowTriggerType.Webhook => "Authenticated HTTP POST",
+        FlowTriggerType.DataSourcePoll => "Poll a REST endpoint",
+        _ => "On demand, API, sub-flow",
+    };
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await FlowService.ListAsync(new FlowListQuery
+        {
+            Page = new PageRequest { Page = _pageNumber, PageSize = 25, SortBy = _sort, SortDescending = _desc, Search = _search },
+            Active = _active,
+            Trigger = _trigger,
+        });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Could not load flows", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task LoadOverviewAsync()
+    {
+        var result = await FlowService.GetOverviewAsync();
+        if (result.Succeeded)
+        {
+            _overview = result.Value;
+        }
+    }
+
+    private async Task SetActiveFilterAsync(bool? active)
+    {
+        _active = active;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SetTriggerFilterAsync(ChangeEventArgs e)
+    {
+        _trigger = Enum.TryParse<FlowTriggerType>(e.Value?.ToString(), out var trigger) ? trigger : null;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task OpenCreate()
+    {
+        _name = null;
+        _description = null;
+        _table = null;
+        _nameError = null;
+        _newTrigger = FlowTriggerType.RecordCreated;
+        if (_tables.Count == 0)
+        {
+            _tables = await TableRegistry.GetTablesAsync();
+        }
+
+        _createOpen = true;
+    }
+
+    private async Task CreateAsync()
+    {
+        _nameError = string.IsNullOrWhiteSpace(_name) ? "A name is required." : null;
+        if (_nameError is not null)
+        {
+            return;
+        }
+
+        _creating = true;
+        var result = await FlowService.CreateAsync(new FlowCreateRequest(_name!.Trim(), _description, _newTrigger, _table));
+        _creating = false;
+        if (result.Succeeded)
+        {
+            _createOpen = false;
+            Toasts.Success("Flow created", "Add steps and activate it when ready.");
+            Nav.NavigateTo($"/automation/flows/{result.Value}");
+        }
+        else
+        {
+            Toasts.Error("Could not create the flow", result.Error);
+        }
+    }
+}

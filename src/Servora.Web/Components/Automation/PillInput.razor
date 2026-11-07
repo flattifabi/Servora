@@ -1,0 +1,61 @@
+@* Text input (single or multi-line) with a data pill picker that inserts {{pills}} into the value. *@
+<div class="pill-input @(Multiline ? "multi" : null)">
+    @if (Multiline)
+    {
+        <textarea class="textarea mono-pills" rows="@Rows" placeholder="@Placeholder" disabled="@Disabled" value="@Value" @onchange="OnChanged"></textarea>
+    }
+    else
+    {
+        <input class="input mono-pills" placeholder="@Placeholder" disabled="@Disabled" value="@Value" @onchange="OnChanged" />
+    }
+    @if (ShowPicker && !Disabled)
+    {
+        <button type="button" class="pill-btn" title="Insert data pill" @onclick="() => _open = !_open"><Icon Name="braces" Size="14" /></button>
+        @if (_open)
+        {
+            <DataPillMenu Pills="Pills" OnPick="InsertAsync" OnClose="() => _open = false" />
+        }
+    }
+</div>
+
+@code {
+    private bool _open;
+
+    /// <summary>Gets or sets the value.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Raised when the value changes.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets the available data pills.</summary>
+    [Parameter] public IReadOnlyList<FlowDataPill> Pills { get; set; } = [];
+
+    /// <summary>Gets or sets a value indicating whether a multi-line editor is shown.</summary>
+    [Parameter] public bool Multiline { get; set; }
+
+    /// <summary>Gets or sets the number of rows of the multi-line editor.</summary>
+    [Parameter] public int Rows { get; set; } = 4;
+
+    /// <summary>Gets or sets the placeholder.</summary>
+    [Parameter] public string? Placeholder { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the input is disabled.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the pill picker is offered.</summary>
+    [Parameter] public bool ShowPicker { get; set; } = true;
+
+    private async Task OnChanged(ChangeEventArgs e)
+    {
+        Value = e.Value?.ToString();
+        await ValueChanged.InvokeAsync(Value);
+    }
+
+    private async Task InsertAsync(FlowDataPill pill)
+    {
+        _open = false;
+        var current = Value ?? string.Empty;
+        Value = current.Length == 0 || current.EndsWith(' ') || current.EndsWith('\n') ? current + pill.Expression : current + " " + pill.Expression;
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

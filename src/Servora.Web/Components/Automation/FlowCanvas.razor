@@ -1,0 +1,193 @@
+@* Vertical Flow Designer canvas: step cards joined by connectors, insert points and branch lanes (recursive per lane). *@
+
+<div class="fc-list @(Depth == 0 ? "fc-root" : null)">
+    @for (var i = 0; i < Steps.Count; i++)
+    {
+        var index = i;
+        var step = Steps[index];
+        var descriptor = Descriptors.FirstOrDefault(d => d.Type == step.Type);
+        var tone = descriptor?.Tone ?? "danger";
+        var selected = step.Id == SelectedStepId;
+        Results.TryGetValue(step.Id, out var result);
+        var hasResult = Results.ContainsKey(step.Id);
+
+        <div class="fc-connector">
+            @if (!ReadOnly)
+            {
+                <button type="button" class="fc-add" title="Insert a step here" @onclick="() => OnAdd.InvokeAsync(new StepInsertPoint(Steps, index))"><Icon Name="plus" Size="13" StrokeWidth="2.6" /></button>
+            }
+        </div>
+
+        <div class="fc-node" @key="step.Id">
+            <div class="fc-card @(selected ? "selected" : null) @(step.Disabled ? "disabled" : null) @(hasResult ? "result-" + FlowUi.StepTone(result) : null)"
+                 style="--tone:@FlowUi.ToneColor(tone);--tone-soft:@FlowUi.ToneSoft(tone)"
+                 @onclick="() => OnSelect.InvokeAsync(step)">
+                <div class="fc-icon"><Icon Name="@(descriptor?.Icon ?? "alert-triangle")" Size="18" /></div>
+                <div class="fc-main">
+                    <div class="fc-title">
+                        <span class="fc-name truncate">@step.Name</span>
+                        @if (hasResult)
+                        {
+                            <span class="fc-result" title="Test run: @result">
+                                @if (result == FlowStepStatus.Running)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                else
+                                {
+                                    <Icon Name="@FlowUi.StepIcon(result)" Size="12" StrokeWidth="2.8" />
+                                }
+                            </span>
+                        }
+                    </div>
+                    <div class="fc-meta">
+                        <span class="fc-type">@(descriptor?.Name ?? step.Type)</span>
+                        @if (!string.IsNullOrEmpty(step.Key))
+                        {
+                            <span class="fc-key mono">steps.@step.Key</span>
+                        }
+                    </div>
+                    @if (FlowUi.StepSummary(step, descriptor) is { } summary)
+                    {
+                        <div class="fc-summary mono truncate" title="@summary">@summary</div>
+                    }
+                    @if (step.Disabled || step.RetryCount > 0 || step.ContinueOnError || descriptor?.CanWait == true)
+                    {
+                        <div class="fc-badges">
+                            @if (step.Disabled)
+                            {
+                                <span class="pill pill-neutral no-dot">Disabled</span>
+                            }
+                            @if (step.RetryCount > 0)
+                            {
+                                <span class="pill pill-info no-dot"><Icon Name="refresh" Size="11" /> @(step.RetryCount == 1 ? "1 retry" : $"{step.RetryCount} retries")</span>
+                            }
+                            @if (step.ContinueOnError)
+                            {
+                                <span class="pill pill-warning no-dot">Continue on error</span>
+                            }
+                            @if (descriptor?.CanWait == true)
+                            {
+                                <span class="pill pill-purple no-dot"><Icon Name="pause" Size="11" /> Can wait</span>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (!ReadOnly)
+                {
+                    <div class="fc-tools" @onclick:stopPropagation="true">
+                        <button type="button" class="icon-btn" title="Move up" disabled="@(index == 0)" @onclick="() => MoveAsync(index, -1)"><Icon Name="arrow-up" Size="14" /></button>
+                        <button type="button" class="icon-btn" title="Move down" disabled="@(index == Steps.Count - 1)" @onclick="() => MoveAsync(index, 1)"><Icon Name="arrow-down" Size="14" /></button>
+                        <button type="button" class="icon-btn" title="Duplicate" @onclick="() => DuplicateAsync(index)"><Icon Name="copy" Size="14" /></button>
+                        <button type="button" class="icon-btn fc-delete" title="Delete" @onclick="() => OnRemove.InvokeAsync(new StepInsertPoint(Steps, index))"><Icon Name="trash" Size="14" /></button>
+                    </div>
+                }
+            </div>
+
+            @if (step.Branches.Count > 0)
+            {
+                <div class="fc-branches" style="--lanes:@step.Branches.Count">
+                    @foreach (var branch in step.Branches)
+                    {
+                        var branchTone = descriptor?.Branches.FirstOrDefault(b => string.Equals(b.Key, branch.Key, StringComparison.OrdinalIgnoreCase))?.Tone ?? "neutral";
+                        <div class="fc-lane" style="--lane:@FlowUi.ToneColor(branchTone);--lane-soft:@FlowUi.ToneSoft(branchTone)" @key="branch.Key">
+                            <div class="fc-lane-head">
+                                <span class="fc-lane-dot"></span>
+                                <span>@(string.IsNullOrWhiteSpace(branch.Label) ? branch.Key : branch.Label)</span>
+                                <span class="faint tiny">@(branch.Steps.Count == 1 ? "1 step" : $"{branch.Steps.Count} steps")</span>
+                            </div>
+                            <FlowCanvas Steps="branch.Steps" Descriptors="Descriptors" SelectedStepId="@SelectedStepId" Results="Results" ReadOnly="ReadOnly"
+                                        Depth="Depth + 1" OnSelect="OnSelect" OnAdd="OnAdd" OnRemove="OnRemove" OnChanged="OnChanged" />
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (!ReadOnly)
+    {
+        <div class="fc-connector @(Steps.Count == 0 ? "empty" : null)">
+            @if (Steps.Count == 0 && Depth > 0)
+            {
+                <button type="button" class="fc-add-lane" @onclick="() => OnAdd.InvokeAsync(new StepInsertPoint(Steps, 0))"><Icon Name="plus" Size="13" /> Add step</button>
+            }
+            else
+            {
+                <button type="button" class="fc-add" title="Add a step" @onclick="() => OnAdd.InvokeAsync(new StepInsertPoint(Steps, Steps.Count))"><Icon Name="plus" Size="13" StrokeWidth="2.6" /></button>
+            }
+        </div>
+    }
+    else if (Steps.Count == 0 && Depth > 0)
+    {
+        <div class="fc-connector empty"><span class="tiny faint">No steps</span></div>
+    }
+
+    @if (Depth == 0)
+    {
+        <div class="fc-end"><Icon Name="check-circle" Size="14" /> End of flow</div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the step list rendered by this canvas level.</summary>
+    [Parameter, EditorRequired] public List<FlowStepDefinition> Steps { get; set; } = [];
+
+    /// <summary>Gets or sets the available step type descriptors.</summary>
+    [Parameter] public IReadOnlyList<FlowActionDescriptor> Descriptors { get; set; } = [];
+
+    /// <summary>Gets or sets the identifier of the selected step.</summary>
+    [Parameter] public string? SelectedStepId { get; set; }
+
+    /// <summary>Gets or sets the latest test run status per step identifier.</summary>
+    [Parameter] public IReadOnlyDictionary<string, FlowStepStatus> Results { get; set; } = new Dictionary<string, FlowStepStatus>();
+
+    /// <summary>Gets or sets a value indicating whether editing is disabled.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Gets or sets the nesting depth (0 = root).</summary>
+    [Parameter] public int Depth { get; set; }
+
+    /// <summary>Raised when a step card is clicked.</summary>
+    [Parameter] public EventCallback<FlowStepDefinition> OnSelect { get; set; }
+
+    /// <summary>Raised when the user wants to insert a step at a position.</summary>
+    [Parameter] public EventCallback<StepInsertPoint> OnAdd { get; set; }
+
+    /// <summary>Raised when the user wants to delete the step at a position.</summary>
+    [Parameter] public EventCallback<StepInsertPoint> OnRemove { get; set; }
+
+    /// <summary>Raised after the canvas changed the step tree (move, duplicate).</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private async Task MoveAsync(int index, int delta)
+    {
+        var target = index + delta;
+        if (target < 0 || target >= Steps.Count)
+        {
+            return;
+        }
+
+        (Steps[index], Steps[target]) = (Steps[target], Steps[index]);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task DuplicateAsync(int index)
+    {
+        var copy = FlowJson.TryDeserialize<FlowStepDefinition>(FlowJson.Serialize(Steps[index]));
+        if (copy is null)
+        {
+            return;
+        }
+
+        foreach (var step in FlowJson.Flatten([copy]))
+        {
+            step.Id = FlowStepDefinition.NewId();
+            step.Key = string.Empty;
+        }
+
+        copy.Name = $"{copy.Name} (copy)";
+        Steps.Insert(index + 1, copy);
+        await OnChanged.InvokeAsync();
+    }
+}
