@@ -1,0 +1,35 @@
+@* Grid of selectable icons from the design system's icon set (catalog items and categories). *@
+
+<div class="icon-chooser">
+    @foreach (var icon in s_icons)
+    {
+        <button type="button" class="icon-choice @(icon == Value ? "selected" : null)" title="@icon" disabled="@Disabled" @onclick="() => SelectAsync(icon)">
+            <Icon Name="@icon" Size="18" />
+        </button>
+    }
+</div>
+
+@code {
+    private static readonly string[] s_icons =
+    [
+        "package", "laptop", "monitor", "phone", "cpu", "hard-drive", "server", "database", "cloud", "globe", "network", "key", "lock", "unlock",
+        "shield", "shield-check", "id-card", "user", "user-plus", "user-check", "users", "mail", "message-square", "folder", "file-text",
+        "book-open", "wrench", "settings", "tag", "box", "building", "map-pin", "calendar", "clock", "life-buoy", "rocket", "star", "zap",
+        "shopping-cart", "grid", "layers", "code", "terminal", "bot", "sparkles", "award", "lightbulb", "target",
+    ];
+
+    /// <summary>Gets or sets the selected icon name.</summary>
+    [Parameter] public string Value { get; set; } = "package";
+
+    /// <summary>Raised when the selection changes.</summary>
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the chooser is disabled.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    private async Task SelectAsync(string icon)
+    {
+        Value = icon;
+        await ValueChanged.InvokeAsync(icon);
+    }
+}

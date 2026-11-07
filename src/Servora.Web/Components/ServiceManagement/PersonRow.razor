@@ -1,0 +1,26 @@
+@* Labeled person (avatar + name) used in side cards of record pages. *@
+
+<div>
+    <div class="tiny faint">@Label</div>
+    <div class="mt-1">
+        @if (!string.IsNullOrEmpty(Name))
+        {
+            <span class="person"><Avatar Name="@Name" Size="sm" /><span class="person-name">@Name</span></span>
+        }
+        else
+        {
+            <span class="small muted">@Fallback</span>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>Gets or sets the label.</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the person name.</summary>
+    [Parameter] public string? Name { get; set; }
+
+    /// <summary>Gets or sets the text shown when no person is set.</summary>
+    [Parameter] public string Fallback { get; set; } = "—";
+}

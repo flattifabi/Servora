@@ -1,0 +1,338 @@
+@page "/requests/new"
+@* Fulfiller "order on behalf" page: browse the service catalog, fill in the order form for a user and submit the order
+   through ICatalogOrderService (the same validation, approval and fulfilment pipeline the self-service portal uses). *@
+@attribute [RequirePermission(Permissions.Requests.Write)]
+@inject ICatalogOrderService Catalog
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>New request · Servora</PageTitle>
+
+<PageHeader Title="@(_form is null ? "New request" : _form.Item.Name)" Subtitle="@(_form is null ? "Order a catalog item on behalf of an employee." : _form.Item.ShortDescription)" Icon="@(_form?.Item.Icon ?? "shopping-cart")">
+    <Breadcrumbs>
+        <a href="/requests">Requests</a> <Icon Name="chevron-right" Size="12" />
+        @if (_form is null)
+        {
+            <span>New request</span>
+        }
+        else
+        {
+            <a href="/requests/new" @onclick="BackToCatalog" @onclick:preventDefault="true">New request</a> <Icon Name="chevron-right" Size="12" /> <span>@_form.Item.Name</span>
+        }
+    </Breadcrumbs>
+    <Actions>
+        @if (_form is not null)
+        {
+            <button class="btn btn-secondary" @onclick="BackToCatalog"><Icon Name="arrow-left" Size="16" /> Back to catalog</button>
+        }
+        else
+        {
+            <a class="btn btn-secondary" href="/requests"><Icon Name="x" Size="16" /> Cancel</a>
+        }
+    </Actions>
+</PageHeader>
+
+@if (_form is null)
+{
+    <div class="catalog-toolbar mb-4">
+        <div class="input-icon catalog-search">
+            <Icon Name="search" Size="16" />
+            <input class="input" placeholder="Search the catalog…" value="@_search" @oninput="OnSearchInput" />
+        </div>
+        <div class="category-chips">
+            <button class="category-chip @(_categoryId is null ? "active" : null)" @onclick="() => SelectCategoryAsync(null)"><Icon Name="grid" Size="14" /> All</button>
+            @foreach (var category in _categories)
+            {
+                <button class="category-chip @(_categoryId == category.Id ? "active" : null)" @key="category.Id" @onclick="() => SelectCategoryAsync(category.Id)">
+                    <Icon Name="@category.Icon" Size="14" /> @category.Name <span class="chip-count">@category.ItemCount</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="catalog-grid">
+            @for (var i = 0; i < 6; i++)
+            {
+                <div class="card card-body"><Skeleton Lines="3" /></div>
+            }
+        </div>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="card">
+            <EmptyState Icon="package" Title="No catalog items found" Text="@(string.IsNullOrWhiteSpace(_search) ? "There are no active items in this category yet." : $"Nothing matches “{_search}”.")">
+                <PermissionView Permission="@Permissions.Requests.ManageCatalog">
+                    <a class="btn btn-primary" href="/catalog-admin"><Icon Name="package" Size="16" /> Manage catalog</a>
+                </PermissionView>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="catalog-grid">
+            @foreach (var item in _items)
+            {
+                <button type="button" class="card interactive catalog-card" @key="item.Id" @onclick="() => OpenItemAsync(item.Id)">
+                    <div class="flex items-center gap-3">
+                        <div class="catalog-icon"><Icon Name="@item.Icon" Size="22" /></div>
+                        <div style="min-width:0">
+                            <div class="catalog-name truncate">@item.Name</div>
+                            <div class="tiny faint">@(item.CategoryName ?? "Uncategorized")</div>
+                        </div>
+                    </div>
+                    <div class="small muted catalog-description">@(item.ShortDescription ?? "No description.")</div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="tag"><Icon Name="tag" Size="12" /> @SmLabels.Price(item.Price)</span>
+                        <span class="tag"><Icon Name="clock" Size="12" /> @DeliveryText(item.DeliveryDays)</span>
+                        @if (item.ApprovalRequired)
+                        {
+                            <span class="tag"><Icon Name="check-square" Size="12" /> Approval</span>
+                        }
+                    </div>
+                </button>
+            }
+        </div>
+    }
+}
+else
+{
+    <div class="grid grid-sidebar">
+        <div class="card" style="min-width:0">
+            <div class="card-header">
+                <div>
+                    <div class="eyebrow">Order form</div>
+                    <h3 style="margin:0">What is needed?</h3>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="form-section">
+                    <div class="form-section-title">Requester</div>
+                    <div class="form-grid">
+                        <FormField Label="Requested for" Required="true" Error="@_requestedForError" Help="The employee who receives the item.">
+                            <UserPicker Value="_requestedForId" ValueChanged="v => { _requestedForId = v; _requestedForError = null; }" Required="true" />
+                        </FormField>
+                        <FormField Label="Quantity" Required="true" Error="@_quantityError">
+                            <input class="input" type="number" min="1" max="100" step="1" @bind="_quantity" />
+                        </FormField>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_form.Description))
+                {
+                    <div class="alert alert-info mb-4"><Icon Name="info" Size="16" /><div class="small" style="white-space:pre-line">@_form.Description</div></div>
+                }
+
+                <div class="form-section">
+                    <div class="form-section-title">Details</div>
+                    @if (_form.Variables.Count == 0)
+                    {
+                        <div class="small faint">This item has no questions – it can be ordered right away.</div>
+                    }
+                    else
+                    {
+                        <div class="form-grid">
+                            @foreach (var variable in _form.Variables)
+                            {
+                                <CatalogVariableInput @key="variable.Name" Definition="variable" Value="@ValueOf(variable)"
+                                                      ValueChanged="v => SetValue(variable.Name, v)" Error="@_errors.GetValueOrDefault(variable.Name)"
+                                                      Class="@(variable.Type == CatalogVariableType.MultilineText ? "span-all" : null)" />
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="card-footer form-actions">
+                <button class="btn btn-secondary" @onclick="BackToCatalog">Cancel</button>
+                <button class="btn btn-primary" disabled="@_busy" @onclick="OrderAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="shopping-cart" Size="16" />
+                    }
+                    Submit order
+                </button>
+            </div>
+        </div>
+
+        <div class="stack sticky-top" style="gap:16px">
+            <div class="card card-body">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="catalog-icon"><Icon Name="@_form.Item.Icon" Size="22" /></div>
+                    <div style="min-width:0">
+                        <div class="catalog-name">@_form.Item.Name</div>
+                        <div class="tiny faint">@(_form.Item.CategoryName ?? "Uncategorized")</div>
+                    </div>
+                </div>
+                <dl class="kv">
+                    <dt>Unit price</dt><dd>@SmLabels.Price(_form.Item.Price)</dd>
+                    <dt>Quantity</dt><dd>@_quantity</dd>
+                    <dt>Total</dt><dd><b>@SmLabels.Price(_form.Item.Price * Math.Max(1, _quantity))</b></dd>
+                    <dt>Delivery</dt><dd>@DeliveryText(_form.Item.DeliveryDays)</dd>
+                    <dt>Approval</dt><dd>@(_form.Item.ApprovalRequired ? "Required" : "Not required")</dd>
+                </dl>
+            </div>
+            <div class="card card-body">
+                <div class="eyebrow mb-2">What happens next</div>
+                <ol class="next-steps small">
+                    @if (_form.Item.ApprovalRequired)
+                    {
+                        <li><Icon Name="check-square" Size="14" /> The approvers are asked to approve the request.</li>
+                    }
+                    <li><Icon Name="clipboard-list" Size="14" /> Fulfilment tasks are created for the fulfilment group.</li>
+                    <li><Icon Name="check-circle" Size="14" /> The request closes automatically when all tasks are done.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<CatalogCategoryModel> _categories = [];
+    private IReadOnlyList<CatalogItemCard> _items = [];
+    private CatalogOrderForm? _form;
+    private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyDictionary<string, string> _errors = new Dictionary<string, string>();
+    private Guid? _categoryId;
+    private string? _search;
+    private Guid? _requestedForId;
+    private string? _requestedForError;
+    private string? _quantityError;
+    private int _quantity = 1;
+    private bool _loading = true;
+    private bool _busy;
+    private CancellationTokenSource? _searchDebounce;
+
+    /// <summary>Gets or sets the catalog item to open directly (query string <c>?item=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "item")] public Guid? ItemId { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var categories = await Catalog.GetCategoriesAsync();
+        _categories = categories.Value ?? [];
+        if (ItemId is { } itemId)
+        {
+            await OpenItemAsync(itemId);
+        }
+
+        await LoadItemsAsync();
+    }
+
+    private async Task LoadItemsAsync()
+    {
+        _loading = true;
+        var result = await Catalog.GetItemsAsync(_categoryId, _search, 100);
+        _items = result.Value ?? [];
+        _loading = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("The catalog could not be loaded", result.Error);
+        }
+    }
+
+    private async Task SelectCategoryAsync(Guid? categoryId)
+    {
+        _categoryId = categoryId;
+        await LoadItemsAsync();
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString();
+        _searchDebounce?.Cancel();
+        _searchDebounce = new CancellationTokenSource();
+        var token = _searchDebounce.Token;
+        try
+        {
+            await Task.Delay(300, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        await LoadItemsAsync();
+    }
+
+    private async Task OpenItemAsync(Guid itemId)
+    {
+        var result = await Catalog.GetOrderFormAsync(itemId);
+        if (!result.Succeeded || result.Value is null)
+        {
+            Toasts.Error("The catalog item cannot be ordered", result.Error);
+            return;
+        }
+
+        _form = result.Value;
+        _values.Clear();
+        foreach (var variable in _form.Variables.Where(v => v.DefaultValue is not null))
+        {
+            _values[variable.Name] = variable.DefaultValue;
+        }
+
+        _errors = new Dictionary<string, string>();
+        _requestedForId ??= CurrentUser.UserId;
+        _quantity = 1;
+        _requestedForError = null;
+        _quantityError = null;
+    }
+
+    private void BackToCatalog()
+    {
+        _form = null;
+        _errors = new Dictionary<string, string>();
+    }
+
+    private string? ValueOf(CatalogVariableDefinition variable) => _values.GetValueOrDefault(variable.Name);
+
+    private void SetValue(string name, string? value)
+    {
+        _values[name] = value;
+        if (_errors.ContainsKey(name))
+        {
+            _errors = _errors.Where(e => e.Key != name).ToDictionary(e => e.Key, e => e.Value);
+        }
+    }
+
+    private async Task OrderAsync()
+    {
+        if (_form is null)
+        {
+            return;
+        }
+
+        // Client-side pre-validation for inline errors; the service validates again (the UI is not the security boundary).
+        _requestedForError = _requestedForId is null ? "Select the user the item is requested for." : null;
+        _quantityError = _quantity is < 1 or > 100 ? "The quantity must be between 1 and 100." : null;
+        _errors = CatalogVariableValidator.Validate(_form.Variables, _values).Errors;
+        if (_requestedForError is not null || _quantityError is not null || _errors.Count > 0)
+        {
+            Toasts.Warning("Please complete the highlighted fields.");
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Catalog.OrderAsync(_form.Item.Id, new Dictionary<string, string?>(_values), _requestedForId, _quantity);
+            if (Toasts.FromResult(result, result.Value is { } confirmation
+                    ? $"{confirmation.RequestNumber} submitted{(confirmation.ApprovalRequired ? " – waiting for approval" : string.Empty)}"
+                    : "Request submitted"))
+            {
+                Nav.NavigateTo($"/requests/{result.Value!.RequestId}");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string DeliveryText(int days) => days == 0 ? "Same day" : days == 1 ? "1 day" : $"{days} days";
+}

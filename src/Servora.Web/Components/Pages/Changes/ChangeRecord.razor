@@ -1,0 +1,597 @@
+@page "/changes/new"
+@page "/changes/{Id:guid}"
+@* Change request record page: lifecycle actions, form, risk, schedule, conflicts, tasks, approvals, activity, attachments. *@
+@attribute [RequirePermission(Permissions.Changes.Read)]
+@inject IChangeService Changes
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(IsNew ? "New change" : _detail?.Number ?? "Change") · Servora</PageTitle>
+
+@if (!IsNew && _detail is null)
+{
+    @if (_notFound)
+    {
+        <EmptyState Icon="git-pull-request" Title="Change not found" Text="The change request does not exist or was deleted.">
+            <a class="btn btn-primary" href="/changes">Back to changes</a>
+        </EmptyState>
+    }
+    else
+    {
+        <Skeleton Lines="2" Height="34px" Width="50%" />
+        <div class="grid grid-sidebar mt-6"><div class="card card-body"><Skeleton Lines="8" Height="38px" /></div><div class="card card-body"><Skeleton Lines="6" /></div></div>
+    }
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New change request" : _detail!.ShortDescription)" Icon="git-pull-request">
+        <Breadcrumbs>
+            <a href="/changes">Changes</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New" : _detail!.Number)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (_detail is { } d)
+            {
+                <div class="flex items-center gap-2 flex-wrap mt-2">
+                    <span class="mono small muted">@d.Number</span>
+                    <StatusPill Text="@SmLabels.Label(d.State)" Tone="@SmLabels.Tone(d.State)" />
+                    <StatusPill Text="@SmLabels.Label(d.Type)" Tone="@SmLabels.Tone(d.Type)" NoDot="true" />
+                    <PriorityBadge Priority="d.Priority" />
+                    <span class="pill pill-@SmLabels.Tone(d.Risk) no-dot">Risk: @SmLabels.Label(d.Risk)</span>
+                    @if (d.Approval != ApprovalStatus.NotRequested)
+                    {
+                        <StatusPill Text="@($"CAB {SmLabels.Label(d.Approval).ToLowerInvariant()}")" Tone="@SmLabels.Tone(d.Approval)" />
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="subtitle">Describe the change, plan the implementation window and submit it for assessment.</div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (_detail is { } detail && _canWrite)
+            {
+                @foreach (var target in detail.NextStates.Where(t => t != ChangeState.Cancelled && IsOffered(detail, t)))
+                {
+                    var forward = IsForward(detail.State, target);
+                    <button class="btn @(forward ? "btn-primary" : "btn-secondary")" disabled="@_busy" @onclick="() => BeginTransition(target)">
+                        <Icon Name="@(forward ? "arrow-right" : "arrow-left")" Size="16" /> @TransitionLabel(detail, target)
+                    </button>
+                }
+                @if (detail.NextStates.Contains(ChangeState.Cancelled))
+                {
+                    <button class="btn btn-outline-danger" disabled="@_busy" @onclick="() => BeginTransition(ChangeState.Cancelled)"><Icon Name="x-circle" Size="16" /> Cancel change</button>
+                }
+            }
+            @if (CanEditForm)
+            {
+                <button class="btn btn-secondary" disabled="@_busy" @onclick="SaveAsync"><Icon Name="save" Size="16" /> @(IsNew ? "Create change" : "Save")</button>
+            }
+            @if (_detail is { State: ChangeState.New or ChangeState.Cancelled } && _canDelete)
+            {
+                <button class="icon-btn" title="Delete change" @onclick="() => _deleteOpen = true"><Icon Name="trash" Size="18" /></button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <div class="mb-4">
+        <StateFlow States="@Progression.Select(SmLabels.Label).ToList()" Current="@(_detail is null ? "New" : SmLabels.Label(_detail.State))" />
+    </div>
+
+    @if (_detail is { } info)
+    {
+        <div class="stack mb-4" style="gap:10px">
+            @if (info.State == ChangeState.Cancelled)
+            {
+                <div class="alert alert-danger"><Icon Name="x-circle" Size="18" /><div>This change was cancelled <RelativeTime Value="info.ClosedAt" />.</div></div>
+            }
+            @if (info.State == ChangeState.Authorize)
+            {
+                <div class="alert alert-warning"><Icon Name="clock" Size="18" />
+                    <div><b>Waiting for authorization.</b> The approval group <b>@info.ApprovalGroupName</b> was asked to approve this change. It is scheduled automatically when approved.
+                        <a href="javascript:void(0)" @onclick="@(() => _tab = "approvals")">View approvals</a></div>
+                </div>
+            }
+            @if (info.Approval == ApprovalStatus.Rejected && info.State == ChangeState.Assess)
+            {
+                <div class="alert alert-danger"><Icon Name="alert-octagon" Size="18" /><div><b>The approval board rejected this change.</b> Review the comments in the approvals tab, adjust the plan and request authorization again.</div></div>
+            }
+            @if (info.Conflicts.Count > 0)
+            {
+                <div class="alert alert-warning"><Icon Name="alert-triangle" Size="18" />
+                    <div>
+                        <b>@info.Conflicts.Count conflicting change(s)</b> on <b>@info.ConfigurationItemName</b> overlap the planned window:
+                        @foreach (var conflict in info.Conflicts)
+                        {
+                            <div class="small mt-1"><a href="/changes/@conflict.Id" class="mono">@conflict.Number</a> · @conflict.ShortDescription · @SmLabels.Utc(conflict.PlannedStartAt) – @SmLabels.Utc(conflict.PlannedEndAt) (@conflict.State)</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="stack" style="gap:20px;min-width:0">
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="file-text" Size="16" /> Details</div>
+                        <div class="form-grid">
+                            <FormField Label="Short description" Required="true" Class="span-all">
+                                <input class="input" @bind="_model.ShortDescription" maxlength="300" disabled="@(!CanEditForm)" placeholder="What is changing?" />
+                            </FormField>
+                            <FormField Label="Type" Help="@(IsNew || _detail?.State == ChangeState.New ? TypeHelp : "The type can only be changed while the change is new.")">
+                                <select class="select" @bind="_model.Type" disabled="@(!CanEditForm || (_detail is not null && _detail.State != ChangeState.New))">
+                                    @foreach (var type in Enum.GetValues<ChangeType>())
+                                    {
+                                        <option value="@type">@SmLabels.Label(type)</option>
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Category">
+                                <select class="select" @bind="_model.Category" disabled="@(!CanEditForm)">
+                                    <option value="">— Select —</option>
+                                    @foreach (var category in s_categories)
+                                    {
+                                        <option value="@category">@category</option>
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Impact">
+                                <select class="select" @bind="_model.Impact" disabled="@(!CanEditForm)">
+                                    @foreach (var impact in Enum.GetValues<Impact>())
+                                    {
+                                        <option value="@impact">@((int)impact) – @impact</option>
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Urgency">
+                                <select class="select" @bind="_model.Urgency" disabled="@(!CanEditForm)">
+                                    @foreach (var urgency in Enum.GetValues<Urgency>())
+                                    {
+                                        <option value="@urgency">@((int)urgency) – @urgency</option>
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Configuration item" Help="Used for conflict detection.">
+                                <CiPicker @bind-Value="_model.ConfigurationItemId" Disabled="@(!CanEditForm)" />
+                            </FormField>
+                            <FormField Label="Requested by"><UserPicker @bind-Value="_model.RequestedById" Disabled="@(!CanEditForm)" /></FormField>
+                            <FormField Label="Assignment group"><GroupPicker @bind-Value="_model.AssignmentGroupId" Disabled="@(!CanEditForm)" /></FormField>
+                            <FormField Label="Assigned to"><UserPicker @bind-Value="_model.AssignedToId" Disabled="@(!CanEditForm)" /></FormField>
+                            <FormField Label="Approval group" Help="Leave empty to use the Change Advisory Board." Class="span-all">
+                                <GroupPicker @bind-Value="_model.ApprovalGroupId" Placeholder="Change Advisory Board (default)" Disabled="@(!CanEditForm)" />
+                            </FormField>
+                            <FormField Label="Description" Class="span-all">
+                                <textarea class="textarea" rows="4" @bind="_model.Description" disabled="@(!CanEditForm)"></textarea>
+                            </FormField>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="calendar-clock" Size="16" /> Schedule <span class="tiny faint" style="font-weight:500">· all times in UTC</span></div>
+                        <div class="form-grid">
+                            <FormField Label="Planned start (UTC)"><UtcDateTimeInput @bind-Value="_model.PlannedStartAt" Disabled="@(!CanEditForm)" /></FormField>
+                            <FormField Label="Planned end (UTC)" Error="@WindowError"><UtcDateTimeInput @bind-Value="_model.PlannedEndAt" Disabled="@(!CanEditForm)" /></FormField>
+                        </div>
+                        @if (CanEditForm && _model.ConfigurationItemId is not null && _model.PlannedStartAt is not null && _model.PlannedEndAt is not null)
+                        {
+                            <div class="flex items-center gap-2 mt-3">
+                                <button class="btn btn-ghost btn-sm" @onclick="CheckConflictsAsync"><Icon Name="search" Size="14" /> Check conflicts</button>
+                                @if (_previewConflicts is { } preview)
+                                {
+                                    @if (preview.Count == 0)
+                                    {
+                                        <span class="small text-success flex items-center gap-1"><Icon Name="check-circle" Size="14" /> No conflicting changes</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="small" style="color:var(--warning)">@preview.Count overlapping change(s): @string.Join(", ", preview.Select(c => c.Number))</span>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="clipboard-list" Size="16" /> Planning</div>
+                        <div class="form-grid">
+                            <FormField Label="Justification" Class="span-all">
+                                <textarea class="textarea" rows="3" @bind="_model.Justification" disabled="@(!CanEditForm)" placeholder="Why is this change needed?"></textarea>
+                            </FormField>
+                            <FormField Label="Implementation plan" Required="true" Class="span-all">
+                                <textarea class="textarea mono" rows="5" @bind="_model.ImplementationPlan" disabled="@(!CanEditForm)" placeholder="Step-by-step plan"></textarea>
+                            </FormField>
+                            <FormField Label="Backout plan" Required="@(_model.Type != ChangeType.Standard)">
+                                <textarea class="textarea" rows="4" @bind="_model.BackoutPlan" disabled="@(!CanEditForm)" placeholder="How to restore the previous state"></textarea>
+                            </FormField>
+                            <FormField Label="Test plan">
+                                <textarea class="textarea" rows="4" @bind="_model.TestPlan" disabled="@(!CanEditForm)" placeholder="How success is verified"></textarea>
+                            </FormField>
+                        </div>
+                    </div>
+
+                    @if (_detail is { CloseCode: { } closedWith } closedChange)
+                    {
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="check-circle" Size="16" /> Closure</div>
+                            <dl class="kv">
+                                <dt>Close code</dt><dd><span class="pill pill-@(closedWith == ChangeCloseCode.Unsuccessful ? "danger" : "success") no-dot">@SmLabels.Label(closedWith)</span></dd>
+                                <dt>Close notes</dt><dd>@closedChange.CloseNotes</dd>
+                            </dl>
+                        </div>
+                    }
+                </div>
+                @if (CanEditForm)
+                {
+                    <div class="card-footer flex justify-end gap-2">
+                        @if (IsNew)
+                        {
+                            <a class="btn btn-secondary" href="/changes">Discard</a>
+                        }
+                        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+                            @if (_busy)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            <Icon Name="save" Size="16" /> @(IsNew ? "Create change" : "Save changes")
+                        </button>
+                    </div>
+                }
+            </div>
+
+            @if (_detail is { } current)
+            {
+                <div>
+                    <Tabs Items="@TabItems(current)" @bind-ActiveKey="_tab" />
+                    <div class="mt-4">
+                        @switch (_tab)
+                        {
+                            case "approvals":
+                                <RecordApprovals @ref="_approvals" Table="@TableNames.ChangeRequest" RecordId="current.Id" OnDecided="ReloadAsync"
+                                                 EmptyText="Approval is requested from the approval board when the change moves to Authorize." />
+                                break;
+                            case "activity":
+                                <div class="card card-body"><ActivityStream Table="@TableNames.ChangeRequest" RecordId="current.Id" AllowPosting="_canWrite" /></div>
+                                break;
+                            case "attachments":
+                                <div class="card card-body"><AttachmentList Table="@TableNames.ChangeRequest" RecordId="current.Id" AllowUpload="_canWrite" AllowDelete="_canWrite" /></div>
+                                break;
+                            default:
+                                <ChangeTaskList ChangeId="current.Id" Tasks="current.Tasks" CanEdit="@(_canWrite && current.IsEditable)" OnChanged="ReloadAsync" />
+                                break;
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="stack sticky-top" style="gap:16px">
+            @if (_detail is { } facts)
+            {
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="info" Size="16" /> Key facts</h3></div>
+                    <div class="card-body">
+                        <dl class="kv">
+                            <dt>Number</dt><dd class="mono">@facts.Number</dd>
+                            <dt>State</dt><dd><StatusPill Text="@SmLabels.Label(facts.State)" Tone="@SmLabels.Tone(facts.State)" /></dd>
+                            <dt>Priority</dt><dd><PriorityBadge Priority="facts.Priority" /></dd>
+                            <dt>Category</dt><dd>@(facts.Category ?? "—")</dd>
+                            <dt>CI</dt><dd>@(facts.ConfigurationItemName ?? "—")</dd>
+                            <dt>Opened</dt><dd><RelativeTime Value="facts.OpenedAt" /> by @(facts.OpenedByName ?? "System")</dd>
+                            <dt>Updated</dt><dd><RelativeTime Value="facts.UpdatedAt" /></dd>
+                        </dl>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="gauge" Size="16" /> Risk</h3>
+                        @if (_canWrite && facts.State is ChangeState.New or ChangeState.Assess)
+                        {
+                            <button class="btn btn-ghost btn-sm" @onclick="() => _riskOpen = true"><Icon Name="edit" Size="14" /> @(facts.RiskAssessedAt is null ? "Assess" : "Reassess")</button>
+                        }
+                    </div>
+                    <div class="card-body">
+                        @if (facts.RiskAssessedAt is null)
+                        {
+                            <div class="small muted">Not assessed yet. @(facts.Type == ChangeType.Normal ? "Required before authorization." : null)</div>
+                        }
+                        else
+                        {
+                            <div class="flex items-center justify-between">
+                                <span class="pill pill-@SmLabels.Tone(facts.Risk) no-dot" style="font-size:14px;height:28px">@SmLabels.Label(facts.Risk)</span>
+                                <span class="small muted">score @facts.RiskScore / 15</span>
+                            </div>
+                            <div class="progress @(facts.Risk >= ChangeRisk.High ? "danger" : facts.Risk == ChangeRisk.Moderate ? "warning" : "success") mt-3">
+                                <span style="width:@(Math.Min(100, facts.RiskScore * 100 / 15))%"></span>
+                            </div>
+                            <div class="tiny faint mt-2">Assessed <RelativeTime Value="facts.RiskAssessedAt" /> · @(facts.Risk >= ChangeRisk.High && facts.Type == ChangeType.Normal ? "every board member must approve" : "any board member can approve")</div>
+                        }
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="calendar-clock" Size="16" /> Schedule</h3></div>
+                    <div class="card-body">
+                        <dl class="kv">
+                            <dt>Planned start</dt><dd>@SmLabels.Utc(facts.PlannedStartAt)</dd>
+                            <dt>Planned end</dt><dd>@SmLabels.Utc(facts.PlannedEndAt)</dd>
+                            @if (facts is { PlannedStartAt: { } ps, PlannedEndAt: { } pe })
+                            {
+                                <dt>Duration</dt><dd>@Duration(pe - ps)</dd>
+                            }
+                            <dt>Actual start</dt><dd>@SmLabels.Utc(facts.ActualStartAt)</dd>
+                            <dt>Actual end</dt><dd>@SmLabels.Utc(facts.ActualEndAt)</dd>
+                        </dl>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3><Icon Name="users" Size="16" /> People & approval</h3></div>
+                    <div class="card-body stack" style="gap:12px">
+                        <PersonRow Label="Requested by" Name="@facts.RequestedByName" />
+                        <PersonRow Label="Assigned to" Name="@facts.AssignedToName" Fallback="@(facts.AssignmentGroupName ?? "Unassigned")" />
+                        <div>
+                            <div class="tiny faint">Approval</div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <StatusPill Text="@SmLabels.Label(facts.Approval)" Tone="@SmLabels.Tone(facts.Approval)" />
+                                <span class="small muted">@facts.ApprovalGroupName</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="card card-body">
+                    <div class="form-section-title"><Icon Name="lightbulb" Size="16" /> How changes flow</div>
+                    <div class="small muted stack" style="gap:8px">
+                        <div><b>Normal</b> changes are assessed (risk questionnaire) and authorized by the Change Advisory Board.</div>
+                        <div><b>Standard</b> changes are pre-approved routine work and can be scheduled directly.</div>
+                        <div><b>Emergency</b> changes use an expedited authorization by the board.</div>
+                        <div>Overlapping changes on the same configuration item are flagged as conflicts.</div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (_detail is { } change)
+    {
+        <RiskAssessmentDialog @bind-Open="_riskOpen" ChangeId="change.Id" Answers="change.RiskAnswers" OnAssessed="ReloadAsync" />
+    }
+
+    <Modal @bind-Open="_transitionOpen" Title="@(_detail is null ? string.Empty : TransitionLabel(_detail, _target))" Subtitle="@_detail?.Number" Size="sm"
+           Icon="@(_target == ChangeState.Cancelled ? "x-circle" : _target == ChangeState.Closed ? "check-circle" : "arrow-right")">
+        <ChildContent>
+            @if (_target == ChangeState.Authorize)
+            {
+                <div class="alert alert-info mb-4"><Icon Name="info" Size="16" /><div>The approval board is notified. @(_detail?.Risk >= ChangeRisk.High && _detail?.Type == ChangeType.Normal ? "Because of the high risk every member must approve." : "The first decision of a member counts.")</div></div>
+            }
+            @if (_target == ChangeState.Cancelled)
+            {
+                <div class="alert alert-danger mb-4"><Icon Name="alert-triangle" Size="16" /><div>Cancelling withdraws pending approvals and cancels open change tasks. This cannot be undone.</div></div>
+            }
+            @if (_target == ChangeState.Closed)
+            {
+                <div class="form-grid cols-1">
+                    <FormField Label="Close code" Required="true">
+                        <select class="select" @bind="_closeCode">
+                            @foreach (var closeOption in Enum.GetValues<ChangeCloseCode>())
+                            {
+                                <option value="@closeOption">@SmLabels.Label(closeOption)</option>
+                            }
+                        </select>
+                    </FormField>
+                    <FormField Label="Close notes" Required="true">
+                        <textarea class="textarea" rows="4" @bind="_closeNotes" placeholder="Outcome of the implementation and review"></textarea>
+                    </FormField>
+                </div>
+            }
+            else
+            {
+                <FormField Label="Work note (optional)">
+                    <textarea class="textarea" rows="3" @bind="_note"></textarea>
+                </FormField>
+            }
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _transitionOpen = false">Back</button>
+            <button class="btn @(_target == ChangeState.Cancelled ? "btn-danger" : "btn-primary")" disabled="@_busy" @onclick="TransitionAsync">
+                @if (_busy)
+                {
+                    <span class="spinner"></span>
+                }
+                Confirm
+            </button>
+        </Footer>
+    </Modal>
+
+    <ConfirmDialog @bind-Open="_deleteOpen" Title="Delete change?" Danger="true" ConfirmText="Delete"
+                   Message="@($"{_detail?.Number} and its tasks will be permanently deleted. This cannot be undone.")" OnConfirm="DeleteAsync" />
+}
+
+@code {
+    private const string TypeHelp = "Standard changes are pre-approved; emergency changes are expedited.";
+    private static readonly string[] s_categories = ["Network", "Software", "Hardware", "Database", "Security", "Cloud", "Facilities", "Other"];
+
+    private ChangeDetail? _detail;
+    private ChangeEditModel _model = new();
+    private bool _notFound;
+    private bool _busy;
+    private bool _canWrite;
+    private bool _canCreate;
+    private bool _canDelete;
+    private string _tab = "tasks";
+    private bool _riskOpen;
+    private bool _transitionOpen;
+    private bool _deleteOpen;
+    private ChangeState _target;
+    private string? _note;
+    private ChangeCloseCode _closeCode = ChangeCloseCode.Successful;
+    private string? _closeNotes;
+    private IReadOnlyList<ChangeConflict>? _previewConflicts;
+    private RecordApprovals? _approvals;
+
+    /// <summary>Gets or sets the change identifier (absent for new changes).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool IsNew => Id is null;
+
+    private bool CanEditForm => IsNew ? _canCreate : _canWrite && _detail is { IsEditable: true };
+
+    private IReadOnlyList<ChangeState> Progression => ChangeStateMachine.GetProgression(_detail?.Type ?? _model.Type);
+
+    private string? WindowError => _model is { PlannedStartAt: { } s, PlannedEndAt: { } e } && e <= s ? "The end must be after the start." : null;
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = await CurrentUser.HasPermissionAsync(Permissions.Changes.Write);
+        _canCreate = await CurrentUser.HasPermissionAsync(Permissions.Changes.Create);
+        _canDelete = await CurrentUser.HasPermissionAsync(Permissions.Changes.Delete);
+        if (IsNew)
+        {
+            _detail = null;
+            _model = new ChangeEditModel { RequestedById = CurrentUser.UserId };
+        }
+        else
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (Id is not { } id)
+        {
+            return;
+        }
+
+        var result = await Changes.GetAsync(id);
+        if (!result.Succeeded)
+        {
+            _notFound = true;
+            _detail = null;
+            return;
+        }
+
+        _detail = result.Value!;
+        _model = ChangeEditModel.From(_detail);
+        _previewConflicts = null;
+        if (_approvals is not null && _tab == "approvals")
+        {
+            await _approvals.ReloadAsync();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (IsNew)
+            {
+                var created = await Changes.CreateAsync(_model);
+                if (Toasts.FromResult(created, "Change created"))
+                {
+                    Nav.NavigateTo($"/changes/{created.Value}");
+                }
+
+                return;
+            }
+
+            var result = await Changes.UpdateAsync(_detail!.Id, _model, _detail.Version);
+            if (Toasts.FromResult(result, "Change saved"))
+            {
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CheckConflictsAsync()
+    {
+        if (_model is { ConfigurationItemId: { } ci, PlannedStartAt: { } start, PlannedEndAt: { } end })
+        {
+            var result = await Changes.FindConflictsAsync(ci, start, end, _detail?.Id);
+            _previewConflicts = result.Value;
+        }
+    }
+
+    private void BeginTransition(ChangeState target)
+    {
+        _target = target;
+        _note = null;
+        _closeNotes = null;
+        _closeCode = ChangeCloseCode.Successful;
+        _transitionOpen = true;
+    }
+
+    private async Task TransitionAsync()
+    {
+        if (_detail is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        var input = _target == ChangeState.Closed ? new ChangeTransitionInput(null, _closeCode, _closeNotes) : new ChangeTransitionInput(_note);
+        var result = await Changes.TransitionAsync(_detail.Id, _target, input);
+        _busy = false;
+        if (Toasts.FromResult(result, $"{_detail.Number} moved to {SmLabels.Label(_target)}"))
+        {
+            _transitionOpen = false;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_detail is null)
+        {
+            return;
+        }
+
+        var result = await Changes.DeleteAsync(_detail.Id);
+        if (Toasts.FromResult(result, $"{_detail.Number} deleted"))
+        {
+            Nav.NavigateTo("/changes");
+        }
+    }
+
+    private static bool IsOffered(ChangeDetail detail, ChangeState target) =>
+        target != ChangeState.Scheduled || detail.Type == ChangeType.Standard || detail.Approval == ApprovalStatus.Approved;
+
+    private static bool IsForward(ChangeState current, ChangeState target) =>
+        !(target == ChangeState.New || (target == ChangeState.Assess && current == ChangeState.Authorize));
+
+    private static string TransitionLabel(ChangeDetail detail, ChangeState target) => target switch
+    {
+        ChangeState.Assess when detail.State == ChangeState.Authorize => "Back to assessment",
+        ChangeState.Assess => "Submit for assessment",
+        ChangeState.Authorize => "Request authorization",
+        ChangeState.Scheduled => "Schedule",
+        ChangeState.Implement => "Start implementation",
+        ChangeState.Review => "Implementation done",
+        ChangeState.Closed => "Close change",
+        ChangeState.New => "Back to new",
+        ChangeState.Cancelled => "Cancel change",
+        _ => target.ToString(),
+    };
+
+    private static string Duration(TimeSpan span) => span.TotalHours >= 24 ? $"{span.TotalDays:0.#} days" : $"{span.TotalHours:0.#} hours";
+
+    private static IReadOnlyList<TabItem> TabItems(ChangeDetail detail) =>
+    [
+        new("tasks", "Tasks", "clipboard-list", detail.Tasks.Count(t => t.State is ChangeTaskState.Open or ChangeTaskState.InProgress) is > 0 and var open ? open : null),
+        new("approvals", "Approvals", "check-square"),
+        new("activity", "Activity", "activity"),
+        new("attachments", "Attachments", "paperclip"),
+    ];
+}

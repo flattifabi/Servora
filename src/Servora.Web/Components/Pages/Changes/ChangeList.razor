@@ -1,0 +1,162 @@
+@page "/changes"
+@* Change request list with KPIs, predefined filters, search, sorting and paging. *@
+@attribute [RequirePermission(Permissions.Changes.Read)]
+@inject IChangeService Changes
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Changes · Servora</PageTitle>
+
+<PageHeader Title="Change Management" Subtitle="Plan, authorize and implement changes with minimal risk to services." Icon="git-pull-request">
+    <Actions>
+        <a class="btn btn-secondary" href="/changes/calendar"><Icon Name="calendar" Size="16" /> Change calendar</a>
+        <PermissionView Permission="@Permissions.Changes.Create">
+            <a class="btn btn-primary" href="/changes/new"><Icon Name="plus" Size="16" /> New change</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Open changes" Value="@Stat(s => s.Open)" Icon="git-pull-request" Tone="primary"
+              Caption="@(_stats is null ? null : $"{_stats.InImplementation} in implementation")" OnClick="() => SetFilterAsync(ChangeListFilter.Open)" />
+    <StatCard Label="Awaiting CAB" Value="@Stat(s => s.AwaitingApproval)" Icon="check-square" Tone="warning" Caption="waiting for authorization" OnClick="() => SetFilterAsync(ChangeListFilter.AwaitingApproval)" />
+    <StatCard Label="Next 7 days" Value="@Stat(s => s.ScheduledNext7Days)" Icon="calendar-clock" Tone="info" Caption="scheduled to start" OnClick="() => SetFilterAsync(ChangeListFilter.Scheduled)" />
+    <StatCard Label="Emergency" Value="@Stat(s => s.OpenEmergency)" Icon="flame" Tone="danger"
+              Caption="@(_stats?.SuccessRate is { } rate ? $"success rate {rate:0.#}% (90 d)" : "no closed changes yet")" OnClick="() => SetFilterAsync(ChangeListFilter.Emergency)" />
+</div>
+
+<DataTable TItem="ChangeListItem" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+           Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search number or description…"
+           OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(c => Nav.NavigateTo($"/changes/{c.Id}"))"
+           EmptyIcon="git-pull-request" EmptyTitle="No changes found" EmptyText="No change requests match the current filter.">
+    <Toolbar>
+        <div class="segmented">
+            @foreach (var (filter, label) in s_filters)
+            {
+                <button class="@(_filter == filter ? "active" : null)" @onclick="() => SetFilterAsync(filter)">@label</button>
+            }
+        </div>
+    </Toolbar>
+    <EmptyContent>
+        <PermissionView Permission="@Permissions.Changes.Create">
+            <a class="btn btn-primary btn-sm" href="/changes/new"><Icon Name="plus" Size="14" /> Create a change</a>
+        </PermissionView>
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="ChangeListItem" Title="Number" SortKey="Number" Width="130px">
+            <Template><span class="cell-link mono">@context.Number</span></Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="Short description" Class="cell-primary">
+            <Template>
+                <div class="truncate" style="max-width:420px">@context.ShortDescription</div>
+                @if (context.ConfigurationItemName is not null)
+                {
+                    <div class="tiny faint flex items-center gap-1"><Icon Name="server" Size="11" /> @context.ConfigurationItemName</div>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="Type" Width="110px">
+            <Template><StatusPill Text="@SmLabels.Label(context.Type)" Tone="@SmLabels.Tone(context.Type)" NoDot="true" /></Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="State" SortKey="State" Width="120px">
+            <Template><StatusPill Text="@SmLabels.Label(context.State)" Tone="@SmLabels.Tone(context.State)" /></Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="Risk" Width="100px">
+            <Template><span class="pill pill-@SmLabels.Tone(context.Risk) no-dot">@SmLabels.Label(context.Risk)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="Priority" SortKey="Priority" Width="120px">
+            <Template><PriorityBadge Priority="context.Priority" /></Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="Planned start (UTC)" SortKey="PlannedStart" Width="170px">
+            <Template><span class="small">@SmLabels.Utc(context.PlannedStartAt)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="Assigned">
+            <Template>
+                @if (context.AssignedToName is not null)
+                {
+                    <span class="person"><Avatar Name="@context.AssignedToName" Size="sm" /><span class="person-name">@context.AssignedToName</span></span>
+                }
+                else
+                {
+                    <span class="faint small">@(context.AssignmentGroupName ?? "Unassigned")</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="ChangeListItem" Title="Approval" Width="130px">
+            <Template>
+                @if (context.Approval != ApprovalStatus.NotRequested)
+                {
+                    <StatusPill Text="@SmLabels.Label(context.Approval)" Tone="@SmLabels.Tone(context.Approval)" />
+                }
+                else
+                {
+                    <span class="faint small">—</span>
+                }
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private static readonly (ChangeListFilter Filter, string Label)[] s_filters =
+    [
+        (ChangeListFilter.Open, "Open"), (ChangeListFilter.AssignedToMe, "Assigned to me"), (ChangeListFilter.AwaitingApproval, "Awaiting CAB"),
+        (ChangeListFilter.Scheduled, "Scheduled"), (ChangeListFilter.Emergency, "Emergency"), (ChangeListFilter.Closed, "Closed"), (ChangeListFilter.All, "All"),
+    ];
+
+    private ChangeListFilter _filter = ChangeListFilter.Open;
+    private PageRequest _request = new() { PageSize = 25 };
+    private PagedResult<ChangeListItem>? _page;
+    private ChangeStats? _stats;
+    private bool _loading;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var stats = await Changes.GetStatsAsync();
+        _stats = stats.Value;
+        await LoadAsync();
+    }
+
+    private string Stat(Func<ChangeStats, int> selector) => _stats is null ? "–" : selector(_stats).ToString("N0");
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Changes.ListAsync(_filter, _request);
+        _loading = false;
+        if (result.Succeeded)
+        {
+            _page = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Could not load changes", result.Error);
+        }
+    }
+
+    private Task SetFilterAsync(ChangeListFilter filter)
+    {
+        _filter = filter;
+        _request = _request with { Page = 1 };
+        return LoadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _request = _request with { Page = page };
+        return LoadAsync();
+    }
+
+    private Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        _request = _request with { SortBy = sort.SortBy, SortDescending = sort.Descending, Page = 1 };
+        return LoadAsync();
+    }
+
+    private Task SearchAsync(string term)
+    {
+        _request = _request with { Search = term, Page = 1 };
+        return LoadAsync();
+    }
+}

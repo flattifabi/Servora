@@ -1,0 +1,168 @@
+@page "/approvals"
+@* "My approvals": the approver's inbox of pending approvals (cards) and decision history. Every authenticated user can
+   open it; the service only returns approvals assigned to the user (all approvals require approval.read). *@
+@inject IApprovalInboxService Inbox
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+
+<PageTitle>My approvals · Servora</PageTitle>
+
+<PageHeader Title="My approvals" Subtitle="Review the changes and requests waiting for your decision." Icon="check-square">
+    <Actions>
+        <button class="btn btn-secondary" @onclick="ReloadAsync"><Icon Name="refresh" Size="16" /> Refresh</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Waiting for me" Value="@(_stats?.Pending.ToString() ?? "–")" Icon="inbox" Tone="warning" Caption="pending decisions" OnClick="() => SetFilterAsync(ApprovalInboxFilter.MyPending)" />
+    <StatCard Label="Approved" Value="@(_stats?.ApprovedLast30Days.ToString() ?? "–")" Icon="check-circle" Tone="success" Caption="last 30 days" OnClick="() => SetFilterAsync(ApprovalInboxFilter.MyHistory)" />
+    <StatCard Label="Rejected" Value="@(_stats?.RejectedLast30Days.ToString() ?? "–")" Icon="x-circle" Tone="danger" Caption="last 30 days" OnClick="() => SetFilterAsync(ApprovalInboxFilter.MyHistory)" />
+    <StatCard Label="Oldest waiting" Value="@OldestText" Icon="timer" Tone="info" Caption="@(_stats?.OldestPendingAt is null ? "nothing pending" : "since requested")" />
+</div>
+
+<div class="flex items-center gap-3 mb-4 flex-wrap">
+    <div class="segmented">
+        <button class="@(_filter == ApprovalInboxFilter.MyPending ? "active" : null)" @onclick="() => SetFilterAsync(ApprovalInboxFilter.MyPending)">Pending</button>
+        <button class="@(_filter == ApprovalInboxFilter.MyHistory ? "active" : null)" @onclick="() => SetFilterAsync(ApprovalInboxFilter.MyHistory)">My history</button>
+        @if (_canReadAll)
+        {
+            <button class="@(_filter == ApprovalInboxFilter.AllPending ? "active" : null)" @onclick="() => SetFilterAsync(ApprovalInboxFilter.AllPending)">All pending</button>
+            <button class="@(_filter == ApprovalInboxFilter.All ? "active" : null)" @onclick="() => SetFilterAsync(ApprovalInboxFilter.All)">All approvals</button>
+        }
+    </div>
+    <div class="input-icon" style="max-width:320px;flex:1">
+        <Icon Name="search" Size="16" />
+        <input class="input" placeholder="Search number or summary…" value="@_search" @oninput="OnSearchInput" />
+    </div>
+    <div class="flex-1"></div>
+    @if (_page is not null)
+    {
+        <span class="small muted">@_page.TotalCount.ToString("N0") approval(s)</span>
+    }
+</div>
+
+@if (_page is null)
+{
+    <div class="grid grid-2">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="card card-body"><Skeleton Lines="4" Height="16px" /></div>
+        }
+    </div>
+}
+else if (_items.Count == 0)
+{
+    <div class="card">
+        @if (_filter == ApprovalInboxFilter.MyPending && string.IsNullOrEmpty(_search))
+        {
+            <EmptyState Icon="check-circle" Title="You're all caught up" Text="No approvals are waiting for you. New requests appear here and are announced by e-mail." />
+        }
+        else
+        {
+            <EmptyState Icon="search" Title="No approvals found" Text="Try another filter or search term." />
+        }
+    </div>
+}
+else
+{
+    <div class="grid grid-2">
+        @foreach (var item in _items)
+        {
+            <ApprovalCard @key="item.Id" Item="item" OnDecide="approve => OpenDecision(item, approve)" />
+        }
+    </div>
+    @if (_items.Count < _page.TotalCount)
+    {
+        <div class="flex justify-center mt-6">
+            <button class="btn btn-secondary" disabled="@_loading" @onclick="LoadMoreAsync">
+                @if (_loading)
+                {
+                    <span class="spinner"></span>
+                }
+                Load more
+            </button>
+        </div>
+    }
+}
+
+<ApprovalDecisionDialog @bind-Open="_dialogOpen" Item="_selected" Approve="_approve" OnDecided="ReloadAsync" />
+
+@code {
+    private const int PageSize = 24;
+    private ApprovalInboxFilter _filter = ApprovalInboxFilter.MyPending;
+    private ApprovalInboxStats? _stats;
+    private PagedResult<ApprovalItem>? _page;
+    private List<ApprovalItem> _items = [];
+    private string _search = string.Empty;
+    private bool _canReadAll;
+    private bool _loading;
+    private bool _dialogOpen;
+    private bool _approve;
+    private ApprovalItem? _selected;
+    private CancellationTokenSource? _debounce;
+
+    private string OldestText => _stats?.OldestPendingAt is { } oldest ? RelativeTime.Format(oldest).Replace(" ago", string.Empty) : "–";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canReadAll = await CurrentUser.HasPermissionAsync(Permissions.Approvals.Read);
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        var stats = await Inbox.GetStatsAsync();
+        _stats = stats.Value;
+        await LoadAsync(1, append: false);
+    }
+
+    private async Task LoadAsync(int pageNumber, bool append)
+    {
+        _loading = true;
+        var result = await Inbox.ListAsync(_filter, new PageRequest { Page = pageNumber, PageSize = PageSize, Search = _search });
+        _loading = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Could not load approvals", result.Error);
+            _page = PagedResult<ApprovalItem>.Empty();
+            _items = [];
+            return;
+        }
+
+        _page = result.Value!;
+        _items = append ? [.. _items, .. _page.Items] : [.. _page.Items];
+    }
+
+    private Task LoadMoreAsync() => LoadAsync((_page?.Page ?? 0) + 1, append: true);
+
+    private async Task SetFilterAsync(ApprovalInboxFilter filter)
+    {
+        _filter = filter;
+        _page = null;
+        await LoadAsync(1, append: false);
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? string.Empty;
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(300, _debounce.Token);
+            await LoadAsync(1, append: false);
+        }
+        catch (TaskCanceledException)
+        {
+            // Superseded by a newer keystroke.
+        }
+    }
+
+    private void OpenDecision(ApprovalItem item, bool approve)
+    {
+        _selected = item;
+        _approve = approve;
+        _dialogOpen = true;
+    }
+}

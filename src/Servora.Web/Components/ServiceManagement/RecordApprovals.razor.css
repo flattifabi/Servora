@@ -1,0 +1,9 @@
+.record-approval {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: var(--r);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}

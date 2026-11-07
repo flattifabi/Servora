@@ -1,0 +1,19 @@
+@* Segmented filter buttons for the request lists. *@
+
+<div class="segmented">
+    @foreach (var (filter, label) in Filters)
+    {
+        <button class="@(filter == Current ? "active" : null)" @onclick="() => OnSelect.InvokeAsync(filter)">@label</button>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the offered filters with their labels.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<(RequestListFilter Filter, string Label)> Filters { get; set; } = [];
+
+    /// <summary>Gets or sets the active filter.</summary>
+    [Parameter] public RequestListFilter Current { get; set; }
+
+    /// <summary>Raised when a filter is selected.</summary>
+    [Parameter] public EventCallback<RequestListFilter> OnSelect { get; set; }
+}

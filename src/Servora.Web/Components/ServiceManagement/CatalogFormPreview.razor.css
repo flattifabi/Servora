@@ -1,0 +1,38 @@
+.preview-shell {
+    padding: 4px;
+}
+
+.preview-hero {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 18px;
+    border-radius: var(--r-lg);
+    background: var(--gradient-soft);
+    border: 1px solid var(--border);
+}
+
+.preview-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    background: var(--gradient);
+    color: #fff;
+    box-shadow: var(--glow);
+}
+
+.preview-name {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.preview-description {
+    margin-top: 14px;
+    color: var(--text-2);
+    white-space: pre-line;
+}

@@ -1,0 +1,460 @@
+@page "/catalog-admin/new"
+@page "/catalog-admin/{Id:guid}"
+@* Catalog item builder: item settings, fulfilment and approval, variable designer and a live portal preview. *@
+@attribute [RequirePermission(Permissions.Requests.ManageCatalog)]
+@inject ICatalogAdminService Catalog
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(IsNew ? "New catalog item" : _model.Name) · Servora</PageTitle>
+
+@if (_loading)
+{
+    <Skeleton Lines="2" Height="34px" Width="40%" />
+    <div class="grid grid-sidebar mt-6"><div class="card card-body"><Skeleton Lines="8" Height="38px" /></div><div class="card card-body"><Skeleton Lines="6" /></div></div>
+}
+else if (_notFound)
+{
+    <EmptyState Icon="package" Title="Catalog item not found" Text="The item does not exist or was deleted.">
+        <a class="btn btn-primary" href="/catalog-admin">Back to the catalog</a>
+    </EmptyState>
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New catalog item" : _model.Name)" Icon="@_model.Icon">
+        <Breadcrumbs><a href="/catalog-admin">Service catalog</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New item" : _model.Name)</span></Breadcrumbs>
+        <SubtitleContent>
+            <div class="flex items-center gap-2 mt-2 flex-wrap">
+                <StatusPill Text="@(_model.IsActive ? "Active" : "Inactive")" />
+                <span class="small muted">@_model.Variables.Count question(s)</span>
+                @if (_model.ApprovalRequired)
+                {
+                    <span class="pill pill-warning no-dot"><Icon Name="check-square" Size="12" /> Approval required</span>
+                }
+            </div>
+        </SubtitleContent>
+        <Actions>
+            @if (!IsNew)
+            {
+                <button class="btn btn-secondary" @onclick="DuplicateAsync"><Icon Name="copy" Size="16" /> Duplicate</button>
+                <button class="icon-btn" title="Delete item" @onclick="() => _deleteOpen = true"><Icon Name="trash" Size="18" /></button>
+            }
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+                @if (_busy)
+                {
+                    <span class="spinner"></span>
+                }
+                <Icon Name="save" Size="16" /> @(IsNew ? "Create item" : "Save item")
+            </button>
+        </Actions>
+    </PageHeader>
+
+    <div class="grid grid-sidebar">
+        <div class="stack" style="gap:20px;min-width:0">
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="package" Size="16" /> General</div>
+                        <div class="form-grid">
+                            <FormField Label="Name" Required="true"><input class="input" @bind="_model.Name" @bind:event="oninput" maxlength="200" /></FormField>
+                            <FormField Label="Category">
+                                <select class="select" @bind="_model.CategoryId">
+                                    <option value="">— No category —</option>
+                                    @foreach (var category in _categories)
+                                    {
+                                        <option value="@category.Id">@category.Name</option>
+                                    }
+                                </select>
+                            </FormField>
+                            <FormField Label="Short description" Class="span-all" Help="Shown on catalog cards.">
+                                <input class="input" @bind="_model.ShortDescription" @bind:event="oninput" maxlength="300" />
+                            </FormField>
+                            <FormField Label="Description" Class="span-all" Help="Shown on the order form (plain text).">
+                                <textarea class="textarea" rows="4" @bind="_model.Description" @bind:event="oninput" maxlength="8000"></textarea>
+                            </FormField>
+                            <FormField Label="Price" Help="One-time price per unit, 0 for free.">
+                                <input class="input" type="number" min="0" step="0.01" @bind="_model.Price" />
+                            </FormField>
+                            <FormField Label="Delivery time (days)">
+                                <input class="input" type="number" min="0" max="365" @bind="_model.DeliveryDays" />
+                            </FormField>
+                            <FormField Label="Sort order"><input class="input" type="number" @bind="_model.Order" /></FormField>
+                            <FormField Label="Availability"><Switch @bind-Value="_model.IsActive" Label="Active – can be ordered" /></FormField>
+                            <FormField Label="Icon" Class="span-all"><IconChooser @bind-Value="_model.Icon" /></FormField>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="wrench" Size="16" /> Fulfilment</div>
+                        <div class="form-grid">
+                            <FormField Label="Fulfilment group" Help="Receives the catalog tasks.">
+                                <GroupPicker @bind-Value="_model.FulfillmentGroupId" />
+                            </FormField>
+                            <FormField Label="Fulfilment tasks" Help="One task per line (max. 10). Empty = one task." >
+                                <textarea class="textarea" rows="4" @bind="_model.FulfillmentTasks" placeholder="Prepare device&#10;Deliver to user"></textarea>
+                            </FormField>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="check-square" Size="16" /> Approval</div>
+                        <Switch @bind-Value="_model.ApprovalRequired" Label="Approval required before fulfilment" />
+                        @if (_model.ApprovalRequired)
+                        {
+                            <div class="form-grid mt-4">
+                                <FormField Label="Approval group" Help="Every active member becomes an approver.">
+                                    <GroupPicker @bind-Value="_model.ApprovalGroupId" />
+                                </FormField>
+                                <FormField Label="Policy">
+                                    <select class="select" @bind="_model.ApprovalMode">
+                                        <option value="@ApprovalMode.AnyApprover">Any approver decides</option>
+                                        <option value="@ApprovalMode.AllApprovers">All approvers must approve</option>
+                                    </select>
+                                </FormField>
+                                <FormField Class="span-all"><Switch @bind-Value="_model.ManagerApproval" Label="The manager of the requested-for user must approve too" /></FormField>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h3><Icon Name="list" Size="16" /> Questions <span class="badge">@_model.Variables.Count</span></h3>
+                        <div class="card-subtitle">Variables of the order form. Answers are validated on order.</div>
+                    </div>
+                    @if (!IsNew)
+                    {
+                        <button class="btn btn-secondary btn-sm" @onclick="NewVariable"><Icon Name="plus" Size="14" /> Add question</button>
+                    }
+                </div>
+                <div class="card-body">
+                    @if (IsNew)
+                    {
+                        <EmptyState Icon="list" Title="Save the item first" Text="Questions can be added once the item exists." />
+                    }
+                    else if (_model.Variables.Count == 0)
+                    {
+                        <EmptyState Icon="list" Title="No questions yet" Text="Add questions such as a model choice, a justification or a needed-by date.">
+                            <button class="btn btn-primary btn-sm" @onclick="NewVariable"><Icon Name="plus" Size="14" /> Add question</button>
+                        </EmptyState>
+                    }
+                    else
+                    {
+                        <div class="variable-list">
+                            @for (var i = 0; i < _model.Variables.Count; i++)
+                            {
+                                var variable = _model.Variables[i];
+                                var index = i;
+                                <div class="variable-row" @key="variable.Id">
+                                    <div class="variable-type"><Icon Name="@SmLabels.Icon(variable.Type)" Size="16" /></div>
+                                    <div class="flex-1" style="min-width:0">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <b>@variable.Label</b>
+                                            @if (variable.Mandatory)
+                                            {
+                                                <span class="pill pill-danger no-dot" style="height:20px;font-size:11px">Mandatory</span>
+                                            }
+                                        </div>
+                                        <div class="tiny faint mt-1">
+                                            <span class="mono">@variable.Name</span> · @SmLabels.Label(variable.Type)
+                                            @if (variable.Options.Count > 0)
+                                            {
+                                                <span> · @variable.Options.Count option(s)</span>
+                                            }
+                                            @if (variable.DefaultValue is not null)
+                                            {
+                                                <span> · default “@variable.DefaultValue”</span>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div class="flex gap-1">
+                                        <button class="icon-btn" title="Move up" disabled="@(index == 0)" @onclick="() => MoveAsync(variable, -1)"><Icon Name="chevron-up" Size="15" /></button>
+                                        <button class="icon-btn" title="Move down" disabled="@(index == _model.Variables.Count - 1)" @onclick="() => MoveAsync(variable, 1)"><Icon Name="chevron-down" Size="15" /></button>
+                                        <button class="icon-btn" title="Edit" @onclick="() => EditVariable(variable)"><Icon Name="edit" Size="15" /></button>
+                                        <button class="icon-btn" title="Delete" @onclick="() => AskDeleteVariable(variable)"><Icon Name="trash" Size="15" /></button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="sticky-top">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h3><Icon Name="eye" Size="16" /> Live preview</h3>
+                        <div class="card-subtitle">How employees see the order form.</div>
+                    </div>
+                    <span class="live-dot"></span>
+                </div>
+                <div class="card-body">
+                    <CatalogFormPreview Name="@_model.Name" ShortDescription="@_model.ShortDescription" Description="@_model.Description" Icon="@_model.Icon"
+                                        Price="_model.Price" DeliveryDays="_model.DeliveryDays" ApprovalRequired="_model.ApprovalRequired" Variables="PreviewVariables" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <Drawer @bind-Open="_variableOpen" Title="@(_variable.Id is null ? "New question" : "Edit question")" Subtitle="Define what the requester must answer." Size="lg">
+        <ChildContent>
+            <div class="form-section-title">Input type</div>
+            <div class="type-tiles mb-4">
+                @foreach (var type in Enum.GetValues<CatalogVariableType>())
+                {
+                    <button type="button" class="type-tile @(_variable.Type == type ? "selected" : null)" @onclick="() => _variable.Type = type">
+                        <Icon Name="@SmLabels.Icon(type)" Size="18" />
+                        <span>@SmLabels.Label(type)</span>
+                    </button>
+                }
+            </div>
+            <div class="form-grid">
+                <FormField Label="Question label" Required="true" Class="span-all">
+                    <input class="input" value="@_variable.Label" @oninput="OnLabelInput" maxlength="200" placeholder="e.g. Preferred model" />
+                </FormField>
+                <FormField Label="Technical name" Required="true" Help="Lowercase letters, digits and underscores. Key of the stored answer.">
+                    <input class="input mono" @bind="_variable.Name" @bind:after="() => _nameTouched = true" maxlength="64" />
+                </FormField>
+                <FormField Label="Mandatory"><Switch @bind-Value="_variable.Mandatory" Label="@(_variable.Mandatory ? "Answer required" : "Optional")" /></FormField>
+                @if (_variable.Type == CatalogVariableType.Choice)
+                {
+                    <FormField Label="Options" Required="true" Help="One option per line (max. 100)." Class="span-all">
+                        <textarea class="textarea" rows="5" @bind="_variable.OptionsText" @bind:event="oninput"></textarea>
+                    </FormField>
+                }
+                @if (_variable.Type is CatalogVariableType.Text or CatalogVariableType.MultilineText)
+                {
+                    <FormField Label="Maximum length" Help="@($"Default {(_variable.Type == CatalogVariableType.Text ? CatalogVariableValidator.DefaultTextLength : CatalogVariableValidator.DefaultMultilineLength)}")">
+                        <input class="input" type="number" min="1" max="4000" @bind="_variable.MaxLength" />
+                    </FormField>
+                }
+                @if (_variable.Type == CatalogVariableType.Number)
+                {
+                    <FormField Label="Minimum"><input class="input" type="number" step="any" @bind="_variable.MinValue" /></FormField>
+                    <FormField Label="Maximum"><input class="input" type="number" step="any" @bind="_variable.MaxValue" /></FormField>
+                }
+                @if (_variable.Type is not CatalogVariableType.UserReference)
+                {
+                    <FormField Label="Default value" Help="@DefaultHelp"><input class="input" @bind="_variable.DefaultValue" maxlength="1000" /></FormField>
+                }
+                <FormField Label="Help text" Class="span-all"><input class="input" @bind="_variable.HelpText" maxlength="1000" /></FormField>
+            </div>
+            <div class="form-section-title mt-6"><Icon Name="eye" Size="14" /> Preview</div>
+            <div class="card card-body">
+                <CatalogVariableInput Definition="@_variable.ToDefinition()" Value="@_variable.DefaultValue" />
+            </div>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _variableOpen = false">Cancel</button>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveVariableAsync"><Icon Name="save" Size="14" /> Save question</button>
+        </Footer>
+    </Drawer>
+
+    <ConfirmDialog @bind-Open="_deleteOpen" Title="Delete catalog item?" Danger="true" ConfirmText="Delete"
+                   Message="@($"\"{_model.Name}\" and its questions will be deleted permanently. Items that were already ordered cannot be deleted – deactivate them instead.")"
+                   OnConfirm="DeleteAsync" />
+    <ConfirmDialog @bind-Open="_deleteVariableOpen" Title="Delete question?" Danger="true" ConfirmText="Delete"
+                   Message="@($"\"{_deletingVariable?.Label}\" will be removed from the order form. Answers of existing requests are kept.")"
+                   OnConfirm="DeleteVariableAsync" />
+}
+
+@code {
+    private CatalogItemModel _model = new();
+    private IReadOnlyList<CatalogCategoryModel> _categories = [];
+    private CatalogVariableModel _variable = new();
+    private CatalogVariableDefinition? _deletingVariable;
+    private bool _loading = true;
+    private bool _notFound;
+    private bool _busy;
+    private bool _variableOpen;
+    private bool _deleteOpen;
+    private bool _deleteVariableOpen;
+    private bool _nameTouched;
+
+    /// <summary>Gets or sets the catalog item identifier (absent for new items).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool IsNew => Id is null;
+
+    private string DefaultHelp => _variable.Type switch
+    {
+        CatalogVariableType.Boolean => "true or false",
+        CatalogVariableType.Date => "YYYY-MM-DD",
+        CatalogVariableType.Choice => "One of the options",
+        _ => "Pre-filled answer",
+    };
+
+    private IReadOnlyList<CatalogVariableDefinition> PreviewVariables
+    {
+        get
+        {
+            if (!_variableOpen || string.IsNullOrWhiteSpace(_variable.Name))
+            {
+                return _model.Variables;
+            }
+
+            var live = _variable.ToDefinition();
+            var list = _model.Variables.Where(v => v.Id != _variable.Id && v.Name != live.Name).ToList();
+            var existing = _model.Variables.FirstOrDefault(v => v.Id == _variable.Id);
+            list.Add(live with { Order = existing?.Order ?? int.MaxValue });
+            return list;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _categories = (await Catalog.ListCategoriesAsync()).Value ?? [];
+        if (Id is { } id)
+        {
+            await ReloadAsync(id);
+        }
+        else
+        {
+            _model = new CatalogItemModel { CategoryId = _categories.FirstOrDefault()?.Id };
+        }
+
+        _loading = false;
+    }
+
+    private async Task ReloadAsync(Guid id)
+    {
+        var result = await Catalog.GetItemAsync(id);
+        _notFound = !result.Succeeded;
+        if (result.Succeeded)
+        {
+            _model = result.Value!;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (IsNew)
+            {
+                var created = await Catalog.CreateItemAsync(_model);
+                if (Toasts.FromResult(created, "Catalog item created – now add questions"))
+                {
+                    Nav.NavigateTo($"/catalog-admin/{created.Value}");
+                }
+
+                return;
+            }
+
+            var result = await Catalog.UpdateItemAsync(Id!.Value, _model);
+            if (Toasts.FromResult(result, "Catalog item saved"))
+            {
+                await ReloadAsync(Id.Value);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DuplicateAsync()
+    {
+        var result = await Catalog.DuplicateItemAsync(Id!.Value);
+        if (Toasts.FromResult(result, "Copy created (inactive)"))
+        {
+            Nav.NavigateTo($"/catalog-admin/{result.Value}");
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await Catalog.DeleteItemAsync(Id!.Value);
+        if (Toasts.FromResult(result, "Catalog item deleted"))
+        {
+            Nav.NavigateTo("/catalog-admin");
+        }
+    }
+
+    private void NewVariable()
+    {
+        _variable = new CatalogVariableModel();
+        _nameTouched = false;
+        _variableOpen = true;
+    }
+
+    private void EditVariable(CatalogVariableDefinition variable)
+    {
+        _variable = CatalogVariableModel.From(variable);
+        _nameTouched = true;
+        _variableOpen = true;
+    }
+
+    private void OnLabelInput(ChangeEventArgs e)
+    {
+        _variable.Label = e.Value?.ToString() ?? string.Empty;
+        if (!_nameTouched && _variable.Id is null)
+        {
+            _variable.Name = Slug(_variable.Label);
+        }
+    }
+
+    private async Task SaveVariableAsync()
+    {
+        _busy = true;
+        var result = await Catalog.SaveVariableAsync(Id!.Value, _variable);
+        _busy = false;
+        if (Toasts.FromResult(result, "Question saved"))
+        {
+            _variableOpen = false;
+            await ReloadAsync(Id.Value);
+        }
+    }
+
+    private async Task MoveAsync(CatalogVariableDefinition variable, int direction)
+    {
+        var result = await Catalog.MoveVariableAsync(variable.Id, direction);
+        if (result.Succeeded)
+        {
+            await ReloadAsync(Id!.Value);
+        }
+        else
+        {
+            Toasts.Error("Could not reorder", result.Error);
+        }
+    }
+
+    private void AskDeleteVariable(CatalogVariableDefinition variable)
+    {
+        _deletingVariable = variable;
+        _deleteVariableOpen = true;
+    }
+
+    private async Task DeleteVariableAsync()
+    {
+        if (_deletingVariable is null)
+        {
+            return;
+        }
+
+        var result = await Catalog.DeleteVariableAsync(_deletingVariable.Id);
+        if (Toasts.FromResult(result, "Question deleted"))
+        {
+            await ReloadAsync(Id!.Value);
+        }
+    }
+
+    private static string Slug(string label)
+    {
+        var chars = label.Trim().ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) ? c : '_').ToArray();
+        var slug = string.Join('_', new string(chars).Split('_', StringSplitOptions.RemoveEmptyEntries));
+        if (slug.Length > 0 && char.IsAsciiDigit(slug[0]))
+        {
+            slug = "q_" + slug;
+        }
+
+        return slug.Length > 64 ? slug[..64] : slug;
+    }
+}

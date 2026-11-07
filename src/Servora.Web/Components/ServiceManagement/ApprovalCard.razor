@@ -1,0 +1,81 @@
+@* Card of one approval in the approval inbox: record summary, context and approve / reject actions. *@
+
+<div class="card approval-card @(Item.CanDecide ? "pending" : null)">
+    <div class="approval-head">
+        <div class="approval-icon"><Icon Name="@IconFor(Item.TableName)" Size="18" /></div>
+        <div class="flex-1" style="min-width:0">
+            <div class="flex items-center gap-2 flex-wrap">
+                <span class="tag">@Item.TableLabel</span>
+                @if (!string.IsNullOrEmpty(Item.RecordRoute))
+                {
+                    <a class="mono approval-number" href="@Item.RecordRoute">@Item.RecordNumber</a>
+                }
+                else
+                {
+                    <span class="mono approval-number">@Item.RecordNumber</span>
+                }
+                <StatusPill Text="@SmLabels.Label(Item.State)" Tone="@SmLabels.Tone(Item.State)" />
+            </div>
+            <div class="approval-title">@Item.RecordSummary</div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Item.Reason))
+    {
+        <div class="approval-reason"><Icon Name="info" Size="14" /> <span>@Item.Reason</span></div>
+    }
+
+    <div class="approval-meta">
+        <span class="flex items-center gap-1"><Icon Name="user" Size="13" /> @(Item.RequestedByName ?? "System")</span>
+        <span class="flex items-center gap-1"><Icon Name="clock" Size="13" /> <RelativeTime Value="Item.RequestedAt" /></span>
+        @if (Item.GroupName is not null)
+        {
+            <span class="flex items-center gap-1"><Icon Name="users" Size="13" /> via @Item.GroupName</span>
+        }
+        <span class="flex items-center gap-1"><Icon Name="layers" Size="13" /> @(Item.Mode == ApprovalMode.AllApprovers ? "All must approve" : "Any approver decides")</span>
+        @if (!Item.IsMine)
+        {
+            <span class="flex items-center gap-1"><Avatar Name="@Item.ApproverName" Size="sm" /> @Item.ApproverName</span>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Item.Comments))
+    {
+        <div class="approval-comment"><Icon Name="message-square" Size="14" /> <span>@Item.Comments</span></div>
+    }
+
+    @if (Item.CanDecide)
+    {
+        <div class="approval-actions">
+            @if (!string.IsNullOrEmpty(Item.RecordRoute))
+            {
+                <a class="btn btn-ghost btn-sm" href="@Item.RecordRoute"><Icon Name="eye" Size="14" /> Open record</a>
+            }
+            <div class="spacer"></div>
+            <button class="btn btn-outline-danger btn-sm" disabled="@Busy" @onclick="() => OnDecide.InvokeAsync(false)"><Icon Name="x" Size="14" /> Reject</button>
+            <button class="btn btn-success btn-sm" disabled="@Busy" @onclick="() => OnDecide.InvokeAsync(true)"><Icon Name="check" Size="14" /> Approve</button>
+        </div>
+    }
+    else if (Item.DecidedAt is { } decided)
+    {
+        <div class="approval-actions small faint">Decided <RelativeTime Value="decided" /></div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the approval.</summary>
+    [Parameter, EditorRequired] public ApprovalItem Item { get; set; } = default!;
+
+    /// <summary>Raised when the user wants to approve (<see langword="true"/>) or reject (<see langword="false"/>).</summary>
+    [Parameter] public EventCallback<bool> OnDecide { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a decision is being processed.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    private static string IconFor(string table) => table switch
+    {
+        "change_request" => "git-pull-request",
+        "sc_req_item" => "shopping-cart",
+        _ => "check-square",
+    };
+}
