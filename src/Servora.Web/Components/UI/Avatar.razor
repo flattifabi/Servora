@@ -1,0 +1,48 @@
+@* Circular avatar with initials and a deterministic gradient derived from the name. *@
+<span class="avatar @Size" style="background:@Background" title="@(ShowTitle ? Name : null)">@Initials</span>
+
+@code {
+    private static readonly string[] s_gradients =
+    [
+        "linear-gradient(135deg,#7c6cff,#a855f7)", "linear-gradient(135deg,#22d3ee,#3b82f6)", "linear-gradient(135deg,#f43f5e,#f97316)",
+        "linear-gradient(135deg,#22c55e,#14b8a6)", "linear-gradient(135deg,#f59e0b,#ef4444)", "linear-gradient(135deg,#ec4899,#8b5cf6)",
+        "linear-gradient(135deg,#06b6d4,#22c55e)", "linear-gradient(135deg,#6366f1,#22d3ee)",
+    ];
+
+    /// <summary>Gets or sets the person or entity name.</summary>
+    [Parameter] public string? Name { get; set; }
+
+    /// <summary>Gets or sets the size: <c>sm</c>, (default), <c>lg</c> or <c>xl</c>.</summary>
+    [Parameter] public string? Size { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the name is shown as tooltip.</summary>
+    [Parameter] public bool ShowTitle { get; set; } = true;
+
+    private string Initials
+    {
+        get
+        {
+            var parts = (Name ?? "?").Split([' ', '.', '_', '-'], StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length switch
+            {
+                0 => "?",
+                1 => parts[0][..Math.Min(2, parts[0].Length)].ToUpperInvariant(),
+                _ => string.Concat(char.ToUpperInvariant(parts[0][0]), char.ToUpperInvariant(parts[^1][0])),
+            };
+        }
+    }
+
+    private string Background
+    {
+        get
+        {
+            var hash = 0;
+            foreach (var c in Name ?? string.Empty)
+            {
+                hash = unchecked((hash * 31) + c);
+            }
+
+            return s_gradients[Math.Abs(hash % s_gradients.Length)];
+        }
+    }
+}

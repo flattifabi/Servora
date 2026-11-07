@@ -1,0 +1,171 @@
+@* Searchable reference (foreign key) picker. Provide a Search delegate and a Resolve delegate for the display value. *@
+@using Servora.Application.Directory
+@implements IDisposable
+
+<div class="combo">
+    <div class="input-icon">
+        <Icon Name="@Icon" Size="16" />
+        <input class="input" placeholder="@Placeholder" value="@(_open ? _term : _display)" disabled="@Disabled"
+               @onfocus="OpenAsync" @oninput="OnInput" @onkeydown="OnKeyDown" autocomplete="off" />
+    </div>
+    @if (Value is not null && !Disabled && !Required)
+    {
+        <button type="button" class="icon-btn combo-clear" style="width:28px;height:28px" title="Clear" @onclick="Clear"><Icon Name="x" Size="14" /></button>
+    }
+    @if (_open)
+    {
+        <div class="click-catcher" @onclick="Close"></div>
+        <div class="combo-menu">
+            @if (_loading && _items.Count == 0)
+            {
+                <div class="combo-empty"><span class="spinner"></span></div>
+            }
+            else if (_items.Count == 0)
+            {
+                <div class="combo-empty">No matches</div>
+            }
+            @for (var i = 0; i < _items.Count; i++)
+            {
+                var item = _items[i];
+                var index = i;
+                <div class="combo-item @(index == _active ? "active" : null)" @onclick="() => Select(item)" @onmouseenter="() => _active = index">
+                    @if (ShowAvatar)
+                    {
+                        <Avatar Name="@item.Display" Size="sm" ShowTitle="false" />
+                    }
+                    else
+                    {
+                        <Icon Name="@Icon" Size="15" Class="faint" />
+                    }
+                    <span>@item.Display</span>
+                    <span class="secondary">@item.Secondary</span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<LookupItem> _items = [];
+    private string _term = string.Empty;
+    private string _display = string.Empty;
+    private bool _open;
+    private bool _loading;
+    private int _active;
+    private Guid? _resolvedFor;
+    private CancellationTokenSource? _debounce;
+
+    /// <summary>Gets or sets the selected record id.</summary>
+    [Parameter] public Guid? Value { get; set; }
+
+    /// <summary>Raised when the selection changes.</summary>
+    [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets the search delegate (term, take) returning matches.</summary>
+    [Parameter, EditorRequired] public Func<string?, Task<IReadOnlyList<LookupItem>>> Search { get; set; } = default!;
+
+    /// <summary>Gets or sets the delegate resolving the display value of the current id.</summary>
+    [Parameter] public Func<Guid, Task<LookupItem?>>? Resolve { get; set; }
+
+    /// <summary>Gets or sets the placeholder.</summary>
+    [Parameter] public string Placeholder { get; set; } = "Search…";
+
+    /// <summary>Gets or sets the leading icon.</summary>
+    [Parameter] public string Icon { get; set; } = "search";
+
+    /// <summary>Gets or sets a value indicating whether avatars are shown for results.</summary>
+    [Parameter] public bool ShowAvatar { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the picker is disabled.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a value is required (hides the clear button).</summary>
+    [Parameter] public bool Required { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Value != _resolvedFor)
+        {
+            _resolvedFor = Value;
+            _display = Value is { } id && Resolve is not null ? (await Resolve(id))?.Display ?? string.Empty : string.Empty;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _debounce?.Cancel();
+
+    private async Task OpenAsync()
+    {
+        if (_open)
+        {
+            return;
+        }
+
+        _open = true;
+        _term = string.Empty;
+        await LoadAsync();
+    }
+
+    private void Close() => _open = false;
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _items = (await Search(_term)).ToList();
+        _active = 0;
+        _loading = false;
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        _term = e.Value?.ToString() ?? string.Empty;
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(200, _debounce.Token);
+            await LoadAsync();
+        }
+        catch (TaskCanceledException)
+        {
+            // superseded by a newer keystroke
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                _active = Math.Min(_active + 1, _items.Count - 1);
+                break;
+            case "ArrowUp":
+                _active = Math.Max(_active - 1, 0);
+                break;
+            case "Enter" when _items.Count > 0:
+                await Select(_items[Math.Clamp(_active, 0, _items.Count - 1)]);
+                break;
+            case "Escape":
+                Close();
+                break;
+        }
+    }
+
+    private async Task Select(LookupItem item)
+    {
+        _display = item.Display;
+        _resolvedFor = item.Id;
+        _open = false;
+        Value = item.Id;
+        await ValueChanged.InvokeAsync(item.Id);
+    }
+
+    private async Task Clear()
+    {
+        _display = string.Empty;
+        _resolvedFor = null;
+        Value = null;
+        await ValueChanged.InvokeAsync(null);
+    }
+}

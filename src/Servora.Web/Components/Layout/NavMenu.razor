@@ -1,0 +1,94 @@
+@* Sidebar navigation filtered by the effective permissions of the current user. *@
+@using Servora.Web.Navigation
+@implements IDisposable
+@inject ICurrentUser CurrentUser
+@inject IPermissionService PermissionService
+@inject UiStateService Ui
+@inject IJSRuntime JS
+
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        <div class="brand-mark"><Icon Name="sparkles" Size="18" /></div>
+        <div class="brand-text">
+            <div class="brand-name">Servora</div>
+            <div class="brand-sub">Service Platform</div>
+        </div>
+    </div>
+
+    <div class="sidebar-search" @onclick="() => Ui.SetPaletteOpen(true)" title="Search (Ctrl+K)">
+        <Icon Name="search" Size="16" />
+        <span>Search or jump to…</span>
+        <kbd>Ctrl K</kbd>
+    </div>
+
+    <nav class="sidebar-nav">
+        @foreach (var section in _sections)
+        {
+            var closed = _closedSections.Contains(section.Title);
+            <div class="nav-section @(closed ? "closed" : null)">
+                <div class="nav-section-title" @onclick="() => ToggleSection(section.Title)">
+                    <span>@section.Title</span>
+                    <Icon Name="chevron-down" Size="14" />
+                </div>
+                <div class="nav-items">
+                    @foreach (var entry in section.Entries)
+                    {
+                        <NavLink class="nav-link" href="@entry.Route" Match="@(entry.Route == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)" title="@entry.Title">
+                            <Icon Name="@entry.Icon" Size="18" />
+                            <span>@entry.Title</span>
+                        </NavLink>
+                    }
+                </div>
+            </div>
+        }
+    </nav>
+
+    <div class="sidebar-footer">
+        <Avatar Name="@CurrentUser.DisplayName" />
+        <div class="user-meta">
+            <div class="name">@CurrentUser.DisplayName</div>
+            <div class="role">@CurrentUser.Name</div>
+        </div>
+        <button class="icon-btn" title="@(Ui.SidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")" @onclick="ToggleCollapsed">
+            <Icon Name="@(Ui.SidebarCollapsed ? "chevrons-right" : "chevrons-left")" Size="16" />
+        </button>
+    </div>
+</aside>
+
+@code {
+    private readonly HashSet<string> _closedSections = [];
+    private IReadOnlyList<NavSection> _sections = [];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Ui.Changed += OnUiChanged;
+        var granted = CurrentUser.UserId is { } userId
+            ? await PermissionService.GetUserPermissionsAsync(userId)
+            : new HashSet<string>();
+
+        _sections = NavigationCatalog.Sections
+            .Select(s => s with { Entries = s.Entries.Where(e => e.Permission is null || PermissionMatcher.IsGranted(granted, e.Permission)).ToList() })
+            .Where(s => s.Entries.Count > 0)
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => Ui.Changed -= OnUiChanged;
+
+    private void ToggleSection(string title)
+    {
+        if (!_closedSections.Remove(title))
+        {
+            _closedSections.Add(title);
+        }
+    }
+
+    private async Task ToggleCollapsed()
+    {
+        Ui.SetSidebarCollapsed(!Ui.SidebarCollapsed);
+        await JS.InvokeVoidAsync("servora.setSidebarCollapsed", Ui.SidebarCollapsed);
+    }
+
+    private void OnUiChanged() => InvokeAsync(StateHasChanged);
+}

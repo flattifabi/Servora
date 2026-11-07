@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Servora.Domain\Servora.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Servora.Application\Servora.Application.csproj" />
+    <ProjectReference Include="..\..\src\Servora.Infrastructure\Servora.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Servora.Persistence.Sqlite\Servora.Persistence.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\Servora.Installer\Servora.Installer.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

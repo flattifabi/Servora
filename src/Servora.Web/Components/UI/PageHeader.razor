@@ -1,0 +1,47 @@
+@* Standard page header with optional breadcrumbs, icon, subtitle and action buttons. *@
+<div class="page-header">
+    <div class="titles">
+        @if (Breadcrumbs is not null)
+        {
+            <div class="breadcrumbs">@Breadcrumbs</div>
+        }
+        <div class="title-row">
+            @if (!string.IsNullOrEmpty(Icon))
+            {
+                <div class="page-icon"><Icon Name="@Icon" Size="22" /></div>
+            }
+            <div>
+                <h1>@Title</h1>
+                @if (!string.IsNullOrEmpty(Subtitle))
+                {
+                    <div class="subtitle">@Subtitle</div>
+                }
+                @SubtitleContent
+            </div>
+        </div>
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="actions">@Actions</div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the page title.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the subtitle text.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets rich subtitle content rendered below the title.</summary>
+    [Parameter] public RenderFragment? SubtitleContent { get; set; }
+
+    /// <summary>Gets or sets the icon name.</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>Gets or sets breadcrumb content (links separated by chevrons).</summary>
+    [Parameter] public RenderFragment? Breadcrumbs { get; set; }
+
+    /// <summary>Gets or sets the action buttons.</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

@@ -1,0 +1,27 @@
+@* Layout for sign-in, password change and setup pages: aurora hero on the left, form panel on the right. *@
+@inherits LayoutComponentBase
+
+<div class="auth-shell">
+    <section class="auth-hero">
+        <div class="flex items-center gap-3">
+            <div class="brand-mark"><Icon Name="sparkles" Size="18" /></div>
+            <div>
+                <div class="brand-name" style="color:#fff">Servora</div>
+                <div class="brand-sub" style="color:rgba(255,255,255,.55)">Service Platform</div>
+            </div>
+        </div>
+        <div>
+            <h1>Run every service your business depends on — on your own terms.</h1>
+            <p>Incidents, changes, requests, knowledge, CMDB, automation and AI agents in one open-source, self-hosted platform.</p>
+        </div>
+        <div class="auth-features">
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="shield-check" Size="17" /></div><div><b>Self-hosted & secure</b><span>Your data, your network, your keys.</span></div></div>
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="workflow" Size="17" /></div><div><b>No-code automation</b><span>Flows, rules, SLAs and approvals.</span></div></div>
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="id-card" Size="17" /></div><div><b>Active Directory</b><span>LDAP sign-in and Windows SSO.</span></div></div>
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="bot" Size="17" /></div><div><b>AI & MCP ready</b><span>Scoped agents and tools.</span></div></div>
+        </div>
+    </section>
+    <section class="auth-panel">
+        @Body
+    </section>
+</div>

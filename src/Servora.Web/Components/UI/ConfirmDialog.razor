@@ -1,0 +1,65 @@
+@* Confirmation dialog for destructive or consequential actions. *@
+<Modal Open="Open" OpenChanged="OpenChanged" Title="@Title" Size="sm" Icon="@(Danger ? "alert-triangle" : "help-circle")">
+    <ChildContent>
+        <p style="margin:0">@Message</p>
+        @ChildContent
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="Cancel">@CancelText</button>
+        <button class="btn @(Danger ? "btn-danger" : "btn-primary")" disabled="@_busy" @onclick="Confirm">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            @ConfirmText
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private bool _busy;
+
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the title.</summary>
+    [Parameter] public string Title { get; set; } = "Are you sure?";
+
+    /// <summary>Gets or sets the message.</summary>
+    [Parameter] public string Message { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets additional content.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Gets or sets the confirm button text.</summary>
+    [Parameter] public string ConfirmText { get; set; } = "Confirm";
+
+    /// <summary>Gets or sets the cancel button text.</summary>
+    [Parameter] public string CancelText { get; set; } = "Cancel";
+
+    /// <summary>Gets or sets a value indicating whether the action is destructive.</summary>
+    [Parameter] public bool Danger { get; set; }
+
+    /// <summary>Raised when the user confirms.</summary>
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    private async Task Confirm()
+    {
+        _busy = true;
+        try
+        {
+            await OnConfirm.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await OpenChanged.InvokeAsync(false);
+    }
+
+    private Task Cancel() => OpenChanged.InvokeAsync(false);
+}

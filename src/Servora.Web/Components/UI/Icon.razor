@@ -1,0 +1,20 @@
+@* Renders an inline SVG icon from the Servora icon set (see IconPaths). *@
+<svg class="icon @Class" width="@Size" height="@Size" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+     stroke-width="@StrokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="@Style">@((MarkupString)IconPaths.Get(Name))</svg>
+
+@code {
+    /// <summary>Gets or sets the icon name, for example <c>home</c> or <c>alert-triangle</c>.</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = "dot";
+
+    /// <summary>Gets or sets the pixel size (width and height).</summary>
+    [Parameter] public int Size { get; set; } = 18;
+
+    /// <summary>Gets or sets the stroke width.</summary>
+    [Parameter] public double StrokeWidth { get; set; } = 2;
+
+    /// <summary>Gets or sets additional CSS classes.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Gets or sets inline styles (use sparingly).</summary>
+    [Parameter] public string? Style { get; set; }
+}

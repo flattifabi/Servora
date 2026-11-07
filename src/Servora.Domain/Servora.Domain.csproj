@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Domain layer: entities, enums and invariants. Must not reference any other project or infrastructure package. -->
+  <PropertyGroup>
+    <RootNamespace>Servora.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>

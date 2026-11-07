@@ -1,0 +1,96 @@
+@* Attachments of a record with drag-and-drop / click upload and download links. *@
+@using Servora.Application.Activity
+@using Servora.Domain.Activity
+@inject IAttachmentService Attachments
+@inject ToastService Toasts
+
+<div class="attachment-list">
+    @if (AllowUpload)
+    {
+        <label class="dropzone">
+            <InputFile OnChange="UploadAsync" multiple />
+            @if (_uploading)
+            {
+                <span class="spinner"></span>
+                <span class="small">Uploading…</span>
+            }
+            else
+            {
+                <Icon Name="upload" Size="22" />
+                <span class="small"><b>Drop files</b> or click to upload (max 25 MB each)</span>
+            }
+        </label>
+    }
+    @foreach (var file in _files)
+    {
+        <div class="attachment" @key="file.Id">
+            <div class="file-icon"><Icon Name="file" Size="16" /></div>
+            <div class="file-meta">
+                <a class="truncate" style="display:block;font-weight:600" href="/attachments/@file.Id" target="_blank">@file.FileName</a>
+                <div class="tiny faint">@FormatSize(file.SizeBytes) · @file.UploadedBy · <RelativeTime Value="file.UploadedAt" /></div>
+            </div>
+            <a class="icon-btn" href="/attachments/@file.Id" title="Download"><Icon Name="download" Size="16" /></a>
+            @if (AllowDelete)
+            {
+                <button class="icon-btn" title="Delete" @onclick="() => DeleteAsync(file)"><Icon Name="trash" Size="16" /></button>
+            }
+        </div>
+    }
+    @if (_files.Count == 0 && !AllowUpload)
+    {
+        <div class="small faint">No attachments.</div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<Attachment> _files = [];
+    private bool _uploading;
+
+    /// <summary>Gets or sets the technical table name.</summary>
+    [Parameter, EditorRequired] public string Table { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the record identifier.</summary>
+    [Parameter, EditorRequired] public Guid RecordId { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether uploads are allowed.</summary>
+    [Parameter] public bool AllowUpload { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether deletion is allowed.</summary>
+    [Parameter] public bool AllowDelete { get; set; } = true;
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync() => _files = await Attachments.ListAsync(Table, RecordId);
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+        _ => $"{bytes / (1024.0 * 1024):0.#} MB",
+    };
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        foreach (var file in e.GetMultipleFiles(10))
+        {
+            await using var stream = file.OpenReadStream(IAttachmentService.MaxSizeBytes);
+            var result = await Attachments.UploadAsync(Table, RecordId, file.Name, file.ContentType, stream);
+            if (!result.Succeeded)
+            {
+                Toasts.Error($"Upload failed: {file.Name}", result.Error);
+            }
+        }
+
+        _uploading = false;
+        _files = await Attachments.ListAsync(Table, RecordId);
+    }
+
+    private async Task DeleteAsync(Attachment file)
+    {
+        var result = await Attachments.DeleteAsync(file.Id);
+        if (Toasts.FromResult(result, "Attachment deleted"))
+        {
+            _files = await Attachments.ListAsync(Table, RecordId);
+        }
+    }
+}

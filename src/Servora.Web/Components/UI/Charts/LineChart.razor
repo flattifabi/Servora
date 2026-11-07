@@ -1,0 +1,149 @@
+@* Multi-series line / area chart with grid, axis labels, legend and hover tooltip. *@
+@using System.Globalization
+<div style="position:relative">
+    <svg class="chart" viewBox="0 0 @Width @Height" style="height:@(Height)px" @onmouseleave="() => _hover = null">
+        <defs>
+            @for (var s = 0; s < Series.Count; s++)
+            {
+                <linearGradient id="@($"{_id}-{s}")" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="@ColorOf(s)" stop-opacity="0.28" />
+                    <stop offset="100%" stop-color="@ColorOf(s)" stop-opacity="0" />
+                </linearGradient>
+            }
+        </defs>
+        @for (var g = 0; g <= GridLines; g++)
+        {
+            var y = Top + (PlotHeight * g / GridLines);
+            var value = Max - (Max * g / GridLines);
+            <line class="grid-line" x1="@Left" x2="@(Width - Right)" y1="@F(y)" y2="@F(y)" stroke-dasharray="@(g == GridLines ? null : "3 4")" />
+            <SvgText X="@(Left - 8)" Y="@F(y + 4)" Anchor="end" Text="@FormatValue(value)" />
+        }
+        @for (var i = 0; i < Labels.Count; i++)
+        {
+            if (Labels.Count <= 12 || i % (int)Math.Ceiling(Labels.Count / 12.0) == 0)
+            {
+                <SvgText X="@F(X(i))" Y="@(Height - 6)" Anchor="middle" Text="@Labels[i]" />
+            }
+        }
+        @for (var s = 0; s < Series.Count; s++)
+        {
+            var series = Series[s];
+            if (series.Values.Count == 0)
+            {
+                continue;
+            }
+
+            if (Area)
+            {
+                <path class="area" d="@AreaPath(series)" fill="@($"url(#{_id}-{s})")" />
+            }
+
+            <path class="line" d="@LinePath(series)" stroke="@ColorOf(s)" />
+        }
+        @if (_hover is { } h)
+        {
+            <line x1="@F(X(h))" x2="@F(X(h))" y1="@Top" y2="@(Top + PlotHeight)" stroke="var(--border-strong)" />
+            @for (var s = 0; s < Series.Count; s++)
+            {
+                if (h < Series[s].Values.Count)
+                {
+                    <circle class="dot" cx="@F(X(h))" cy="@F(Y(Series[s].Values[h]))" r="4" fill="@ColorOf(s)" />
+                }
+            }
+        }
+        @for (var i = 0; i < Labels.Count; i++)
+        {
+            var index = i;
+            <rect x="@F(X(i) - (Step / 2))" y="@Top" width="@F(Math.Max(Step, 1))" height="@PlotHeight" fill="transparent" @onmouseenter="() => _hover = index" />
+        }
+    </svg>
+    @if (_hover is { } hv && hv < Labels.Count)
+    {
+        <div class="chart-tooltip" style="left:@(F(Math.Min(X(hv) / Width * 100, 80)))%;top:0">
+            <div style="font-weight:650;margin-bottom:4px">@Labels[hv]</div>
+            @for (var s = 0; s < Series.Count; s++)
+            {
+                if (hv < Series[s].Values.Count)
+                {
+                    <div><span class="swatch" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:@ColorOf(s);margin-right:6px"></span>@Series[s].Name: <b>@FormatValue(Series[s].Values[hv])</b></div>
+                }
+            }
+        </div>
+    }
+    @if (ShowLegend && Series.Count > 1)
+    {
+        <div class="chart-legend">
+            @for (var s = 0; s < Series.Count; s++)
+            {
+                <span><span class="swatch" style="background:@ColorOf(s)"></span>@Series[s].Name</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const double Left = 44;
+    private const double Right = 12;
+    private const double Top = 10;
+    private const double Bottom = 26;
+    private const int GridLines = 4;
+    private readonly string _id = "lc" + Guid.NewGuid().ToString("N")[..8];
+    private int? _hover;
+
+    /// <summary>Gets or sets the x-axis labels.</summary>
+    [Parameter] public IReadOnlyList<string> Labels { get; set; } = [];
+
+    /// <summary>Gets or sets the series.</summary>
+    [Parameter] public IReadOnlyList<ChartSeries> Series { get; set; } = [];
+
+    /// <summary>Gets or sets the chart height in pixels.</summary>
+    [Parameter] public int Height { get; set; } = 240;
+
+    /// <summary>Gets or sets a value indicating whether areas are filled.</summary>
+    [Parameter] public bool Area { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether the legend is shown.</summary>
+    [Parameter] public bool ShowLegend { get; set; } = true;
+
+    /// <summary>Gets or sets the value format (for example <c>0</c>, <c>0.0</c>, <c>0%</c>).</summary>
+    [Parameter] public string ValueFormat { get; set; } = "0.#";
+
+    private double Width => 800;
+
+    private double PlotWidth => Width - Left - Right;
+
+    private double PlotHeight => Height - Top - Bottom;
+
+    private double Step => Labels.Count > 1 ? PlotWidth / (Labels.Count - 1) : PlotWidth;
+
+    private double Max
+    {
+        get
+        {
+            var max = Series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max();
+            if (max <= 0)
+            {
+                return 1;
+            }
+
+            var magnitude = Math.Pow(10, Math.Floor(Math.Log10(max)));
+            return Math.Ceiling(max / magnitude * 1.1) * magnitude;
+        }
+    }
+
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private string ColorOf(int index) => Series[index].Color ?? ChartPalette.At(index);
+
+    private string FormatValue(double value) => value.ToString(ValueFormat, CultureInfo.CurrentCulture);
+
+    private double X(int index) => Labels.Count > 1 ? Left + (index * Step) : Left + (PlotWidth / 2);
+
+    private double Y(double value) => Top + PlotHeight - (value / Max * PlotHeight);
+
+    private string LinePath(ChartSeries series) =>
+        "M" + string.Join(" L", series.Values.Select((v, i) => $"{F(X(i))},{F(Y(v))}"));
+
+    private string AreaPath(ChartSeries series) =>
+        LinePath(series) + $" L{F(X(series.Values.Count - 1))},{F(Top + PlotHeight)} L{F(X(0))},{F(Top + PlotHeight)} Z";
+}

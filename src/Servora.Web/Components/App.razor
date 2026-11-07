@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <base href="/" />
+    <script>
+        (function () {
+            var p = localStorage.getItem("servora.theme") || "dark";
+            if (p === "system") { p = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; }
+            document.documentElement.setAttribute("data-theme", p);
+        })();
+    </script>
+    <link rel="stylesheet" href="@Assets["css/servora.css"]" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <ImportMap />
+    <HeadOutlet @rendermode="PageRenderMode" />
+</head>
+<body>
+    @if (PageRenderMode is not null)
+    {
+        <div id="splash" class="splash">
+            <div>
+                <div class="splash-mark" style="margin: 0 auto"></div>
+                <div class="splash-text">Servora</div>
+            </div>
+        </div>
+    }
+    <Routes @rendermode="PageRenderMode" />
+    <div id="blazor-error-ui">
+        An unexpected error occurred.
+        <a href="" class="reload">Reload</a>
+        <span class="dismiss">✕</span>
+    </div>
+    <script src="_framework/blazor.web.js"></script>
+    <script src="@Assets["js/servora.js"]"></script>
+</body>
+</html>
+
+@code {
+    /// <summary>Gets or sets the current HTTP context (available during static rendering of the document).</summary>
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    /// <summary>
+    /// Interactive server rendering (without prerendering) for the application; static SSR for pages marked with
+    /// <c>[ExcludeFromInteractiveRouting]</c> (login, logout, password change) because they must write cookies.
+    /// </summary>
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? new InteractiveServerRenderMode(prerender: false) : null;
+}

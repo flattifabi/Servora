@@ -1,0 +1,15 @@
+@page "/logout"
+@attribute [ExcludeFromInteractiveRouting]
+@layout AuthLayout
+
+<PageTitle>Signing out · Servora</PageTitle>
+
+<div class="auth-card text-center">
+    <div class="spinner lg"></div>
+    <h2 class="mt-4">Signing you out…</h2>
+    <form id="logout-form" method="post" action="/auth/logout" class="mt-4">
+        <AntiforgeryToken />
+        <button type="submit" class="btn btn-secondary">Continue</button>
+    </form>
+</div>
+<script>document.getElementById("logout-form").submit();</script>

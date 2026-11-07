@@ -1,0 +1,34 @@
+@* Underlined tab strip. Bind ActiveKey and render the active panel in the page. *@
+<div class="tabs" role="tablist">
+    @foreach (var item in Items)
+    {
+        <button class="tab @(item.Key == ActiveKey ? "active" : null)" role="tab" @onclick="() => Select(item.Key)">
+            @if (item.Icon is not null)
+            {
+                <Icon Name="@item.Icon" Size="16" />
+            }
+            @item.Title
+            @if (item.Badge is { } badge)
+            {
+                <span class="badge">@badge</span>
+            }
+        </button>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the tabs.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<TabItem> Items { get; set; } = [];
+
+    /// <summary>Gets or sets the active tab key.</summary>
+    [Parameter] public string? ActiveKey { get; set; }
+
+    /// <summary>Raised when the active tab changes.</summary>
+    [Parameter] public EventCallback<string> ActiveKeyChanged { get; set; }
+
+    private async Task Select(string key)
+    {
+        ActiveKey = key;
+        await ActiveKeyChanged.InvokeAsync(key);
+    }
+}

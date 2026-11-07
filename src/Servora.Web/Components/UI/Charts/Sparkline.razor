@@ -1,0 +1,40 @@
+@* Minimal trend line with soft area fill. *@
+@using System.Globalization
+<svg class="chart" viewBox="0 0 100 32" preserveAspectRatio="none" style="height:100%">
+    <defs>
+        <linearGradient id="@_id" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="@Color" stop-opacity="0.35" />
+            <stop offset="100%" stop-color="@Color" stop-opacity="0" />
+        </linearGradient>
+    </defs>
+    @if (Values.Count > 1)
+    {
+        <path d="@AreaPath" fill="url(#@_id)" />
+        <path d="@LinePath" fill="none" stroke="@Color" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+    }
+</svg>
+
+@code {
+    private readonly string _id = "spark" + Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>Gets or sets the values.</summary>
+    [Parameter] public IReadOnlyList<double> Values { get; set; } = [];
+
+    /// <summary>Gets or sets the line color (CSS color or variable).</summary>
+    [Parameter] public string Color { get; set; } = "var(--primary)";
+
+    private IEnumerable<(double X, double Y)> Points
+    {
+        get
+        {
+            var max = Values.Max();
+            var min = Values.Min();
+            var range = Math.Abs(max - min) < double.Epsilon ? 1 : max - min;
+            return Values.Select((v, i) => (i * 100.0 / (Values.Count - 1), 30 - ((v - min) / range * 26)));
+        }
+    }
+
+    private string LinePath => "M" + string.Join(" L", Points.Select(p => string.Create(CultureInfo.InvariantCulture, $"{p.X:0.##},{p.Y:0.##}")));
+
+    private string AreaPath => LinePath + " L100,32 L0,32 Z";
+}

@@ -1,0 +1,86 @@
+@* Application shell: sidebar, sticky top bar, content area, command palette and toasts. *@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject UiStateService Ui
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="app-shell @(Ui.SidebarCollapsed ? "collapsed" : null) @(Ui.MobileSidebarOpen ? "mobile-open" : null)">
+    <NavMenu />
+    <div class="main">
+        <TopBar />
+        <main class="content">
+            <ErrorBoundary @ref="_errorBoundary">
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent Context="exception">
+                    <div class="card">
+                        <EmptyState Icon="alert-octagon" Title="Something went wrong"
+                                    Text="An unexpected error occurred while rendering this page. The error was logged. You can try again or go back to your workspace.">
+                            <div class="flex gap-2 justify-center">
+                                <button class="btn btn-primary" @onclick="Recover"><Icon Name="refresh" Size="16" /> Try again</button>
+                                <a class="btn btn-secondary" href="/">Go to My Work</a>
+                            </div>
+                        </EmptyState>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
+        </main>
+    </div>
+    @if (Ui.MobileSidebarOpen)
+    {
+        <div class="drawer-backdrop" style="z-index: 35" @onclick="Ui.CloseMobileSidebar"></div>
+    }
+</div>
+<CommandPalette />
+<ToastHost />
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+
+    /// <summary>Gets or sets the cascading authentication state.</summary>
+    [CascadingParameter] private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Ui.Changed += OnUiChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+        if (AuthenticationState is not null)
+        {
+            var state = await AuthenticationState;
+            if (state.User.HasClaim(Servora.Infrastructure.Security.ServoraClaimTypes.MustChangePassword, "true"))
+            {
+                Navigation.NavigateTo(MustChangePasswordMiddleware.ChangePasswordPath, forceLoad: true);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            Ui.SetSidebarCollapsed(await JS.InvokeAsync<bool>("servora.getSidebarCollapsed"));
+            await JS.InvokeVoidAsync("servora.hideSplash");
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Ui.Changed -= OnUiChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+
+    private void Recover() => _errorBoundary?.Recover();
+
+    private void OnUiChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        Ui.CloseMobileSidebar();
+        _errorBoundary?.Recover();
+    }
+}

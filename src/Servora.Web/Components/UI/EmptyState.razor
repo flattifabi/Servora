@@ -1,0 +1,27 @@
+@* Friendly empty / error state with glowing icon. *@
+<div class="empty-state">
+    <div class="empty-icon"><Icon Name="@Icon" Size="28" /></div>
+    <h3>@Title</h3>
+    @if (!string.IsNullOrEmpty(Text))
+    {
+        <p>@Text</p>
+    }
+    @if (ChildContent is not null)
+    {
+        <div class="mt-3">@ChildContent</div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the icon name.</summary>
+    [Parameter] public string Icon { get; set; } = "inbox";
+
+    /// <summary>Gets or sets the title.</summary>
+    [Parameter] public string Title { get; set; } = "Nothing here yet";
+
+    /// <summary>Gets or sets the text.</summary>
+    [Parameter] public string? Text { get; set; }
+
+    /// <summary>Gets or sets extra content such as buttons.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Application layer: use cases, application services, DTOs and abstractions.
+    References EF Core (provider-agnostic) for IQueryable/DbSet access through IAppDbContext (see ADR-004).
+    Must not reference a database provider, the web host or external SDKs.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Servora.Application</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Servora.Domain\Servora.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Servora.Tests.Unit" />
+  </ItemGroup>
+</Project>

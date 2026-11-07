@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Infrastructure layer: EF Core DbContext, LDAP / Active Directory, SMTP, HTTP data source execution,
+    secret protection, background services and module registrations.
+    Provider-specific EF packages live in the Servora.Persistence.* projects, not here.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Servora.Infrastructure</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Servora.Application\Servora.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="System.DirectoryServices.Protocols" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Servora.Tests.Unit" />
+    <InternalsVisibleTo Include="Servora.Tests.Integration" />
+  </ItemGroup>
+</Project>

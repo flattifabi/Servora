@@ -1,0 +1,198 @@
+@* Visual editor for ConditionGroup (AND/OR rules with nested groups) over a table's fields. *@
+@using Servora.Application.Conditions
+@using Servora.Application.Tables
+
+<div class="cond-group">
+    <div class="cond-logic">
+        <div class="segmented">
+            <button class="@(Condition.Logic == ConditionLogic.And ? "active" : null)" @onclick="() => SetLogic(ConditionLogic.And)">All (AND)</button>
+            <button class="@(Condition.Logic == ConditionLogic.Or ? "active" : null)" @onclick="() => SetLogic(ConditionLogic.Or)">Any (OR)</button>
+        </div>
+        <span class="small faint">of the following conditions match</span>
+        @if (OnRemove.HasDelegate)
+        {
+            <button class="icon-btn" style="margin-left:auto" title="Remove group" @onclick="() => OnRemove.InvokeAsync()"><Icon Name="trash" Size="15" /></button>
+        }
+    </div>
+
+    @foreach (var rule in Condition.Rules)
+    {
+        var field = Fields.FirstOrDefault(f => string.Equals(f.Name, rule.Field, StringComparison.OrdinalIgnoreCase));
+        <div class="cond-row" @key="rule">
+            <select class="select" value="@rule.Field" @onchange="e => SetField(rule, e.Value?.ToString())">
+                <option value="">— Field —</option>
+                @foreach (var f in Fields.OrderBy(f => f.Label))
+                {
+                    <option value="@f.Name">@f.Label</option>
+                }
+            </select>
+            <select class="select" value="@rule.Operator" @onchange="e => SetOperator(rule, e.Value?.ToString())">
+                @foreach (var op in OperatorsFor(field))
+                {
+                    <option value="@op">@OperatorLabel(op)</option>
+                }
+            </select>
+            @if (rule.Operator is ConditionOperator.IsEmpty or ConditionOperator.IsNotEmpty or ConditionOperator.Changed or ConditionOperator.IsMe)
+            {
+                <span></span>
+            }
+            else if (field is { Type: FieldType.Choice, Choices.Count: > 0 } && rule.Operator is not (ConditionOperator.In or ConditionOperator.NotIn))
+            {
+                <select class="select" value="@rule.Value" @onchange="e => SetValue(rule, e.Value?.ToString())">
+                    <option value="">— Value —</option>
+                    @foreach (var choice in field.Choices)
+                    {
+                        <option value="@choice.Value">@choice.Label</option>
+                    }
+                </select>
+            }
+            else if (field is { Type: FieldType.Boolean })
+            {
+                <select class="select" value="@rule.Value" @onchange="e => SetValue(rule, e.Value?.ToString())">
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                </select>
+            }
+            else
+            {
+                <input class="input" placeholder="@(rule.Operator is ConditionOperator.In or ConditionOperator.NotIn ? "value1, value2" : "Value")"
+                       type="@(field?.Type switch { FieldType.DateTime => "datetime-local", FieldType.Date => "date", FieldType.Integer or FieldType.Decimal => "number", _ => "text" })"
+                       value="@rule.Value" @onchange="e => SetValue(rule, e.Value?.ToString())" />
+            }
+            <button class="icon-btn" title="Remove condition" @onclick="() => RemoveRule(rule)"><Icon Name="x" Size="15" /></button>
+        </div>
+    }
+
+    @foreach (var group in Condition.Groups.ToList())
+    {
+        <ConditionBuilder Condition="group" Fields="Fields" AllowChangeOperators="AllowChangeOperators" ConditionChanged="NotifyAsync" OnRemove="() => RemoveGroup(group)" />
+    }
+
+    <div class="flex gap-2 mt-2">
+        <button class="btn btn-ghost btn-sm" @onclick="AddRule"><Icon Name="plus" Size="14" /> Add condition</button>
+        <button class="btn btn-ghost btn-sm" @onclick="AddGroup"><Icon Name="layers" Size="14" /> Add group</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>Gets or sets the edited condition (mutated in place).</summary>
+    [Parameter, EditorRequired] public ConditionGroup Condition { get; set; } = new();
+
+    /// <summary>Raised after any change.</summary>
+    [Parameter] public EventCallback<ConditionGroup> ConditionChanged { get; set; }
+
+    /// <summary>Gets or sets the selectable fields.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<FieldDefinition> Fields { get; set; } = [];
+
+    /// <summary>Gets or sets a value indicating whether change-aware operators (changed, changed to/from) are offered.</summary>
+    [Parameter] public bool AllowChangeOperators { get; set; }
+
+    /// <summary>Raised when the nested group should be removed (set by the parent builder).</summary>
+    [Parameter] public EventCallback OnRemove { get; set; }
+
+    private static string OperatorLabel(ConditionOperator op) => op switch
+    {
+        ConditionOperator.Equals => "is",
+        ConditionOperator.NotEquals => "is not",
+        ConditionOperator.Contains => "contains",
+        ConditionOperator.NotContains => "does not contain",
+        ConditionOperator.StartsWith => "starts with",
+        ConditionOperator.EndsWith => "ends with",
+        ConditionOperator.GreaterThan => "greater than",
+        ConditionOperator.GreaterOrEqual => "at least",
+        ConditionOperator.LessThan => "less than",
+        ConditionOperator.LessOrEqual => "at most",
+        ConditionOperator.IsEmpty => "is empty",
+        ConditionOperator.IsNotEmpty => "is not empty",
+        ConditionOperator.In => "is one of",
+        ConditionOperator.NotIn => "is not one of",
+        ConditionOperator.Changed => "changes",
+        ConditionOperator.ChangedTo => "changes to",
+        ConditionOperator.ChangedFrom => "changes from",
+        ConditionOperator.IsMe => "is (dynamic) me",
+        _ => op.ToString(),
+    };
+
+    private IEnumerable<ConditionOperator> OperatorsFor(FieldDefinition? field)
+    {
+        var ops = new List<ConditionOperator> { ConditionOperator.Equals, ConditionOperator.NotEquals };
+        switch (field?.Type)
+        {
+            case FieldType.String or FieldType.Text or FieldType.Email or FieldType.Url or null:
+                ops.AddRange([ConditionOperator.Contains, ConditionOperator.NotContains, ConditionOperator.StartsWith, ConditionOperator.EndsWith, ConditionOperator.In, ConditionOperator.NotIn]);
+                break;
+            case FieldType.Integer or FieldType.Decimal or FieldType.DateTime or FieldType.Date:
+                ops.AddRange([ConditionOperator.GreaterThan, ConditionOperator.GreaterOrEqual, ConditionOperator.LessThan, ConditionOperator.LessOrEqual]);
+                break;
+            case FieldType.Choice:
+                ops.AddRange([ConditionOperator.In, ConditionOperator.NotIn, ConditionOperator.GreaterThan, ConditionOperator.LessThan]);
+                break;
+            case FieldType.Reference:
+                ops.Add(ConditionOperator.IsMe);
+                break;
+        }
+
+        ops.AddRange([ConditionOperator.IsEmpty, ConditionOperator.IsNotEmpty]);
+        if (AllowChangeOperators)
+        {
+            ops.AddRange([ConditionOperator.Changed, ConditionOperator.ChangedTo, ConditionOperator.ChangedFrom]);
+        }
+
+        return ops;
+    }
+
+    private Task NotifyAsync() => ConditionChanged.InvokeAsync(Condition);
+
+    private Task SetLogic(ConditionLogic logic)
+    {
+        Condition.Logic = logic;
+        return NotifyAsync();
+    }
+
+    private Task SetField(ConditionRule rule, string? field)
+    {
+        rule.Field = field ?? string.Empty;
+        rule.Value = null;
+        return NotifyAsync();
+    }
+
+    private Task SetOperator(ConditionRule rule, string? value)
+    {
+        if (Enum.TryParse<ConditionOperator>(value, out var op))
+        {
+            rule.Operator = op;
+        }
+
+        return NotifyAsync();
+    }
+
+    private Task SetValue(ConditionRule rule, string? value)
+    {
+        rule.Value = value;
+        return NotifyAsync();
+    }
+
+    private Task AddRule()
+    {
+        Condition.Rules.Add(new ConditionRule());
+        return NotifyAsync();
+    }
+
+    private Task RemoveRule(ConditionRule rule)
+    {
+        Condition.Rules.Remove(rule);
+        return NotifyAsync();
+    }
+
+    private Task AddGroup()
+    {
+        Condition.Groups.Add(new ConditionGroup { Logic = Condition.Logic == ConditionLogic.And ? ConditionLogic.Or : ConditionLogic.And, Rules = [new ConditionRule()] });
+        return NotifyAsync();
+    }
+
+    private Task RemoveGroup(ConditionGroup group)
+    {
+        Condition.Groups.Remove(group);
+        return NotifyAsync();
+    }
+}

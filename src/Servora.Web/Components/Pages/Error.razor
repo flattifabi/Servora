@@ -1,0 +1,25 @@
+@page "/error"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout AuthLayout
+@using System.Diagnostics
+
+<PageTitle>Error · Servora</PageTitle>
+
+<div class="auth-card">
+    <div class="eyebrow mb-2">Unexpected error</div>
+    <h2>Something went wrong</h2>
+    <p class="lead">The request could not be completed. The error has been logged.</p>
+    @if (!string.IsNullOrEmpty(RequestId))
+    {
+        <p class="small faint">Correlation ID: <code>@RequestId</code></p>
+    }
+    <a class="btn btn-primary btn-lg btn-block" href="/">Back to Servora</a>
+</div>
+
+@code {
+    /// <summary>Gets or sets the HTTP context.</summary>
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId => Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

@@ -1,0 +1,44 @@
+@* Human friendly relative time ("5 min ago") with the absolute local time as tooltip. *@
+@if (Value is { } value)
+{
+    <span title="@value.ToLocalTime().ToString("f")" class="@Class">@Format(value)</span>
+}
+else
+{
+    <span class="faint">@Placeholder</span>
+}
+
+@code {
+    /// <summary>Gets or sets the timestamp.</summary>
+    [Parameter] public DateTimeOffset? Value { get; set; }
+
+    /// <summary>Gets or sets the placeholder for empty values.</summary>
+    [Parameter] public string Placeholder { get; set; } = "—";
+
+    /// <summary>Gets or sets CSS classes.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Formats a timestamp relative to now.</summary>
+    /// <param name="value">The timestamp.</param>
+    /// <returns>The relative text.</returns>
+    public static string Format(DateTimeOffset value)
+    {
+        var delta = DateTimeOffset.UtcNow - value;
+        var future = delta < TimeSpan.Zero;
+        var span = future ? -delta : delta;
+        if (span.TotalSeconds < 45)
+        {
+            return "just now";
+        }
+
+        if (span.TotalDays >= 30)
+        {
+            return value.ToLocalTime().ToString("d MMM yyyy");
+        }
+
+        var text = span.TotalMinutes < 60 ? $"{(int)span.TotalMinutes} min"
+            : span.TotalHours < 24 ? $"{(int)span.TotalHours} h"
+            : $"{(int)span.TotalDays} d";
+        return future ? $"in {text}" : $"{text} ago";
+    }
+}

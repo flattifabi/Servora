@@ -1,0 +1,20 @@
+@* Priority badge (P1..P5) with glow for critical priority. *@
+@using Servora.Domain.Itsm
+<span class="prio prio-@((int)Priority)"><span class="prio-chip">P@((int)Priority)</span>@(Compact ? null : Label)</span>
+
+@code {
+    /// <summary>Gets or sets the priority.</summary>
+    [Parameter] public Priority Priority { get; set; } = Priority.Planning;
+
+    /// <summary>Gets or sets a value indicating whether only the chip is shown.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private string Label => Priority switch
+    {
+        Priority.Critical => "Critical",
+        Priority.High => "High",
+        Priority.Moderate => "Moderate",
+        Priority.Low => "Low",
+        _ => "Planning",
+    };
+}

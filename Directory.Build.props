@@ -1,0 +1,21 @@
+<Project>
+  <!--
+    Shared MSBuild properties for every project in the Servora solution.
+    Keep this file small: project-specific settings belong in the individual .csproj files.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Version>0.1.0</Version>
+    <Authors>Servora Contributors</Authors>
+    <Company>Servora Contributors</Company>
+    <Product>Servora</Product>
+    <Copyright>Copyright (c) Servora Contributors. Licensed under the MIT License.</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>

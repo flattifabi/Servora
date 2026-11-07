@@ -1,0 +1,65 @@
+@* Donut chart with center total and side legend. *@
+@using System.Globalization
+<div class="flex items-center gap-6 flex-wrap">
+    <svg class="chart" viewBox="0 0 120 120" style="width:@(Size)px;height:@(Size)px;flex-shrink:0">
+        <circle cx="60" cy="60" r="@Radius" fill="none" stroke="var(--surface-3)" stroke-width="@Thickness" />
+        @{
+            double offset = 0;
+            var circumference = 2 * Math.PI * Radius;
+        }
+        @for (var i = 0; i < Slices.Count; i++)
+        {
+            var fraction = Total <= 0 ? 0 : Slices[i].Value / Total;
+            var length = fraction * circumference;
+            <circle cx="60" cy="60" r="@Radius" fill="none" stroke="@(Slices[i].Color ?? ChartPalette.At(i))" stroke-width="@Thickness"
+                    stroke-dasharray="@($"{F(Math.Max(length - 1.5, 0))} {F(circumference)}")" stroke-dashoffset="@F(-offset)"
+                    transform="rotate(-90 60 60)" stroke-linecap="butt">
+                <title>@Slices[i].Label: @Slices[i].Value.ToString(ValueFormat, CultureInfo.CurrentCulture)</title>
+            </circle>
+            offset += length;
+        }
+        <text class="donut-center" x="60" y="60" text-anchor="middle" font-size="20">@Total.ToString(ValueFormat, CultureInfo.CurrentCulture)</text>
+        <text class="donut-sub" x="60" y="76" text-anchor="middle">@CenterLabel</text>
+    </svg>
+    @if (ShowLegend)
+    {
+        <div class="stack flex-1" style="gap:8px;min-width:140px">
+            @for (var i = 0; i < Slices.Count; i++)
+            {
+                var pct = Total <= 0 ? 0 : Slices[i].Value / Total * 100;
+                <div class="flex items-center gap-2 small">
+                    <span class="swatch" style="display:inline-block;width:10px;height:10px;border-radius:3px;background:@(Slices[i].Color ?? ChartPalette.At(i))"></span>
+                    <span class="flex-1 muted truncate">@Slices[i].Label</span>
+                    <b>@Slices[i].Value.ToString(ValueFormat, CultureInfo.CurrentCulture)</b>
+                    <span class="faint" style="width:42px;text-align:right">@pct.ToString("0")%</span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const double Radius = 46;
+
+    /// <summary>Gets or sets the slices.</summary>
+    [Parameter] public IReadOnlyList<ChartSlice> Slices { get; set; } = [];
+
+    /// <summary>Gets or sets the rendered size in pixels.</summary>
+    [Parameter] public int Size { get; set; } = 170;
+
+    /// <summary>Gets or sets the ring thickness.</summary>
+    [Parameter] public double Thickness { get; set; } = 14;
+
+    /// <summary>Gets or sets the label under the center total.</summary>
+    [Parameter] public string CenterLabel { get; set; } = "Total";
+
+    /// <summary>Gets or sets a value indicating whether the legend is shown.</summary>
+    [Parameter] public bool ShowLegend { get; set; } = true;
+
+    /// <summary>Gets or sets the value format.</summary>
+    [Parameter] public string ValueFormat { get; set; } = "0";
+
+    private double Total => Slices.Sum(s => s.Value);
+
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+}

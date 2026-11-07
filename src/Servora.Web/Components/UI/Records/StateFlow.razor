@@ -1,0 +1,29 @@
+@* Horizontal state progression ("New → In Progress → Resolved → Closed") highlighting the current state. *@
+<div class="state-flow">
+    @for (var i = 0; i < States.Count; i++)
+    {
+        var index = i;
+        var css = index < CurrentIndex ? "done" : index == CurrentIndex ? "current" : null;
+        if (i > 0)
+        {
+            <span class="connector"></span>
+        }
+        <span class="state @css">
+            @if (index < CurrentIndex)
+            {
+                <Icon Name="check" Size="13" />
+            }
+            @States[i]
+        </span>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the ordered state labels.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<string> States { get; set; } = [];
+
+    /// <summary>Gets or sets the current state label.</summary>
+    [Parameter] public string? Current { get; set; }
+
+    private int CurrentIndex => States.ToList().FindIndex(s => string.Equals(s, Current, StringComparison.OrdinalIgnoreCase));
+}

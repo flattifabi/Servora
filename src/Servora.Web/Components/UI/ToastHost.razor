@@ -1,0 +1,38 @@
+@* Renders toasts from ToastService (bottom-right). Placed once in MainLayout. *@
+@implements IDisposable
+@inject ToastService Toasts
+
+<div class="toast-host" aria-live="polite">
+    @foreach (var toast in Toasts.Messages)
+    {
+        <div class="toast @toast.Level.ToString().ToLowerInvariant()" @key="toast.Id">
+            <div class="toast-icon"><Icon Name="@IconFor(toast.Level)" Size="16" /></div>
+            <div class="flex-1">
+                <div class="toast-title">@toast.Title</div>
+                @if (!string.IsNullOrEmpty(toast.Text))
+                {
+                    <div class="toast-text">@toast.Text</div>
+                }
+            </div>
+            <button class="icon-btn toast-close" style="width:26px;height:26px" @onclick="() => Toasts.Dismiss(toast.Id)"><Icon Name="x" Size="14" /></button>
+        </div>
+    }
+</div>
+
+@code {
+    /// <inheritdoc />
+    protected override void OnInitialized() => Toasts.Changed += OnChanged;
+
+    /// <inheritdoc />
+    public void Dispose() => Toasts.Changed -= OnChanged;
+
+    private static string IconFor(ToastLevel level) => level switch
+    {
+        ToastLevel.Success => "check-circle",
+        ToastLevel.Error => "alert-octagon",
+        ToastLevel.Warning => "alert-triangle",
+        _ => "info",
+    };
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+}

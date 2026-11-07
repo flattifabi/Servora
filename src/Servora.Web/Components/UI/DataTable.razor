@@ -1,0 +1,365 @@
+@* Server-paged data table with search, sorting, selection, empty and loading states.
+   Columns are declared with <DataColumn> children. Paging/sorting/search are raised as callbacks so the page
+   queries the backend (never load unbounded data into the browser). *@
+@typeparam TItem
+@implements IDisposable
+
+<CascadingValue Value="this" IsFixed="true">@Columns</CascadingValue>
+
+<div class="card card-flush @Class">
+    @if (ShowToolbar)
+    {
+        <div class="table-toolbar">
+            @if (ShowSearch)
+            {
+                <div class="input-icon">
+                    <Icon Name="search" Size="16" />
+                    <input class="input" placeholder="@SearchPlaceholder" value="@_search" @oninput="OnSearchInput" />
+                </div>
+            }
+            @Toolbar
+            <div class="spacer"></div>
+            @ToolbarEnd
+            @if (Selectable && SelectedItems.Count > 0)
+            {
+                <span class="pill pill-primary no-dot">@SelectedItems.Count selected</span>
+                @BulkActions
+            }
+        </div>
+    }
+    <div class="table-wrap" style="@(MaxHeight is null ? null : $"max-height:{MaxHeight}")">
+        <table class="table @(Compact ? "compact" : null)">
+            <thead>
+                <tr>
+                    @if (Selectable)
+                    {
+                        <th class="check-col"><input type="checkbox" class="checkbox" checked="@AllSelected" @onchange="ToggleAll" /></th>
+                    }
+                    @foreach (var column in _columns)
+                    {
+                        <th class="@(column.SortKey is null ? null : "sortable") @(column.Align == "right" ? "num" : null) @column.HeaderClass"
+                            style="@(column.Width is null ? null : $"width:{column.Width}")"
+                            @onclick="() => Sort(column)">
+                            @column.Title
+                            @if (column.SortKey is not null && column.SortKey == SortBy)
+                            {
+                                <span class="sort"><Icon Name="@(SortDescending ? "arrow-down" : "arrow-up")" Size="12" /></span>
+                            }
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @if (Loading && (Items is null || Items.Count == 0))
+                {
+                    @for (var i = 0; i < 6; i++)
+                    {
+                        <tr>
+                            @if (Selectable)
+                            {
+                                <td></td>
+                            }
+                            @foreach (var _ in _columns)
+                            {
+                                <td><div class="skeleton" style="height:14px;width:@(50 + ((i * 17) % 40))%"></div></td>
+                            }
+                        </tr>
+                    }
+                }
+                else if (Items is null || Items.Count == 0)
+                {
+                    <tr>
+                        <td colspan="@(_columns.Count + (Selectable ? 1 : 0))" style="padding:0">
+                            <EmptyState Icon="@EmptyIcon" Title="@EmptyTitle" Text="@EmptyText">@EmptyContent</EmptyState>
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var item in Items)
+                    {
+                        <tr class="@(OnRowClick.HasDelegate ? "clickable" : null) @(SelectedItems.Contains(item) ? "selected" : null) @RowClass?.Invoke(item)"
+                            @onclick="() => RowClicked(item)">
+                            @if (Selectable)
+                            {
+                                <td class="check-col" @onclick:stopPropagation="true">
+                                    <input type="checkbox" class="checkbox" checked="@SelectedItems.Contains(item)" @onchange="() => ToggleItem(item)" />
+                                </td>
+                            }
+                            @foreach (var column in _columns)
+                            {
+                                <td class="@(column.Align == "right" ? "num" : null) @column.Class">
+                                    @if (column.Template is not null)
+                                    {
+                                        @column.Template(item)
+                                    }
+                                    else
+                                    {
+                                        @column.Value?.Invoke(item)
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (ShowPager && TotalCount > 0)
+    {
+        <div class="table-footer">
+            <span>@FirstRow–@LastRow of @TotalCount.ToString("N0")</span>
+            <div class="pager">
+                <button disabled="@(PageNumber <= 1)" @onclick="() => GoTo(PageNumber - 1)"><Icon Name="chevron-left" Size="14" /></button>
+                @foreach (var p in VisiblePages)
+                {
+                    if (p == 0)
+                    {
+                        <span class="faint" style="padding:0 4px">…</span>
+                    }
+                    else
+                    {
+                        <button class="@(p == PageNumber ? "active" : null)" @onclick="() => GoTo(p)">@p</button>
+                    }
+                }
+                <button disabled="@(PageNumber >= PageCount)" @onclick="() => GoTo(PageNumber + 1)"><Icon Name="chevron-right" Size="14" /></button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly List<DataColumn<TItem>> _columns = [];
+    private string _search = string.Empty;
+    private CancellationTokenSource? _debounce;
+
+    /// <summary>Gets or sets the column definitions (<c>DataColumn</c> elements).</summary>
+    [Parameter] public RenderFragment? Columns { get; set; }
+
+    /// <summary>Gets or sets the items of the current page.</summary>
+    [Parameter] public IReadOnlyList<TItem>? Items { get; set; }
+
+    /// <summary>Gets or sets the total number of matching items (for paging).</summary>
+    [Parameter] public int TotalCount { get; set; }
+
+    /// <summary>Gets or sets the 1-based page number.</summary>
+    [Parameter] public int PageNumber { get; set; } = 1;
+
+    /// <summary>Gets or sets the page size.</summary>
+    [Parameter] public int PageSize { get; set; } = 25;
+
+    /// <summary>Gets or sets a value indicating whether data is loading.</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>Gets or sets the current sort key.</summary>
+    [Parameter] public string? SortBy { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether sorting is descending.</summary>
+    [Parameter] public bool SortDescending { get; set; }
+
+    /// <summary>Raised when the page changes.</summary>
+    [Parameter] public EventCallback<int> OnPageChanged { get; set; }
+
+    /// <summary>Raised when the sort changes (key, descending).</summary>
+    [Parameter] public EventCallback<(string SortBy, bool Descending)> OnSortChanged { get; set; }
+
+    /// <summary>Raised (debounced) when the search text changes.</summary>
+    [Parameter] public EventCallback<string> OnSearch { get; set; }
+
+    /// <summary>Raised when a row is clicked.</summary>
+    [Parameter] public EventCallback<TItem> OnRowClick { get; set; }
+
+    /// <summary>Gets or sets toolbar content shown after the search box.</summary>
+    [Parameter] public RenderFragment? Toolbar { get; set; }
+
+    /// <summary>Gets or sets toolbar content aligned to the right.</summary>
+    [Parameter] public RenderFragment? ToolbarEnd { get; set; }
+
+    /// <summary>Gets or sets bulk action buttons shown when rows are selected.</summary>
+    [Parameter] public RenderFragment? BulkActions { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the toolbar is shown.</summary>
+    [Parameter] public bool ShowToolbar { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether the search box is shown.</summary>
+    [Parameter] public bool ShowSearch { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether the pager is shown.</summary>
+    [Parameter] public bool ShowPager { get; set; } = true;
+
+    /// <summary>Gets or sets the search placeholder.</summary>
+    [Parameter] public string SearchPlaceholder { get; set; } = "Search…";
+
+    /// <summary>Gets or sets a value indicating whether rows can be selected.</summary>
+    [Parameter] public bool Selectable { get; set; }
+
+    /// <summary>Gets or sets the selected items.</summary>
+    [Parameter] public HashSet<TItem> SelectedItems { get; set; } = [];
+
+    /// <summary>Raised when the selection changes.</summary>
+    [Parameter] public EventCallback<HashSet<TItem>> SelectedItemsChanged { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether rows are compact.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    /// <summary>Gets or sets a per-row CSS class.</summary>
+    [Parameter] public Func<TItem, string?>? RowClass { get; set; }
+
+    /// <summary>Gets or sets the empty state icon.</summary>
+    [Parameter] public string EmptyIcon { get; set; } = "inbox";
+
+    /// <summary>Gets or sets the empty state title.</summary>
+    [Parameter] public string EmptyTitle { get; set; } = "Nothing here yet";
+
+    /// <summary>Gets or sets the empty state text.</summary>
+    [Parameter] public string? EmptyText { get; set; } = "No records match the current filter.";
+
+    /// <summary>Gets or sets additional empty state content (for example a create button).</summary>
+    [Parameter] public RenderFragment? EmptyContent { get; set; }
+
+    /// <summary>Gets or sets a maximum table height (enables vertical scrolling with sticky header).</summary>
+    [Parameter] public string? MaxHeight { get; set; }
+
+    /// <summary>Gets or sets additional CSS classes for the card.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    private int PageCount => PageSize <= 0 ? 1 : Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
+
+    private int FirstRow => TotalCount == 0 ? 0 : ((PageNumber - 1) * PageSize) + 1;
+
+    private int LastRow => Math.Min(PageNumber * PageSize, TotalCount);
+
+    private bool AllSelected => Items is { Count: > 0 } && Items.All(SelectedItems.Contains);
+
+    private IEnumerable<int> VisiblePages
+    {
+        get
+        {
+            var count = PageCount;
+            if (count <= 7)
+            {
+                return Enumerable.Range(1, count);
+            }
+
+            var pages = new List<int> { 1 };
+            var start = Math.Max(2, PageNumber - 1);
+            var end = Math.Min(count - 1, PageNumber + 1);
+            if (start > 2)
+            {
+                pages.Add(0);
+            }
+
+            pages.AddRange(Enumerable.Range(start, end - start + 1));
+            if (end < count - 1)
+            {
+                pages.Add(0);
+            }
+
+            pages.Add(count);
+            return pages;
+        }
+    }
+
+    /// <summary>Registers a column (called by <c>DataColumn</c>).</summary>
+    /// <param name="column">The column.</param>
+    internal void AddColumn(DataColumn<TItem> column)
+    {
+        if (!_columns.Contains(column))
+        {
+            _columns.Add(column);
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Unregisters a column.</summary>
+    /// <param name="column">The column.</param>
+    internal void RemoveColumn(DataColumn<TItem> column)
+    {
+        if (_columns.Remove(column))
+        {
+            StateHasChanged();
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _debounce?.Cancel();
+
+    private async Task Sort(DataColumn<TItem> column)
+    {
+        if (column.SortKey is null)
+        {
+            return;
+        }
+
+        var descending = column.SortKey == SortBy && !SortDescending;
+        await OnSortChanged.InvokeAsync((column.SortKey, descending));
+    }
+
+    private async Task GoTo(int page)
+    {
+        if (page >= 1 && page <= PageCount && page != PageNumber)
+        {
+            await OnPageChanged.InvokeAsync(page);
+        }
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? string.Empty;
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        try
+        {
+            await Task.Delay(300, token);
+            await OnSearch.InvokeAsync(_search);
+        }
+        catch (TaskCanceledException)
+        {
+            // A newer keystroke superseded this search.
+        }
+    }
+
+    private async Task RowClicked(TItem item)
+    {
+        if (OnRowClick.HasDelegate)
+        {
+            await OnRowClick.InvokeAsync(item);
+        }
+    }
+
+    private async Task ToggleItem(TItem item)
+    {
+        if (!SelectedItems.Remove(item))
+        {
+            SelectedItems.Add(item);
+        }
+
+        await SelectedItemsChanged.InvokeAsync(SelectedItems);
+    }
+
+    private async Task ToggleAll()
+    {
+        if (Items is null)
+        {
+            return;
+        }
+
+        if (AllSelected)
+        {
+            foreach (var item in Items)
+            {
+                SelectedItems.Remove(item);
+            }
+        }
+        else
+        {
+            foreach (var item in Items)
+            {
+                SelectedItems.Add(item);
+            }
+        }
+
+        await SelectedItemsChanged.InvokeAsync(SelectedItems);
+    }
+}

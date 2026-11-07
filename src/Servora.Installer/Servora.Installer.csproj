@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Installer / updater for the Servora Windows Service (owned by T-12). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Servora.Installer</RootNamespace>
+    <AssemblyName>ServoraSetup</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Servora.Tests.Unit" />
+  </ItemGroup>
+</Project>

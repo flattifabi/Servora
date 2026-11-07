@@ -1,0 +1,27 @@
+@* Renders content only when the current user holds a permission (UI convenience; the backend still enforces). *@
+@inject ICurrentUser CurrentUser
+
+@if (_granted)
+{
+    @ChildContent
+}
+else
+{
+    @NotAuthorized
+}
+
+@code {
+    private bool _granted;
+
+    /// <summary>Gets or sets the required permission key.</summary>
+    [Parameter, EditorRequired] public string Permission { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the content shown when granted.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Gets or sets the content shown when not granted.</summary>
+    [Parameter] public RenderFragment? NotAuthorized { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync() => _granted = await CurrentUser.HasPermissionAsync(Permission);
+}

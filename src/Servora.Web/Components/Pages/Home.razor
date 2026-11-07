@@ -1,0 +1,19 @@
+@page "/"
+@* Placeholder "My Work" dashboard. Owned by T-04 (Incident & Problem Management), which replaces it with the real workspace. *@
+
+<PageTitle>My Work · Servora</PageTitle>
+
+<PageHeader Title="@($"Good {DayPart}, {CurrentUser.DisplayName.Split(' ')[0]}")" Subtitle="Here is what needs your attention today." Icon="home" />
+
+<div class="grid grid-4">
+    <StatCard Label="Assigned to me" Value="0" Icon="inbox" Tone="primary" Caption="open work items" Trend="@([2, 4, 3, 5, 4, 6, 5])" />
+    <StatCard Label="Critical incidents" Value="0" Icon="flame" Tone="danger" Caption="P1 open" Trend="@([1, 0, 2, 1, 0, 1, 0])" />
+    <StatCard Label="Pending approvals" Value="0" Icon="check-square" Tone="warning" Caption="awaiting you" />
+    <StatCard Label="SLA compliance" Value="100%" Icon="timer" Tone="success" Caption="last 30 days" Trend="@([96, 97, 98, 97, 99, 98, 100])" />
+</div>
+
+@code {
+    [Inject] private ICurrentUser CurrentUser { get; set; } = default!;
+
+    private static string DayPart => DateTime.Now.Hour switch { < 12 => "morning", < 18 => "afternoon", _ => "evening" };
+}

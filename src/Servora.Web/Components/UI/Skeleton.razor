@@ -1,0 +1,17 @@
+@* Shimmering placeholder used while data loads. *@
+@for (var i = 0; i < Lines; i++)
+{
+    var width = i == Lines - 1 && Lines > 1 ? "60%" : Width;
+    <div class="skeleton" style="height:@Height;width:@width;margin-bottom:10px"></div>
+}
+
+@code {
+    /// <summary>Gets or sets the number of lines.</summary>
+    [Parameter] public int Lines { get; set; } = 1;
+
+    /// <summary>Gets or sets the line height (CSS).</summary>
+    [Parameter] public string Height { get; set; } = "14px";
+
+    /// <summary>Gets or sets the width (CSS).</summary>
+    [Parameter] public string Width { get; set; } = "100%";
+}

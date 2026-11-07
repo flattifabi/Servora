@@ -1,0 +1,175 @@
+@* Global command palette (Ctrl+K): jump to any permitted page or run quick actions with the keyboard. *@
+@using Servora.Web.Navigation
+@implements IAsyncDisposable
+@inject UiStateService Ui
+@inject ICurrentUser CurrentUser
+@inject IPermissionService PermissionService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+@if (Ui.PaletteOpen)
+{
+    <div class="palette-backdrop" @onclick="Close">
+        <div class="palette" @onclick:stopPropagation="true">
+            <div class="palette-input">
+                <Icon Name="search" Size="20" Class="faint" />
+                <input id="palette-input" placeholder="Type a page, action or record number…" autocomplete="off"
+                       value="@_term" @oninput="OnInput" @onkeydown="OnKeyDown" />
+                <kbd>Esc</kbd>
+            </div>
+            <div class="palette-results">
+                @if (_results.Count == 0)
+                {
+                    <div class="combo-empty">No matches for “@_term”.</div>
+                }
+                @foreach (var group in _results.GroupBy(r => r.Group))
+                {
+                    <div class="palette-group">@group.Key</div>
+                    @foreach (var item in group)
+                    {
+                        var index = _results.IndexOf(item);
+                        <div class="palette-item @(index == _active ? "active" : null)" @onclick="() => Execute(item)" @onmouseenter="() => _active = index">
+                            <div class="icon-wrap"><Icon Name="@item.Icon" Size="16" /></div>
+                            <div>@item.Title</div>
+                            <div class="hint">@item.Hint</div>
+                        </div>
+                    }
+                }
+            </div>
+            <div class="palette-footer">
+                <span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span>
+                <span><kbd>Enter</kbd> open</span>
+                <span><kbd>Esc</kbd> close</span>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly List<PaletteItem> _all = [];
+    private List<PaletteItem> _results = [];
+    private DotNetObjectReference<CommandPalette>? _reference;
+    private string _term = string.Empty;
+    private int _active;
+    private bool _focusPending;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Ui.Changed += OnUiChanged;
+        var granted = CurrentUser.UserId is { } userId ? await PermissionService.GetUserPermissionsAsync(userId) : new HashSet<string>();
+        foreach (var section in NavigationCatalog.Sections)
+        {
+            foreach (var entry in section.Entries.Where(e => e.Permission is null || PermissionMatcher.IsGranted(granted, e.Permission)))
+            {
+                _all.Add(new PaletteItem("Pages", entry.Title, entry.Icon, section.Title, $"{entry.Title} {entry.Keywords} {section.Title}", entry.Route));
+            }
+        }
+
+        _all.Add(new PaletteItem("Actions", "Toggle light / dark theme", "sun", "Appearance", "theme dark light mode", "#theme"));
+        _all.Add(new PaletteItem("Actions", "Sign out", "log-out", "Account", "logout sign out exit", "/logout"));
+        _results = _all.Take(12).ToList();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _reference = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("servora.registerPalette", _reference);
+        }
+
+        if (_focusPending && Ui.PaletteOpen)
+        {
+            _focusPending = false;
+            await JS.InvokeVoidAsync("servora.focusById", "palette-input");
+        }
+    }
+
+    /// <summary>Opens the palette (invoked from JavaScript on Ctrl+K).</summary>
+    /// <returns>A completed task.</returns>
+    [JSInvokable]
+    public Task Open()
+    {
+        Ui.SetPaletteOpen(true);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        Ui.Changed -= OnUiChanged;
+        _reference?.Dispose();
+        await ValueTask.CompletedTask;
+    }
+
+    private void OnUiChanged()
+    {
+        if (Ui.PaletteOpen)
+        {
+            _focusPending = true;
+        }
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Close()
+    {
+        _term = string.Empty;
+        _results = _all.Take(12).ToList();
+        _active = 0;
+        Ui.SetPaletteOpen(false);
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _term = e.Value?.ToString() ?? string.Empty;
+        var tokens = _term.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        _results = tokens.Length == 0
+            ? _all.Take(12).ToList()
+            : _all.Where(i => tokens.All(t => i.SearchText.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                  .OrderByDescending(i => i.Title.StartsWith(_term, StringComparison.OrdinalIgnoreCase))
+                  .Take(20)
+                  .ToList();
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(_term.Trim(), "^[A-Za-z]{2,6}[0-9]{4,10}$"))
+        {
+            _results.Insert(0, new PaletteItem("Records", $"Open record {_term.Trim().ToUpperInvariant()}", "arrow-right", "Number", _term, $"/go/{_term.Trim().ToUpperInvariant()}"));
+        }
+
+        _active = 0;
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                _active = Math.Min(_active + 1, _results.Count - 1);
+                break;
+            case "ArrowUp":
+                _active = Math.Max(_active - 1, 0);
+                break;
+            case "Enter" when _results.Count > 0:
+                Execute(_results[Math.Clamp(_active, 0, _results.Count - 1)]);
+                break;
+            case "Escape":
+                Close();
+                break;
+        }
+    }
+
+    private async void Execute(PaletteItem item)
+    {
+        Close();
+        if (item.Target == "#theme")
+        {
+            var current = await JS.InvokeAsync<string>("servora.getTheme");
+            await JS.InvokeVoidAsync("servora.setTheme", current == "light" ? "dark" : "light");
+            return;
+        }
+
+        Navigation.NavigateTo(item.Target, forceLoad: item.Target == "/logout");
+    }
+}

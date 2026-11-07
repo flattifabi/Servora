@@ -1,0 +1,76 @@
+@* Centered dialog with blurred backdrop. Size: sm | (default) | lg | xl. *@
+@if (Open)
+{
+    <div class="modal-backdrop" @onclick="BackdropClick">
+        <div class="modal @Size" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <div class="flex items-center gap-3">
+                    @if (!string.IsNullOrEmpty(Icon))
+                    {
+                        <div class="page-icon" style="width:36px;height:36px;border-radius:10px"><Icon Name="@Icon" Size="18" /></div>
+                    }
+                    <div>
+                        <h2>@Title</h2>
+                        @if (!string.IsNullOrEmpty(Subtitle))
+                        {
+                            <div class="small muted">@Subtitle</div>
+                        }
+                    </div>
+                </div>
+                <button class="icon-btn" @onclick="Close" title="Close"><Icon Name="x" /></button>
+            </div>
+            <div class="modal-body">@ChildContent</div>
+            @if (Footer is not null)
+            {
+                <div class="modal-footer">@Footer</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the title.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the subtitle.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets the header icon.</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>Gets or sets the size class.</summary>
+    [Parameter] public string? Size { get; set; }
+
+    /// <summary>Gets or sets the body.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Gets or sets the footer (buttons).</summary>
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether clicking the backdrop closes the dialog.</summary>
+    [Parameter] public bool CloseOnBackdrop { get; set; } = true;
+
+    /// <summary>Raised after the dialog was closed by the user.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private async Task BackdropClick()
+    {
+        if (CloseOnBackdrop)
+        {
+            await Close();
+        }
+    }
+
+    private async Task Close()
+    {
+        Open = false;
+        await OpenChanged.InvokeAsync(false);
+        await OnClose.InvokeAsync();
+    }
+}

@@ -1,0 +1,154 @@
+@* Sticky top bar: breadcrumb context, global search, quick create, theme switch and user menu. *@
+@using Servora.Web.Navigation
+@implements IDisposable
+@inject ICurrentUser CurrentUser
+@inject IPermissionService PermissionService
+@inject UiStateService Ui
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<header class="topbar">
+    <button class="icon-btn mobile-only" @onclick="Ui.ToggleMobileSidebar" title="Menu">
+        <Icon Name="menu" />
+    </button>
+    <div class="topbar-title">
+        @if (_current is not null)
+        {
+            <span class="faint small">@_currentSection</span>
+            <Icon Name="chevron-right" Size="14" Class="faint" />
+            <span class="small" style="font-weight:600">@_current.Title</span>
+        }
+    </div>
+
+    <div class="global-search" @onclick="() => Ui.SetPaletteOpen(true)">
+        <Icon Name="search" Size="16" />
+        <span>Search records, pages and actions…</span>
+        <kbd>Ctrl K</kbd>
+    </div>
+
+    <div class="topbar-actions">
+        @if (_createActions.Count > 0)
+        {
+            <div class="dropdown">
+                <button class="btn btn-primary btn-sm" @onclick="() => _createOpen = !_createOpen">
+                    <Icon Name="plus" Size="16" /> Create
+                </button>
+                @if (_createOpen)
+                {
+                    <div class="click-catcher" @onclick="() => _createOpen = false"></div>
+                    <div class="dropdown-menu">
+                        <div class="dropdown-header">Create new</div>
+                        @foreach (var action in _createActions)
+                        {
+                            <a class="dropdown-item" href="@action.Route" @onclick="() => _createOpen = false">
+                                <Icon Name="@action.Icon" Size="16" /> @action.Title
+                            </a>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <button class="icon-btn" title="Toggle theme" @onclick="ToggleTheme">
+            <Icon Name="@(_theme == "light" ? "moon" : "sun")" />
+        </button>
+
+        <a class="icon-btn" href="/approvals" title="My approvals"><Icon Name="bell" /></a>
+
+        <div class="dropdown">
+            <button class="icon-btn" style="width:auto;padding:0 4px" @onclick="() => _userOpen = !_userOpen" title="Account">
+                <Avatar Name="@CurrentUser.DisplayName" Size="sm" />
+            </button>
+            @if (_userOpen)
+            {
+                <div class="click-catcher" @onclick="() => _userOpen = false"></div>
+                <div class="dropdown-menu">
+                    <div class="flex items-center gap-3" style="padding:10px">
+                        <Avatar Name="@CurrentUser.DisplayName" Size="lg" />
+                        <div class="flex-1">
+                            <div style="font-weight:650" class="truncate">@CurrentUser.DisplayName</div>
+                            <div class="small faint truncate">@CurrentUser.Name</div>
+                        </div>
+                    </div>
+                    <div class="dropdown-divider"></div>
+                    <a class="dropdown-item" href="/profile" @onclick="() => _userOpen = false"><Icon Name="user" Size="16" /> My profile</a>
+                    <a class="dropdown-item" href="/account/change-password" data-enhance-nav="false"><Icon Name="key" Size="16" /> Change password</a>
+                    <a class="dropdown-item" href="https://github.com/" target="_blank" rel="noopener"><Icon Name="help-circle" Size="16" /> Documentation</a>
+                    <div class="dropdown-divider"></div>
+                    <button class="dropdown-item danger" @onclick="SignOut"><Icon Name="log-out" Size="16" /> Sign out</button>
+                </div>
+            }
+        </div>
+    </div>
+</header>
+
+@code {
+    private static readonly NavEntry[] s_createCandidates =
+    [
+        new("Incident", "/incidents/new", "alert-triangle", Permissions.Incidents.Create),
+        new("Problem", "/problems/new", "lightbulb", Permissions.Problems.Create),
+        new("Change Request", "/changes/new", "git-pull-request", Permissions.Changes.Create),
+        new("Knowledge Article", "/knowledge/new", "book-open", Permissions.Knowledge.Write),
+        new("Configuration Item", "/cmdb/new", "server", Permissions.Cmdb.Write),
+        new("Flow", "/automation/flows/new", "workflow", Permissions.Automation.Manage),
+        new("Service Request", "/portal/catalog", "shopping-cart", Permissions.Portal.Access),
+    ];
+
+    private List<NavEntry> _createActions = [];
+    private NavEntry? _current;
+    private string? _currentSection;
+    private bool _createOpen;
+    private bool _userOpen;
+    private string _theme = "dark";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        ResolveCurrent();
+        if (CurrentUser.UserId is { } userId)
+        {
+            var granted = await PermissionService.GetUserPermissionsAsync(userId);
+            _createActions = s_createCandidates.Where(a => a.Permission is null || PermissionMatcher.IsGranted(granted, a.Permission)).ToList();
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _theme = await JS.InvokeAsync<string>("servora.getTheme");
+            StateHasChanged();
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+
+    private async Task ToggleTheme()
+    {
+        _theme = _theme == "light" ? "dark" : "light";
+        await JS.InvokeVoidAsync("servora.setTheme", _theme);
+    }
+
+    private void SignOut() => Navigation.NavigateTo("/logout", forceLoad: true);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        ResolveCurrent();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ResolveCurrent()
+    {
+        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
+        var match = NavigationCatalog.Sections
+            .SelectMany(s => s.Entries.Select(e => (Section: s.Title, Entry: e)))
+            .Where(x => x.Entry.Route == "/" ? path == "/" : path.StartsWith(x.Entry.Route, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.Entry.Route.Length)
+            .FirstOrDefault();
+        _current = match.Entry;
+        _currentSection = match.Section;
+    }
+}

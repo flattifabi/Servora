@@ -1,0 +1,51 @@
+@* Right-hand slide-in panel for details and quick edits. Size: (default) | lg. *@
+@if (Open)
+{
+    <div class="drawer-backdrop" @onclick="Close"></div>
+    <aside class="drawer @Size" role="dialog" aria-modal="true">
+        <div class="drawer-header">
+            <div>
+                <h2>@Title</h2>
+                @if (!string.IsNullOrEmpty(Subtitle))
+                {
+                    <div class="small muted">@Subtitle</div>
+                }
+            </div>
+            <button class="icon-btn" @onclick="Close" title="Close"><Icon Name="x" /></button>
+        </div>
+        <div class="drawer-body">@ChildContent</div>
+        @if (Footer is not null)
+        {
+            <div class="drawer-footer">@Footer</div>
+        }
+    </aside>
+}
+
+@code {
+    /// <summary>Gets or sets a value indicating whether the drawer is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the title.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the subtitle.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets the size class.</summary>
+    [Parameter] public string? Size { get; set; }
+
+    /// <summary>Gets or sets the body.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Gets or sets the footer.</summary>
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    private async Task Close()
+    {
+        Open = false;
+        await OpenChanged.InvokeAsync(false);
+    }
+}

@@ -1,0 +1,67 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout AuthLayout
+
+<PageTitle>Sign in · Servora</PageTitle>
+
+<div class="auth-card">
+    <div class="eyebrow mb-2">Welcome back</div>
+    <h2>Sign in to Servora</h2>
+    <p class="lead">Use your company account or a local Servora account.</p>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="alert alert-danger mb-4"><Icon Name="alert-circle" Size="18" /><div>@Error</div></div>
+    }
+    @if (SignedOut == 1)
+    {
+        <div class="alert alert-success mb-4"><Icon Name="check-circle" Size="18" /><div>You have been signed out.</div></div>
+    }
+
+    <form method="post" action="/auth/login" class="stack" style="gap:16px">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+        <div class="field">
+            <label for="userName">User name</label>
+            <div class="input-icon">
+                <Icon Name="user" Size="16" />
+                <input id="userName" name="userName" class="input" autocomplete="username" required autofocus value="@UserName" placeholder="jane.doe or DOMAIN\jane.doe" />
+            </div>
+        </div>
+        <div class="field">
+            <label for="password">Password</label>
+            <div class="input-icon">
+                <Icon Name="lock" Size="16" />
+                <input id="password" name="password" type="password" class="input" autocomplete="current-password" required placeholder="••••••••" />
+            </div>
+        </div>
+        <div class="flex items-center justify-between">
+            <label class="checkbox"><input type="checkbox" name="rememberMe" value="true" /> Keep me signed in</label>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg btn-block"><Icon Name="log-in" Size="18" /> Sign in</button>
+    </form>
+
+    <div class="auth-divider">or</div>
+    <a class="btn btn-secondary btn-lg btn-block" href="/auth/windows?returnUrl=@Uri.EscapeDataString(ReturnUrl ?? "/")">
+        <Icon Name="monitor" Size="18" /> Sign in with Windows
+    </a>
+
+    <p class="small faint mt-6 text-center">
+        Protected system. Access is logged and monitored.
+    </p>
+</div>
+
+@code {
+    /// <summary>Gets or sets the error message passed back by the login endpoint.</summary>
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+
+    /// <summary>Gets or sets the previously entered user name.</summary>
+    [SupplyParameterFromQuery] public string? UserName { get; set; }
+
+    /// <summary>Gets or sets the local URL to return to after sign-in.</summary>
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+
+    /// <summary>Gets or sets a flag indicating the user just signed out.</summary>
+    [SupplyParameterFromQuery] public int? SignedOut { get; set; }
+}

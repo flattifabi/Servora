@@ -1,0 +1,473 @@
+# Servora – Task Board (single source of truth)
+
+Protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) · Decisions: [`DECISIONS.md`](DECISIONS.md) · Spec: [`../PROJECT_SPEC.md`](../PROJECT_SPEC.md)
+
+Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Review · 🔁 Rework · ✅ Done · ⛔ Blocked
+
+## Product owner directives (binding, override the spec where they conflict)
+
+- Open-source, self-hosted ServiceNow alternative in **Blazor** with backend; administration and configuration
+  **only through the UI**. Feature parity goal: everything ServiceNow offers (ITSM, catalog, knowledge, CMDB, assets,
+  automation, integrations, analytics, AI) – delivered incrementally.
+- Databases: **SQL Server, SQLite, PostgreSQL**.
+- UI must look **premium, enterprise-grade and outstanding** – not a standard scaffold.
+- Clean architecture, clean English code documentation, **one class per file**.
+- Automations, REST data sources, configuration, **Active Directory** integration for Windows users, own
+  permission management (local and via AD) – must also work **without AD** using local users.
+- Bootstrap administrator **`admin` / `admin`** (implemented with mandatory password change at first sign-in, ADR-006).
+- Runs as a **Windows Service**; ship an **installer for GitHub releases** that installs or updates the service.
+- Analytics; logging in UI and backend with a **debug switch**; REST interface; **MCP server**; **API key management** in the UI.
+- No additional runtime downloads, **no licensed NuGet packages**; all documentation in English Markdown.
+
+## Overview
+
+| ID | Task | Owner (agent) | Depends on | Status |
+|----|------|---------------|-----------|--------|
+| T-01 | Kernel: solution, architecture, persistence, auth pipeline, design system, contracts | Orchestrator | – | ✅ Done |
+| T-02 | Identity & Access: users, groups, roles, LDAP/AD, Windows SSO, profile | Identity Agent | T-01 | ⏳ Planned |
+| T-03 | Setup wizard, system settings, branding, SMTP e-mail, secrets admin, database admin | Configuration Agent | T-01 | ⏳ Planned |
+| T-04 | Incident & Problem Management + "My Work" workspace | ITSM Agent | T-01 | ⏳ Planned |
+| T-05 | Change Management, Service Catalog, Requests, Approvals engine | Service Mgmt Agent | T-01 | ⏳ Planned |
+| T-06 | Knowledge Management, CMDB (relationships, graph), Asset Management | Knowledge/CMDB Agent | T-01 | ⏳ Planned |
+| T-07 | Platform engine: table registry, generic records & forms, conditions, custom tables/fields, business rules, SLAs, notifications, Table REST API, global record lookup | Platform Agent | T-01 | ⏳ Planned |
+| T-08 | Automation & Integration: Flow Designer + engine, scheduler, REST data sources (SSRF-safe), import sets | Automation Agent | T-01 | ⏳ Planned |
+| T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | ⏳ Planned |
+| T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | ⏳ Planned |
+| T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ⏳ Planned |
+| T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ⏳ Planned |
+| T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
+| T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
+
+Dependency graph:
+
+```
+T-01 ─┬─► T-02 ─┐
+      ├─► T-03 ─┤
+      ├─► T-04 ─┼─► T-11 ─┐
+      ├─► T-05 ─┤         │
+      ├─► T-06 ─┘         ├─► T-13 ─► T-14
+      ├─► T-07 ───────────┤
+      ├─► T-08 ───────────┤
+      ├─► T-09 ───────────┤
+      ├─► T-10 ───────────┤
+      └─► T-12 ───────────┘
+```
+
+Cross-module calls go through kernel contracts with placeholders (ORCHESTRATION.md §5), so T-02…T-10 and T-12 run
+in parallel without blocking each other.
+
+---
+
+## T-01 Kernel ✅
+
+**Result:** Solution `Servora.slnx` (.NET 10): Domain / Application / Infrastructure / 3 persistence providers / Web
+host / unit tests. Delivered: EF Core context with audit fields, optimistic concurrency, before-save hooks and async
+record events; provider abstraction (SQLite, SQL Server, PostgreSQL) with encrypted `database.json`; Data Protection
+keys (DPAPI on Windows); actor model (`ICurrentUser`, `ActorContext`) for users / API keys / agents / system;
+RBAC with permission catalog, dynamic `perm:` policies and `[RequirePermission]`; cookie auth with security-stamp
+revalidation, lockout, password policy, forced password change; bootstrap roles + `admin/admin`; hash-chained audit
+log; number sequences; activity stream & attachments; directory lookups; setup guard; security headers; rate
+limiting; Windows Service hosting; design system (`servora.css`), icon set, app shell (sidebar, top bar, command
+palette Ctrl+K, toasts), 30+ UI components incl. SVG charts; login / logout / change-password pages; module stubs
+for every task; placeholder implementations for cross-module contracts.
+
+**Evidence:** `dotnet build Servora.slnx` → 0 errors, 0 warnings. `dotnet test` → 23 passed. Manual run: login as
+admin/admin → forced password change (policy rejects weak / user-name passwords) → interactive dashboard.
+
+---
+
+## T-02 Identity & Access ⏳
+
+**Owned paths:** `*/Identity/**` (Domain additions, Application, Infrastructure, Configurations), `Components/Pages/Admin/Identity/**`,
+`Components/Pages/Account/**` (may restyle/extend Login, ChangePassword), `Components/Pages/Profile/**`,
+`IdentityModule.cs`, `IdentityEndpoints.cs`, `IdentityWebModule.cs`, `Permissions.Identity.cs`, `docs/modules/identity.md`.
+
+**Scope**
+1. Admin UI `/admin/users` (list, search, filters active/source/role, KPI cards), `/admin/users/{id}` and new user:
+   profile fields, activation, roles, groups, reset password (sets MustChangePassword), unlock, force sign-out
+   (rotate security stamp), source badge (Local / Directory / Windows).
+2. `/admin/groups` + detail: members (add/remove), roles granted by group, type (assignment/security/approval), manager.
+3. `/admin/roles` + detail: permission matrix grouped by `PermissionCatalog` groups with search, system-role
+   protection (cannot delete, `admin` keeps `*`), privilege-escalation guard (a user can only grant permissions they hold).
+4. LDAP / Active Directory: configuration page `/admin/directory` (host, port, LDAPS/StartTLS/None (warning),
+   certificate validation, base DN, bind DN + password via `ISecretStore`, user/group search base & filter,
+   attribute mapping, group→role mapping table, sync schedule, enable switch, "Test connection" and "Test user
+   lookup"). `IExternalCredentialValidator` implementation using `System.DirectoryServices.Protocols` (safe filter
+   escaping RFC 4515, timeouts, no anonymous bind fallback, never downgrade TLS silently). Just-in-time provisioning
+   of users on first login; group membership → roles mapping (`IsFromDirectory` flags). Background directory sync
+   (hosted service, interval configurable, bounded) and a "Sync now" button with result summary.
+5. Windows integrated authentication (Negotiate/Kerberos/NTLM): `/auth/windows` endpoint challenging the Negotiate
+   scheme (registered in `IdentityWebModule`), maps the Windows identity (SID / `DOMAIN\user`) to a user (JIT
+   provisioning from AD when enabled), issues the normal cookie via `UserPicker`-independent `UserPrincipalFactory`.
+   Toggle on `/admin/directory`; the login page button is shown only when enabled.
+6. `/admin/auth` authentication policy: password policy values, lockout threshold/duration, session lifetime,
+   allow local login toggle (break-glass: `admin` local login always allowed), stored as system settings.
+7. `/profile`: own profile (name, phone, time zone, theme), my roles & groups, my sessions info, change password link.
+8. Audit every identity/role/permission/directory change; invalidate `IPermissionService` caches on changes.
+9. Seed demo data (idempotent): groups "Service Desk", "Network Operations", "Database Administration",
+   "Change Advisory Board" (approval), a few demo users (fulfillers and employees) **with `MustChangePassword=true`
+   and random passwords not shown anywhere**, memberships.
+
+**Acceptance criteria:** CRUD for users/groups/roles works end-to-end; LDAP login works against AD when configured
+and the app works fully without AD; Windows SSO endpoint works when enabled; escalation guard + audit present;
+unit tests for LDAP filter escaping, group→role mapping and escalation guard.
+
+---
+
+## T-03 Setup, Configuration & Secrets ⏳
+
+**Owned paths:** `*/Configuration/**`, `Components/Pages/Setup/**`, `Components/Pages/Admin/Configuration/**`,
+`src/Servora.Web/Setup/**` (except `SetupGuardMiddleware`, `SetupState` which you may extend), `ConfigurationModule.cs`,
+`ConfigurationEndpoints.cs`, `ConfigurationWebModule.cs`, `Permissions.Configuration.cs`, `docs/modules/configuration.md`.
+
+**Scope**
+1. **Setup wizard** `/setup` (AuthLayout, beautiful stepper): Welcome → Database (choose SQLite / SQL Server /
+   PostgreSQL with provider cards, connection builder fields + raw connection string, "Test connection") →
+   Organisation (company name, product name, accent color, time zone) → Summary → Install (saves via
+   `DatabaseSettingsStore`, runs `DatabaseInitializer`, shows progress, admin credentials hint `admin/admin` +
+   forced change) → "Go to sign-in". Remote (non-loopback) access to the wizard requires a setup token written to
+   `<data dir>/setup-token.txt` on startup while unconfigured. Use `SetupState.IsInProgress` while finishing.
+2. **System settings** `/admin/settings`: typed configuration service `ISystemSettingsService` (get/set typed values,
+   defaults, categories, change history via audit) and UI with categories (General, Branding, Localization,
+   E-mail, Security headers info, Features). Settings take effect without restart where possible; show a
+   "restart required" badge otherwise.
+3. **Branding**: product name, company name, logo (upload → stored safely), accent color; expose
+   `IBrandingService` for layout use (request to orchestrator to wire into NavMenu/AuthLayout).
+4. **E-mail**: SMTP settings (host, port, TLS mode, user, password in `ISecretStore`, from address), "Send test
+   e-mail"; real `IEmailSender` (System.Net.Mail, async, timeout, no credential logging) + outbound mail queue
+   with retry and an "Outbox" view.
+5. **Secrets** `/admin/secrets`: list (name, description, last rotated – never values), create, rotate (write-only
+   input), delete with confirmation; audit.
+6. **Database** info card (provider, redacted connection string, schema status, size where available) and
+   "Test connection" in settings.
+7. **Feature flags** stored as settings (`features.*`) with a toggle UI.
+
+**Acceptance criteria:** fresh data dir → wizard → working instance on SQLite (and connection test for SQL Server /
+PostgreSQL); settings persist and audit; test e-mail works against an SMTP server; secrets never displayed after save;
+unit tests for settings typing/defaults and SMTP option validation.
+
+---
+
+## T-04 Incident & Problem Management + My Work ⏳
+
+**Owned paths:** `*/Itsm/**` (excluding kernel files `TaskRecord.cs`, `Priority*.cs`, `Impact.cs`, `Urgency.cs`,
+`TaskRecordConfigurationExtensions.cs` – read-only), `Components/Pages/Itsm/**`, `Components/Itsm/**`,
+`Components/Pages/Home.razor` (replace placeholder), `ItsmModule.cs`, `ItsmEndpoints.cs`, `ItsmWebModule.cs`,
+`Permissions.Incidents.cs`, `Permissions.Problems.cs`, `docs/modules/itsm.md`.
+
+**Scope**
+1. `Incident : TaskRecord` (`incident`): state machine New → In Progress → On Hold (reason) → Resolved (resolution
+   code + notes, required) → Closed / Cancelled; caller, category/subcategory, channel (portal, phone, e-mail,
+   monitoring, chat), business service (CI), major incident flag, parent incident, problem link, reopen count,
+   resolved at/by. Priority from `PriorityMatrix` via a saving hook. Number prefix `INC`.
+2. `Problem : TaskRecord` (`problem`): New → Assess → Root Cause Analysis → Fix in Progress → Resolved → Closed;
+   known error flag, workaround, root cause, fix notes, related incidents. Prefix `PRB`.
+3. Services with permission checks; state transition validation; auto-assignment helper (assign to me);
+   resolve/close/reopen actions; link incidents to problem; create problem from incident.
+4. List pages `/incidents`, `/problems`: KPI row (open, P1, unassigned, breached SLA via `ISlaService` if any),
+   saved quick filters (My open, Unassigned, P1/P2, All active, Resolved), DataTable with number, priority badge,
+   state pill, short description, caller/assignee avatars, group, updated time; bulk assign.
+5. Record pages `/incidents/new`, `/incidents/{id}` (and problems): enterprise form layout, `StateFlow`, header
+   actions (Resolve, Close, Reopen, Assign to me, Create problem), side card (SLA timers, caller info, CI),
+   tabs: Activity (`ActivityStream`), Related (child incidents / problem / incidents of problem), Attachments.
+6. **My Work** (`/`): personalised workspace replacing the placeholder: greeting, KPI cards (assigned to me, my
+   groups' unassigned, P1 open, my approvals placeholder count via `IApprovalService` where possible), my work
+   list across incidents/problems, recent activity, 14-day trend chart of opened vs resolved incidents.
+7. Seed: incident categories and ~25 realistic demo incidents + 4 problems (idempotent; only if table empty).
+
+**Acceptance criteria:** full lifecycle works with validation; lists page/sort/search server-side; priority
+calculated; activity/attachments work; unit tests for state machine and priority hook.
+
+---
+
+## T-05 Change, Catalog, Requests & Approvals ⏳
+
+**Owned paths:** `*/Changes/**`, `*/Catalog/**`, `*/Approvals/**` (Application `Approvals` contract files are
+read-only, implement them), `Components/Pages/Changes/**`, `Components/Pages/Catalog/**`,
+`Components/Pages/Requests/**`, `Components/Pages/Approvals/**`, `Components/ServiceManagement/**`,
+`ServiceManagementModule.cs`, `ServiceManagementEndpoints.cs`, `ServiceManagementWebModule.cs`,
+`Permissions.Changes.cs`, `Permissions.Requests.cs`, `Permissions.Approvals.cs`, `docs/modules/service-management.md`.
+
+**Scope**
+1. **Approvals engine** implementing `IApprovalService`: `Approval` entity (`sys_approval`, approver, state
+   requested/approved/rejected/cancelled, comments, decided at), group expansion, policy any/all, record events so
+   other modules can react; `/approvals` "My approvals" page (cards with record summary, approve / reject with comment).
+2. **Change requests** `ChangeRequest : TaskRecord` (`change_request`, prefix `CHG`): types Normal / Standard /
+   Emergency; states New → Assess → Authorize → Scheduled → Implement → Review → Closed / Cancelled; risk & impact
+   assessment (simple questionnaire → risk level), implementation / backout / test plans, planned start/end,
+   CAB approval via `IApprovalService` (approval group "Change Advisory Board"), conflict detection (overlapping
+   changes on the same CI), change tasks (`change_task`). List + record pages, change calendar view (month grid).
+3. **Service catalog**: categories, catalog items (name, short/long description, icon, price/delivery time,
+   fulfilment group, approval required + approver group, active), variables (variable definitions: text,
+   multiline, number, choice with options, boolean, date, user reference; mandatory, order, help text) – builder
+   UI `/catalog-admin` and `/catalog-admin/{id}`.
+4. **Requests**: `Request` (`sc_request`, `REQ`), `RequestItem` (`sc_req_item`, `RITM`, variable answers JSON),
+   `CatalogTask` (`sc_task`, `SCTASK`); ordering service used by the portal (T-11) –
+   `ICatalogOrderService.OrderAsync(itemId, variables, requestedFor)` with validation; on order: approval (if
+   required) → task creation for fulfilment group → closing RITM/REQ when tasks complete. Fulfiller pages
+   `/requests`, `/requests/{id}` with RITMs and tasks.
+5. Seed: CAB group usage, 8 catalog items (New laptop, Software install, Access request, VPN, Mobile phone,
+   Password reset, New employee onboarding, Shared mailbox) with variables; a few demo changes.
+
+**Acceptance criteria:** change lifecycle with CAB approval works; catalog builder creates items with variables;
+order → approval → tasks → closure works; approvals page works; unit tests for approval policy logic, change
+state machine and variable validation.
+
+---
+
+## T-06 Knowledge, CMDB & Assets ⏳
+
+**Owned paths:** `*/Knowledge/**`, `*/Cmdb/**` (kernel `ConfigurationItem.cs`, `OperationalStatus.cs` may be
+extended additively), `*/Assets/**`, `Components/Pages/Knowledge/**`, `Components/Pages/Cmdb/**`,
+`Components/Pages/Assets/**`, `Components/KnowledgeCmdb/**`, `KnowledgeCmdbModule.cs`, `KnowledgeCmdbEndpoints.cs`,
+`KnowledgeCmdbWebModule.cs`, `Permissions.Knowledge.cs`, `Permissions.Cmdb.cs`, `Permissions.Assets.cs`,
+`docs/modules/knowledge-cmdb-assets.md`.
+
+**Scope**
+1. **Knowledge**: knowledge bases, categories, `KnowledgeArticle` (`kb_knowledge`, prefix `KB`): title, summary,
+   body (Markdown rendered safely to HTML – implement a small, safe Markdown subset renderer with HTML encoding;
+   no external packages), workflow Draft → Review → Published → Retired, versions, valid to, view count, helpful
+   votes, attachments, related CIs. Pages: `/knowledge` (search-first hero, categories, popular/new),
+   `/knowledge/{id}` (reader view with TOC), `/knowledge/new|edit/{id}` (editor with live preview).
+   `IKnowledgeSearchService` (title/summary/body term search, ranked) for portal & AI.
+2. **CMDB**: CI classes (`cmdb_class`: key, label, icon, parent class, class-specific attribute definitions stored as
+   JSON schema → rendered as custom fields), `CiRelationship` (`cmdb_rel_ci`: parent, child, type "Depends on",
+   "Runs on", "Hosted on", "Connects to", "Contains"), pages `/cmdb` (class filter chips, KPIs by status),
+   `/cmdb/{id}` (attributes, relationships editor, **interactive SVG dependency graph** (radial / layered layout,
+   upstream & downstream, click to navigate), related incidents/changes via `IRecordService` or direct queries
+   guarded by permissions), `/cmdb/classes` admin.
+3. **Assets** `Asset` (`alm_asset`, prefix `AST`): model, category (hardware/software/license), serial, asset tag,
+   state (in stock, in use, in repair, retired, disposed), assigned to, location, cost, purchase date, warranty
+   end, linked CI; software licenses (entitlements count vs. installs). Pages `/assets`, `/assets/{id}` with KPIs
+   (value, expiring warranties).
+4. Seed: CI classes (Business Service, Application, Server, Database, Network Device, Virtual Machine, Storage),
+   ~30 CIs with relationships forming a meaningful service map, 8 KB articles, ~20 assets.
+
+**Acceptance criteria:** KB workflow and search work, Markdown rendering is XSS-safe (tests), CMDB graph renders and
+navigates, asset lifecycle works; unit tests for Markdown renderer safety, graph traversal and KB workflow.
+
+---
+
+## T-07 Platform Engine ⏳
+
+**Owned paths:** `*/Platform/**` (replace kernel `ReflectionTableRegistry` usage by registering your own registry;
+you may subclass it), `*/Conditions/**` implementations (contract files read-only), `*/Tables/**` implementations,
+`*/Sla/**`, `*/Notifications/**` (except `IEmailSender`/`EmailMessage` contracts), `*/BusinessRules/**`,
+`Components/Pages/Platform/**`, `Components/Platform/**`, `PlatformModule.cs`, `PlatformEndpoints.cs`,
+`PlatformWebModule.cs`, `Permissions.Platform.cs`, `docs/modules/platform.md`.
+
+**Scope**
+1. `ConditionEvaluator` (`IConditionEvaluator`): all operators, type coercion (enums by value/name, Guid, dates,
+   numbers, booleans), `IsMe`, change-aware operators; LINQ expression builder for EF (provider-neutral).
+2. Table registry with **custom tables & custom fields** (`sys_db_object`-like `CustomTable`, `CustomField` with
+   types, choices, reference table, mandatory, default, help) – custom fields on typed tables stored in
+   `CustomFieldsJson`; custom table records in `CustomRecord` (`IDynamicTableRecord`, JSON data). Cache + invalidate.
+3. `RecordService` (`IRecordService`): generic CRUD for typed + custom tables using EF metadata/reflection, field
+   validation, `[NotExposed]` respected, table permissions (`table.<name>.read|create|write|delete` **or** the owning
+   module permission mapped per table), display values for references, bounded paging.
+4. Studio UI: `/admin/tables` (list typed + custom tables), `/admin/tables/{name}` (fields designer: add/edit custom
+   fields, form layout ordering/sections, list default columns), generic list `/table/{name}` and generic form
+   `/table/{name}/{id}` (rendering any table incl. custom fields, using kernel UI components), plus a reusable
+   `CustomFieldsSection` component other modules can embed in typed forms.
+5. **Business rules** (`sys_script`-like, declarative only – no code): table, when (before insert/update/delete,
+   after async), condition (`ConditionBuilder` with change operators), actions: set field values, abort with
+   message, add work note, start flow (`IFlowExecutionService`), send notification. Implemented via
+   `IRecordSavingHook` (before) and `IRecordEventHandler` (after). UI `/admin/business-rules`.
+6. **SLA engine**: SLA definitions (table, start / pause / stop conditions, target duration, schedule: 24×7 or
+   business hours with time zone and weekdays), task SLA records, background evaluator (hosted service, bounded),
+   breach → activity entry + notification; `ISlaService` implementation; UI `/admin/sla`.
+7. **Notifications**: templates (subject/body with `${field}` placeholders, HTML-encoded), triggers (table, event,
+   condition), recipients (field references like AssignedTo, group members, fixed addresses), delivery via
+   `IEmailSender`; in-app notifications bell API (`INotificationInbox`) – request orchestrator to wire the TopBar bell.
+   UI `/admin/notifications`.
+8. **Table REST API** in `PlatformEndpoints`: `GET/POST /api/v1/table/{table}`, `GET/PATCH/DELETE /api/v1/table/{table}/{id}`
+   with `sysparm_query`-like condition JSON, fields, paging limits; authorization via `api.access` + table
+   permissions (API keys come from T-10; cookie auth also works). ProblemDetails errors.
+9. `/go/{number}` page resolving a record number prefix (INC, PRB, CHG, REQ, RITM, SCTASK, KB, AST, …) to its route.
+
+**Acceptance criteria:** custom table end-to-end (create table + fields in UI → records via generic list/form and
+Table API); business rule set-field and abort work; SLA timer appears for a task and breaches; notification e-mail
+rendered; comprehensive unit tests for the condition evaluator (in-memory and EF on SQLite).
+
+---
+
+## T-08 Automation & Integration ⏳
+
+**Owned paths:** `*/Automation/**` (contract files read-only, implement them), `*/Integration/**` (contracts
+read-only), `Components/Pages/Automation/**`, `Components/Pages/Integration/**`, `Components/Automation/**`,
+`AutomationModule.cs`, `AutomationEndpoints.cs`, `AutomationWebModule.cs`, `Permissions.Automation.cs`,
+`Permissions.Integration.cs`, `docs/modules/automation-integration.md`.
+
+**Scope**
+1. **Flow model**: `Flow` (name, description, active, trigger, steps JSON, version), triggers: record created /
+   updated (table + condition), scheduled (cron), manual, inbound webhook (authenticated, secret per flow),
+   data source poll. Steps (extensible action registry `IFlowAction`): Create record, Update record, Look up records,
+   Condition (if/else branches), Wait (duration), Ask for approval (`IApprovalService`, wait for decision), Send e-mail
+   (`IEmailSender`), Call data source (`IDataSourceExecutor`), Add work note, Log, Set variable, Run sub-flow.
+   Data pills / variables (`{{trigger.record.ShortDescription}}`, `{{steps.lookup.count}}`) with a safe template
+   resolver (no code execution).
+2. **Engine**: `IFlowExecutionService` implementation, `FlowRun` + `FlowRunStep` history (status, duration, input/
+   output snapshot redacted, error), bounded concurrency (configurable), retries with backoff per step, cancellation,
+   idempotency key per trigger event, waiting runs resumed by a background service, record-event trigger via
+   `IRecordEventHandler`, actor = flow's run-as identity (system with audit).
+3. **Flow Designer UI** `/automation/flows`, `/automation/flows/{id}`: premium vertical canvas with trigger card,
+   step cards, connectors, branch lanes for conditions, add-step palette, step configuration drawer with data pill
+   picker, test run button with live step results; activate/deactivate; version note.
+4. **Executions** `/automation/runs` (filters, status pills, duration) + run detail timeline.
+5. **Scheduler**: own cron parser (5-field, with tests), scheduled jobs list `/automation/schedules`, next-run preview.
+6. **REST data sources** `/integration/datasources`: base URL, auth (none / API key header / bearer / basic over TLS
+   / OAuth2 client credentials) with credentials in `ISecretStore`, default headers, endpoints (key, method, path
+   template, allowed parameters with validation, body template, response JSON path mapping), timeout, retries,
+   max response size, rate limit, enabled. **SSRF protection**: resolve DNS, block loopback/private/link-local/
+   metadata ranges unless an admin allow-list entry exists, re-check on redirects (max 3), HTTPS-only by default,
+   certificate validation always on. `IDataSourceExecutor` implementation, "Test endpoint" UI with response viewer,
+   execution log.
+7. **Import sets** `/integration/imports`: import from a data source endpoint (JSON array) or uploaded CSV into a
+   staging set, transform map (source path → target table field via `IRecordService`, coalesce key for
+   insert/update), run now / schedule, run history with row results.
+
+**Acceptance criteria:** a record-triggered flow with condition + update + e-mail step runs end-to-end; scheduled
+flow fires; approval wait resumes; data source executes against a public HTTPS API and blocks `http://127.0.0.1`
+and `169.254.169.254`; import maps rows into a table; unit tests for cron parser, SSRF guard, template resolver and
+engine step sequencing.
+
+---
+
+## T-09 Observability & Analytics ⏳
+
+**Owned paths:** `*/Observability/**` (kernel `AuditService`, `AuditEvent` may be extended additively),
+`*/Analytics/**`, `Components/Pages/Observability/**`, `Components/Pages/Analytics/**`, `Components/Analytics/**`,
+`ObservabilityModule.cs`, `ObservabilityEndpoints.cs`, `ObservabilityWebModule.cs`, `Permissions.Observability.cs`,
+`Permissions.Analytics.cs`, `docs/modules/observability-analytics.md`.
+
+**Scope**
+1. **Logging**: rolling JSON-lines file logger provider (daily files, size cap, retention days) in the data
+   directory + in-memory ring buffer (last N entries) – both via `ObservabilityWebModule` on `builder.Logging`;
+   correlation id scope middleware; secret redaction filter (patterns for passwords, tokens, connection strings).
+2. **Debug switch**: runtime minimum level (Information ↔ Debug ↔ Trace) global and per category prefix, persisted
+   as setting, applied without restart; optional auto-revert after N minutes. UI `/admin/logs`: live tail
+   (auto-refresh), level/category/text filters, detail drawer with exception, download filtered logs.
+3. **Audit viewer** `/admin/audit`: filters (category, action, actor, outcome, date range), detail drawer, CSV export
+   (permission `admin.audit.read`), **hash-chain verification** button showing integrity status; retention setting.
+4. **Health** `/admin/health` and `/health` (JSON, anonymous minimal / authenticated detailed): database
+   connectivity & latency, disk space of data dir, record event queue backlog, background services heartbeat,
+   memory/CPU/uptime/version; ASP.NET Core health checks registration.
+5. **Metrics**: request count/latency/error middleware (in-memory aggregation per minute, last 24 h), exposed to UI.
+6. **Analytics dashboards** `/analytics`: executive dashboard with KPI cards and charts (incidents opened vs
+   resolved, backlog by priority, MTTR trend, SLA compliance, changes by state, requests by item, top categories,
+   automation success rate) – computed by `IAnalyticsService` from typed tables (handle missing modules gracefully).
+7. **Report builder** `/analytics/reports`, `/analytics/reports/{id}`: choose table (`ITableRegistry`), filter
+   (`ConditionBuilder`), group by field, aggregate (count/sum/avg), chart type (bar, line, donut, table), save &
+   share (private / role), pin to a personal dashboard; uses `IRecordService` when available, falls back to typed
+   queries for core tables.
+
+**Acceptance criteria:** debug switch changes log level live; logs visible in UI and on disk with redaction tests;
+audit verification detects tampering (test); health page shows real data; dashboards render with seed data; report
+builder saves and renders a grouped chart.
+
+---
+
+## T-10 API, MCP & AI ⏳
+
+**Owned paths:** `*/Api/**`, `*/Mcp/**`, `*/Ai/**`, `Components/Pages/Api/**`, `Components/Pages/Mcp/**`,
+`Components/Pages/Ai/**`, `Components/Ai/**`, `ApiMcpAiModule.cs`, `ApiMcpAiEndpoints.cs`, `ApiMcpAiWebModule.cs`,
+`Permissions.Api.cs`, `Permissions.Mcp.cs`, `Permissions.Ai.cs`, `docs/modules/api-mcp-ai.md`.
+
+**Scope**
+1. **API keys** `/admin/api-keys`: create (name, description, owner user or service identity, scopes from the
+   permission catalog limited to the creator's own permissions, expiry, allowed IP ranges, rate limit), secret shown
+   **once** (`srv_<id>_<secret>` format), SHA-256 hash storage with constant-time comparison, rotate, revoke,
+   last-used tracking, usage chart. Authentication handler scheme `ApiKey` (header `X-Api-Key` or
+   `Authorization: Bearer srv_…`) producing a principal with `ServoraClaimTypes.ActorType=apikey`, `ApiKeyId`,
+   `Permission` scope claims and owner user id (registered in `ApiMcpAiWebModule`, policy scheme forwarding for
+   `/api` and `/mcp`). Per-key rate limiting. Audit lifecycle + failed auth.
+2. **REST API foundation**: `/api/v1` conventions (ProblemDetails, correlation id header, paging limits),
+   OpenAPI document via `Microsoft.AspNetCore.OpenApi` at `/openapi/v1.json`, and a custom, beautiful **API Explorer**
+   page `/admin/api-docs` (lists operations from the OpenAPI document, try-it with the user's cookie, curl snippets).
+   Core endpoints: `GET /api/v1/me`, `GET /api/v1/health`. (Modules add their own endpoints.)
+3. **MCP server** at `/mcp` implementing the Model Context Protocol over **Streamable HTTP** (JSON-RPC 2.0):
+   `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`; protocol version
+   negotiation (document supported version in docs). Authentication via API keys (`mcp.access`); every tool call
+   authorized by scope `mcp.tool.<name>` **and** the underlying permission; inputs validated against JSON schema;
+   bounded outputs; audit of each call. Tools: `search_records` / `get_record` (via `IRecordService`),
+   `create_incident`, `list_data_sources` / `execute_data_source` (`IDataSourceExecutor`), `list_flows` /
+   `start_flow` / `get_flow_run` (`IFlowExecutionService`), `search_knowledge` (via record service on
+   `kb_knowledge`), `platform_health`. Admin page `/admin/mcp`: enable switch, tool catalog with per-tool enable,
+   client connection snippet (Claude Desktop / generic JSON), recent invocations.
+4. **AI providers** `/admin/ai`: provider configs (OpenAI-compatible endpoint incl. local Ollama/LM Studio,
+   Anthropic Messages API, Azure OpenAI) with API keys in `ISecretStore`, model selection, test button; all calls via
+   `HttpClient` (no SDK packages); timeouts and token limits.
+5. **AI orchestrator & sub-agents**: `IAiOrchestrator` that receives a request, plans, delegates to registered
+   sub-agents (Triage agent: classify/prioritise incident text; Knowledge agent: answer from KB search results;
+   Record agent: look up records; Automation agent: suggest/start flows) using tool calling where the provider
+   supports it; agents run with their own scoped `ActorInfo` (no permission escalation; consequential actions
+   require explicit user confirmation in the UI); execution trace persisted (`AiConversation`, `AiMessage`, tool
+   calls) and visible.
+6. **AI Assistant** `/assistant`: premium chat UI (streaming-style rendering, suggestions, tool-call cards showing
+   which agent did what, confirmation buttons for actions, conversation history sidebar). Works with a clear
+   "configure a provider" empty state when none is configured.
+
+**Acceptance criteria:** API key auth works for `/api/v1/me` and is revocable; secrets never retrievable; MCP
+`initialize` → `tools/list` → `tools/call` works with an API key and is denied without scope; AI assistant answers
+via a configured OpenAI-compatible endpoint; unit tests for key hashing/verification, MCP JSON-RPC dispatch and
+input validation, orchestrator delegation with a fake provider.
+
+---
+
+## T-11 Self-Service Portal ⏳ (wave 2 – after T-04/T-05/T-06 are merged)
+
+**Owned paths:** `*/Portal/**`, `Components/Pages/Portal/**`, `Components/Portal/**`, `PortalModule.cs`,
+`PortalEndpoints.cs`, `PortalWebModule.cs`, `Permissions.Portal.cs`, `docs/modules/portal.md`.
+
+**Scope:** consumer-grade portal (own `PortalLayout` with hero search): home (search KB + catalog, popular items,
+my open requests/incidents, announcements), catalog browsing & item order form rendering variables, "Report an
+issue" (creates incident as caller), my requests & incidents (status timeline, comments as caller via
+`ActivityStream` without work notes), knowledge reader, approvals for approvers. Users with only `portal.access`
+can use it fully; data access restricted to own records.
+
+---
+
+## T-12 Installer, Windows Service & Release ⏳
+
+**Owned paths:** `src/Servora.Installer/**` (new console project – request orchestrator to add it to the solution
+if you cannot), `.github/workflows/**`, `build/**`, `docs/operations/**`.
+
+**Scope**
+1. `Servora.Installer` (.NET console, self-contained single-file `ServoraSetup.exe`, requires elevation – app
+   manifest `requireAdministrator`): detects existing service `Servora` → **update** (stop service, back up
+   current binaries to `%ProgramData%\Servora\backups\<timestamp>`, copy new files, keep data dir and instance
+   `appsettings.json`, start service, health check `/health`, automatic rollback on failure) or **install** (copy to
+   `%ProgramFiles%\Servora`, create service via `sc.exe`/ServiceController with automatic (delayed) start,
+   recovery actions restart, optional firewall rule via `netsh`, port selection, open browser to setup wizard).
+   Commands: `install`, `update`, `uninstall [--keep-data]`, `status`, interactive menu when run without args,
+   `--silent`. Payload: zipped published app embedded as resource or side-by-side `app/` folder.
+2. GitHub Actions: `ci.yml` (build + test on push/PR, windows-latest), `release.yml` (on tag `v*`: publish
+   `win-x64` self-contained, build installer, create `Servora-<version>-win-x64.zip` + `ServoraSetup-<version>.exe`
+   + SHA256 checksums, create GitHub release with notes from CHANGELOG).
+3. `build/publish.ps1` local script producing the same artifacts.
+4. Docs: `docs/operations/installation.md`, `upgrade.md` (incl. rollback), `windows-service.md`, `backup-restore.md`
+   (per provider), `configuration.md` (data dir, `appsettings.json` overrides, HTTPS certificate configuration with
+   Kestrel, reverse proxy), `troubleshooting.md`.
+
+**Acceptance criteria:** `build/publish.ps1` produces artifacts locally; installer `status` works without admin,
+install/update logic unit-tested via abstractions (file system + service controller interfaces); workflows valid YAML.
+
+---
+
+## T-13 Integration ⏳ (Orchestrator)
+
+Merge all branches, resolve conflicts, process "Requests to orchestrator" (nav entries, shared files, packages),
+wire cross-module UI (branding into layout, notification bell, custom fields section in typed forms), generate
+`InitialCreate` migrations for SQLite, SQL Server and PostgreSQL, run full build/tests, smoke test every page.
+
+## T-14 Security & Architecture Review ⏳
+
+Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings; record residual risks.
+
+---
+
+## Change log of this board
+
+| Date | Change |
+|------|--------|
+| 2026-11-07 | Board created; T-01 completed by orchestrator; T-02…T-10, T-12 dispatched in parallel. |

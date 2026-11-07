@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Servora.Application/Servora.Application.csproj" />
+    <Project Path="src/Servora.Domain/Servora.Domain.csproj" />
+    <Project Path="src/Servora.Infrastructure/Servora.Infrastructure.csproj" />
+    <Project Path="src/Servora.Installer/Servora.Installer.csproj" />
+    <Project Path="src/Servora.Persistence.PostgreSql/Servora.Persistence.PostgreSql.csproj" />
+    <Project Path="src/Servora.Persistence.Sqlite/Servora.Persistence.Sqlite.csproj" />
+    <Project Path="src/Servora.Persistence.SqlServer/Servora.Persistence.SqlServer.csproj" />
+    <Project Path="src/Servora.Web/Servora.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Servora.Tests.Unit/Servora.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

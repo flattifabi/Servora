@@ -1,0 +1,36 @@
+@* Labeled form field wrapper with help and validation text. *@
+<div class="field @Class">
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <label class="@(Required ? "required" : null)">@Label</label>
+    }
+    @ChildContent
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="error">@Error</div>
+    }
+    else if (!string.IsNullOrEmpty(Help))
+    {
+        <div class="help">@Help</div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the label.</summary>
+    [Parameter] public string? Label { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the field is mandatory.</summary>
+    [Parameter] public bool Required { get; set; }
+
+    /// <summary>Gets or sets the help text.</summary>
+    [Parameter] public string? Help { get; set; }
+
+    /// <summary>Gets or sets the validation error.</summary>
+    [Parameter] public string? Error { get; set; }
+
+    /// <summary>Gets or sets extra CSS classes (for example <c>span-2</c>).</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Gets or sets the input element(s).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

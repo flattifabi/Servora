@@ -1,0 +1,162 @@
+@* Activity stream (journal) of any record: composer for comments / work notes plus a timeline of entries. *@
+@using System.Text.Json
+@using Servora.Application.Activity
+@using Servora.Domain.Activity
+@inject IActivityService Activity
+@inject ToastService Toasts
+
+<div class="activity">
+    @if (AllowPosting)
+    {
+        <div class="activity-composer @(_type == ActivityType.WorkNote ? "worknote" : null)">
+            <div class="composer-tabs">
+                <div class="segmented">
+                    @if (AllowWorkNotes)
+                    {
+                        <button class="@(_type == ActivityType.WorkNote ? "active" : null)" @onclick="() => _type = ActivityType.WorkNote"><Icon Name="sticky-note" Size="14" /> Work note</button>
+                    }
+                    <button class="@(_type == ActivityType.Comment ? "active" : null)" @onclick="() => _type = ActivityType.Comment"><Icon Name="message-square" Size="14" /> Comment</button>
+                </div>
+                <span class="small faint" style="margin-left:auto;align-self:center">
+                    @(_type == ActivityType.WorkNote ? "Internal — visible to fulfillers only" : "Visible to the caller")
+                </span>
+            </div>
+            <textarea class="textarea" rows="3" placeholder="@(_type == ActivityType.WorkNote ? "Add an internal work note…" : "Add a comment for the caller…")" @bind="_text" @bind:event="oninput"></textarea>
+            <div class="flex justify-end mt-2">
+                <button class="btn btn-primary btn-sm" disabled="@(string.IsNullOrWhiteSpace(_text) || _posting)" @onclick="PostAsync">
+                    <Icon Name="send" Size="14" /> Post
+                </button>
+            </div>
+        </div>
+    }
+
+    @if (_entries is null)
+    {
+        <Skeleton Lines="4" Height="44px" />
+    }
+    else if (_entries.Count == 0)
+    {
+        <div class="small faint text-center" style="padding:20px">No activity yet.</div>
+    }
+    else
+    {
+        @foreach (var entry in _entries)
+        {
+            var css = entry.Type switch { ActivityType.WorkNote => "worknote", ActivityType.System => "system", ActivityType.FieldChange => "change", _ => "comment" };
+            <div class="activity-item @css" @key="entry.Id">
+                @if (entry.Type is ActivityType.Comment or ActivityType.WorkNote)
+                {
+                    <Avatar Name="@entry.AuthorName" />
+                }
+                else
+                {
+                    <div class="activity-icon"><Icon Name="@(entry.Type == ActivityType.System ? "zap" : "edit")" Size="14" /></div>
+                }
+                <div class="activity-bubble">
+                    <div class="activity-meta">
+                        <span class="author">@entry.AuthorName</span>
+                        @if (entry.Type == ActivityType.WorkNote)
+                        {
+                            <span class="pill pill-warning no-dot" style="height:20px;font-size:11px">Work note</span>
+                        }
+                        else if (entry.Type == ActivityType.FieldChange)
+                        {
+                            <span>updated fields</span>
+                        }
+                        <span style="margin-left:auto"><RelativeTime Value="entry.CreatedAt" /></span>
+                    </div>
+                    @if (entry.Type == ActivityType.FieldChange && entry.ChangesJson is not null)
+                    {
+                        <div class="activity-changes">
+                            @foreach (var change in ParseChanges(entry.ChangesJson))
+                            {
+                                <span class="faint">@change.Field</span>
+                                <span><span class="from">@change.From</span> → <span class="to">@change.To</span></span>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="activity-text">@entry.Text</div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ActivityEntry>? _entries;
+    private ActivityType _type = ActivityType.WorkNote;
+    private string _text = string.Empty;
+    private bool _posting;
+
+    /// <summary>Gets or sets the technical table name.</summary>
+    [Parameter, EditorRequired] public string Table { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the record identifier.</summary>
+    [Parameter, EditorRequired] public Guid RecordId { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether work notes and field changes are shown and can be posted.</summary>
+    [Parameter] public bool AllowWorkNotes { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether the composer is shown.</summary>
+    [Parameter] public bool AllowPosting { get; set; } = true;
+
+    /// <summary>Raised after an entry was posted.</summary>
+    [Parameter] public EventCallback OnPosted { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!AllowWorkNotes)
+        {
+            _type = ActivityType.Comment;
+        }
+
+        await ReloadAsync();
+    }
+
+    /// <summary>Reloads the stream (call after the record changed).</summary>
+    /// <returns>A task that completes when reloaded.</returns>
+    public async Task ReloadAsync()
+    {
+        _entries = await Activity.GetAsync(Table, RecordId, AllowWorkNotes);
+        StateHasChanged();
+    }
+
+    private async Task PostAsync()
+    {
+        _posting = true;
+        var result = await Activity.AddAsync(Table, RecordId, _type, _text);
+        _posting = false;
+        if (result.Succeeded)
+        {
+            _text = string.Empty;
+            await ReloadAsync();
+            await OnPosted.InvokeAsync();
+        }
+        else
+        {
+            Toasts.Error("Could not post", result.Error);
+        }
+    }
+
+    private static IEnumerable<(string Field, string From, string To)> ParseChanges(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.EnumerateArray()
+                .Select(e => (
+                    e.TryGetProperty("field", out var f) ? f.GetString() ?? "" : "",
+                    e.TryGetProperty("from", out var from) ? from.ToString() : "",
+                    e.TryGetProperty("to", out var to) ? to.ToString() : ""))
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+}

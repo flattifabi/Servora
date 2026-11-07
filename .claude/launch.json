@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "servora",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/Servora.Web", "--launch-profile", "Servora"],
+      "port": 5080
+    }
+  ]
+}

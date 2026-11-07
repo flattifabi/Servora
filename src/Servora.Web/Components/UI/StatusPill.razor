@@ -1,0 +1,37 @@
+@* Colored status pill. Tone is derived from common state names unless set explicitly. *@
+<span class="pill pill-@ResolvedTone @(NoDot ? "no-dot" : null)">@if (ChildContent is not null) { @ChildContent } else { @Text }</span>
+
+@code {
+    /// <summary>Gets or sets the text.</summary>
+    [Parameter] public string? Text { get; set; }
+
+    /// <summary>Gets or sets custom content.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Gets or sets the tone: success, warning, danger, info, purple, accent, neutral, primary.</summary>
+    [Parameter] public string? Tone { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the leading dot is hidden.</summary>
+    [Parameter] public bool NoDot { get; set; }
+
+    private string ResolvedTone => Tone ?? ToneFor(Text);
+
+    /// <summary>Maps well-known state names to a tone.</summary>
+    /// <param name="state">The state text.</param>
+    /// <returns>The tone.</returns>
+    public static string ToneFor(string? state)
+    {
+        var s = (state ?? string.Empty).Replace(" ", string.Empty).ToLowerInvariant();
+        return s switch
+        {
+            "new" or "draft" or "open" or "requested" or "planned" => "info",
+            "inprogress" or "active" or "workinprogress" or "implement" or "running" or "assess" or "authorize" or "scheduled" or "review" => "primary",
+            "onhold" or "pending" or "awaiting" or "waiting" or "maintenance" or "paused" => "warning",
+            "resolved" or "closed" or "completed" or "complete" or "approved" or "published" or "operational" or "succeeded" or "success" or "fulfilled" or "healthy" or "enabled" => "success",
+            "cancelled" or "canceled" or "rejected" or "failed" or "error" or "breached" or "nonoperational" or "unhealthy" or "disabled" => "danger",
+            "retired" or "inactive" or "skipped" => "neutral",
+            "knownerror" or "rootcauseanalysis" or "fixinprogress" => "purple",
+            _ => "neutral",
+        };
+    }
+}

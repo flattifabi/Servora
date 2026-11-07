@@ -1,0 +1,70 @@
+@* KPI tile with icon, big value, optional delta and sparkline. Tone: primary|success|warning|danger|info|accent. *@
+<div class="stat-card tone-@Tone @(OnClick.HasDelegate ? "card interactive" : null)" @onclick="OnClick">
+    <div class="stat-top">
+        <div class="stat-label">@Label</div>
+        @if (!string.IsNullOrEmpty(Icon))
+        {
+            <div class="stat-icon"><Icon Name="@Icon" Size="18" /></div>
+        }
+    </div>
+    <div class="stat-value">@Value</div>
+    <div class="stat-foot">
+        @if (Delta is { } delta)
+        {
+            <span class="delta @(delta > 0 ? (InvertDelta ? "down" : "up") : delta < 0 ? (InvertDelta ? "up" : "down") : "flat")">
+                <Icon Name="@(delta > 0 ? "arrow-up-right" : delta < 0 ? "arrow-down-right" : "minus")" Size="12" />
+                @Math.Abs(delta).ToString("0.#")@DeltaSuffix
+            </span>
+        }
+        @if (!string.IsNullOrEmpty(Caption))
+        {
+            <span>@Caption</span>
+        }
+    </div>
+    @if (Trend is { Count: > 1 })
+    {
+        <div class="sparkline"><Sparkline Values="Trend" Color="@SparkColor" /></div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the label.</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the formatted value.</summary>
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the icon name.</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>Gets or sets the tone.</summary>
+    [Parameter] public string Tone { get; set; } = "primary";
+
+    /// <summary>Gets or sets the delta value (positive = up).</summary>
+    [Parameter] public double? Delta { get; set; }
+
+    /// <summary>Gets or sets the delta suffix, for example <c>%</c>.</summary>
+    [Parameter] public string DeltaSuffix { get; set; } = "%";
+
+    /// <summary>Gets or sets a value indicating whether an increase is bad (for example open incidents).</summary>
+    [Parameter] public bool InvertDelta { get; set; }
+
+    /// <summary>Gets or sets the caption shown next to the delta.</summary>
+    [Parameter] public string? Caption { get; set; }
+
+    /// <summary>Gets or sets the sparkline values.</summary>
+    [Parameter] public IReadOnlyList<double>? Trend { get; set; }
+
+    /// <summary>Gets or sets the click callback (makes the card interactive).</summary>
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    private string SparkColor => Tone switch
+    {
+        "success" => "var(--success)",
+        "warning" => "var(--warning)",
+        "danger" => "var(--danger)",
+        "info" => "var(--info)",
+        "accent" => "var(--accent)",
+        _ => "var(--primary)",
+    };
+}

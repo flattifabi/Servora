@@ -1,0 +1,38 @@
+@* Column definition for DataTable. Provide either Value (plain text) or a Template. *@
+@typeparam TItem
+@implements IDisposable
+
+@code {
+    /// <summary>Gets or sets the parent table.</summary>
+    [CascadingParameter] private DataTable<TItem>? Table { get; set; }
+
+    /// <summary>Gets or sets the header title.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets a plain value selector.</summary>
+    [Parameter] public Func<TItem, object?>? Value { get; set; }
+
+    /// <summary>Gets or sets the cell template.</summary>
+    [Parameter] public RenderFragment<TItem>? Template { get; set; }
+
+    /// <summary>Gets or sets the sort key passed to the sort callback; null disables sorting.</summary>
+    [Parameter] public string? SortKey { get; set; }
+
+    /// <summary>Gets or sets the cell CSS class.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Gets or sets the header CSS class.</summary>
+    [Parameter] public string? HeaderClass { get; set; }
+
+    /// <summary>Gets or sets the column width (CSS value).</summary>
+    [Parameter] public string? Width { get; set; }
+
+    /// <summary>Gets or sets the alignment (<c>right</c> for numbers).</summary>
+    [Parameter] public string? Align { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnInitialized() => Table?.AddColumn(this);
+
+    /// <inheritdoc />
+    public void Dispose() => Table?.RemoveColumn(this);
+}
