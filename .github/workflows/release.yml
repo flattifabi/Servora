@@ -1,0 +1,103 @@
+# Release: on a version tag (v1.2.3 or v1.3.0-beta.1) build, test and publish a GitHub release with
+#   - ServoraSetup-<version>-win-x64.exe  single-file installer/updater with the application embedded
+#   - Servora-<version>-win-x64.zip       published application for manual installation
+#   - SHA256SUMS.txt                      checksums of both files
+# Release notes come from the matching CHANGELOG.md section (build/Get-ReleaseNotes.ps1).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Determine version from tag
+        id: version
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?)$') {
+            throw "Tag '$($env:TAG)' is not a semantic version tag such as v1.2.3 or v1.3.0-beta.1."
+          }
+          $version = $Matches[1]
+          $prerelease = if ($version.Contains('-')) { 'true' } else { 'false' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $version (prerelease: $prerelease)"
+
+      - name: Build, test and package
+        shell: pwsh
+        run: ./build/publish.ps1 -Version '${{ steps.version.outputs.version }}' -OutputDirectory artifacts
+
+      - name: Release notes
+        shell: pwsh
+        run: ./build/Get-ReleaseNotes.ps1 -Version '${{ steps.version.outputs.version }}' -OutFile artifacts/release-notes.md
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: servora-${{ steps.version.outputs.version }}-win-x64
+          path: |
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/SHA256SUMS.txt
+            artifacts/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          $files = @(
+            "artifacts/ServoraSetup-$($env:VERSION)-win-x64.exe",
+            "artifacts/Servora-$($env:VERSION)-win-x64.zip",
+            'artifacts/SHA256SUMS.txt'
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path $file)) { throw "Missing artifact $file" }
+          }
+
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # Re-run of the workflow: refresh notes and assets of the existing release.
+            gh release edit $env:TAG --title "Servora $($env:VERSION)" --notes-file artifacts/release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'gh release edit failed' }
+            gh release upload $env:TAG @files --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+          }
+          else {
+            $arguments = @('release', 'create', $env:TAG) + $files + @('--title', "Servora $($env:VERSION)", '--notes-file', 'artifacts/release-notes.md', '--verify-tag')
+            if ($env:PRERELEASE -eq 'true') { $arguments += '--prerelease' }
+            gh @arguments
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+          }

@@ -1,10 +1,39 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Installer / updater for the Servora Windows Service (owned by T-12). -->
+  <!--
+    Installer / updater for the Servora Windows Service (owned by T-12). See docs/operations/installation.md.
+
+    Release build (done by build/publish.ps1 and .github/workflows/release.yml):
+      dotnet publish src/Servora.Installer -c Release -r win-x64 -p:PayloadZip=<path to Servora-<version>-win-x64.zip>
+    The payload zip is embedded as the manifest resource "Servora.Payload.zip", which turns ServoraSetup.exe into a
+    single downloadable installer. Without PayloadZip the installer looks for an "app" folder next to the exe or a
+    payload passed with the source option (see docs/operations/installation.md).
+  -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>Servora.Installer</RootNamespace>
     <AssemblyName>ServoraSetup</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Description>Installs, updates and removes the Servora Windows Service.</Description>
   </PropertyGroup>
+
+  <!-- Single-file, self-contained publish (only when a runtime identifier is given, so the unit test project can
+       keep referencing this project as a normal framework-dependent assembly). -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Trimming is warning-free (framework libraries only, no reflection); saves about 25 MB per download. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(PayloadZip)' != ''">
+    <EmbeddedResource Include="$(PayloadZip)" LogicalName="Servora.Payload.zip" WithCulture="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.ServiceProcess.ServiceController" />
   </ItemGroup>

@@ -1,0 +1,90 @@
+# Continuous integration: build and test every push and pull request on Windows (the production platform).
+# Pushes to main additionally produce the installer artifacts (same script as the release workflow).
+name: CI
+
+on:
+  push:
+    # Branch pushes only; version tags are handled by release.yml.
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+jobs:
+  build-test:
+    name: Build & test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore Servora.slnx
+
+      - name: Build
+        run: dotnet build Servora.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Servora.slnx -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Installer smoke test (non-elevated status)
+        shell: pwsh
+        run: |
+          dotnet src/Servora.Installer/bin/Release/net10.0/ServoraSetup.dll status
+          if ($LASTEXITCODE -ne 0) { throw "ServoraSetup status failed with exit code $LASTEXITCODE" }
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 14
+
+  package:
+    name: Package (installer + zip)
+    needs: build-test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build artifacts
+        shell: pwsh
+        run: ./build/publish.ps1 -SkipTests -OutputDirectory artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: servora-win-x64-${{ github.sha }}
+          path: |
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
