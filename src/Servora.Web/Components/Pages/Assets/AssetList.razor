@@ -1,0 +1,275 @@
+@page "/assets"
+@* Asset inventory: value / warranty / license KPIs, category and state filters, purchase trend and a server-paged table. *@
+@attribute [RequirePermission(Permissions.Assets.Read)]
+@inject IAssetService AssetService
+@inject IClock Clock
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Assets · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="Asset Management" Subtitle="Hardware, software and licenses – from purchase to disposal." Icon="box">
+    <Actions>
+        <PermissionView Permission="@Permissions.Assets.Write">
+            <a class="btn btn-primary" href="/assets/new"><Icon Name="plus" Size="16" /> New asset</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Active inventory value" Value="@ActiveValueText" Icon="trending-up" Caption="@ActiveValueCaption" OnClick="() => SetFilterAsync(ActiveFilter)" />
+    <StatCard Label="In use" Value="@StateCount(AssetState.InUse)" Icon="user-check" Tone="success" Caption="@($"{StateCount(AssetState.InStock)} in stock · {StateCount(AssetState.InRepair)} in repair")" OnClick="() => SetStateAsync(AssetState.InUse)" />
+    <StatCard Label="Warranties expiring" Value="@(_overview?.WarrantyExpiringSoon.ToString("N0") ?? "–")" Icon="calendar-clock" Tone="warning" Caption="@($"next {AssetDisplay.ExpiringDays} days · {_overview?.WarrantyExpired ?? 0} already expired")" OnClick="() => SetFilterAsync(WarrantyFilter)" />
+    <StatCard Label="License seats in use" Value="@LicenseText" Icon="key" Tone="@(_overview?.OverDeployedLicenses > 0 ? "danger" : "accent")" Caption="@LicenseCaption" OnClick="() => SetCategoryAsync(AssetCategory.License)" />
+</div>
+
+@if (_overview is { Total: > 0 })
+{
+    <div class="grid grid-2 mb-6">
+        <div class="card">
+            <div class="card-header"><h3><Icon Name="pie-chart" Size="16" /> Inventory by state</h3></div>
+            <div class="card-body asset-chart">
+                <DonutChart Slices="StateSlices" CenterLabel="Assets" />
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3><Icon Name="bar-chart" Size="16" /> Purchases · last 12 months</h3></div>
+            <div class="card-body">
+                <BarChart Labels="_overview.PurchasesPerMonth.Select(p => p.Month).ToList()" Series="PurchaseSeries" Height="200" ValueFormat="0" />
+            </div>
+        </div>
+    </div>
+}
+
+<div class="asset-chips mb-4">
+    <button class="asset-chip @(IsAll ? "active" : null)" @onclick="ClearFiltersAsync"><Icon Name="grid" Size="14" /> All <span class="count">@(_overview?.Total ?? 0)</span></button>
+    @foreach (var category in Enum.GetValues<AssetCategory>())
+    {
+        <button class="asset-chip @(_category == category ? "active" : null)" @onclick="() => SetCategoryAsync(category)" @key="category">
+            <Icon Name="@AssetDisplay.CategoryIcon(category)" Size="14" /> @AssetDisplay.Category(category) <span class="count">@(_overview?.ByCategory.GetValueOrDefault(category) ?? 0)</span>
+        </button>
+    }
+    <span class="asset-chip-sep"></span>
+    <button class="asset-chip warn @(_filter == WarrantyFilter ? "active" : null)" @onclick="() => SetFilterAsync(WarrantyFilter)">
+        <Icon Name="calendar-clock" Size="14" /> Warranty attention <span class="count">@((_overview?.WarrantyExpiringSoon ?? 0) + (_overview?.WarrantyExpired ?? 0))</span>
+    </button>
+</div>
+
+<DataTable TItem="AssetSummary" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+           Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search number, name, serial, tag or model…"
+           OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(a => Nav.NavigateTo($"/assets/{a.Id}"))"
+           EmptyIcon="box" EmptyTitle="No assets found" EmptyText="Change the filters or register a new asset.">
+    <Toolbar>
+        <select class="select" style="width:auto;min-width:160px" value="@(_state?.ToString() ?? string.Empty)" @onchange="OnStateChangedAsync">
+            <option value="">Any state</option>
+            @foreach (var state in AssetLifecycle.OrderedStates)
+            {
+                <option value="@state">@AssetLifecycle.Label(state)</option>
+            }
+        </select>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="AssetSummary" Title="Number" SortKey="Number"><Template><span class="cell-link mono">@context.Number</span></Template></DataColumn>
+        <DataColumn TItem="AssetSummary" Title="Asset" SortKey="DisplayName">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <span class="asset-icon cat-@((int)context.Category)"><Icon Name="@AssetDisplay.CategoryIcon(context.Category)" Size="15" /></span>
+                    <div style="min-width:0">
+                        <div class="cell-primary truncate">@context.DisplayName</div>
+                        <div class="cell-sub">@string.Join(" · ", new[] { context.Manufacturer, context.Model }.Where(v => !string.IsNullOrEmpty(v)))</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="AssetSummary" Title="State" SortKey="State"><Template><StatusPill Text="@AssetLifecycle.Label(context.State)" Tone="@AssetDisplay.StateTone(context.State)" /></Template></DataColumn>
+        <DataColumn TItem="AssetSummary" Title="Assigned to">
+            <Template>
+                @if (context.AssignedToName is not null)
+                {
+                    <span class="person"><Avatar Name="@context.AssignedToName" Size="sm" /><span class="person-name">@context.AssignedToName</span></span>
+                }
+                else
+                {
+                    <span class="faint">—</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="AssetSummary" Title="Serial / tag"><Template><div class="mono small">@(context.SerialNumber ?? "—")</div><div class="cell-sub mono">@context.AssetTag</div></Template></DataColumn>
+        <DataColumn TItem="AssetSummary" Title="Location" SortKey="Location"><Template>@(context.Location ?? "—")</Template></DataColumn>
+        <DataColumn TItem="AssetSummary" Title="Cost" Class="num"><Template><span class="mono">@AssetDisplay.Money(context.Cost, context.Currency)</span></Template></DataColumn>
+        <DataColumn TItem="AssetSummary" Title="Warranty / seats" SortKey="WarrantyEnd">
+            <Template>
+                @if (context.Category == AssetCategory.License)
+                {
+                    var utilisation = AssetDisplay.LicenseUtilisation(context.Entitlements, context.Installs);
+                    <div class="seat-meter" title="@($"{context.Installs ?? 0} of {context.Entitlements ?? 0} seats in use")">
+                        <div class="progress @(utilisation > 100 ? "danger" : utilisation >= 90 ? "warning" : "success")"><span style="width:@(Math.Min(100, utilisation ?? 0))%"></span></div>
+                        <span class="small">@(context.Installs ?? 0)/@(context.Entitlements ?? 0)</span>
+                    </div>
+                }
+                else
+                {
+                    var status = AssetDisplay.WarrantyStatus(context.WarrantyEnd, Today);
+                    if (status == "none")
+                    {
+                        <span class="faint">—</span>
+                    }
+                    else
+                    {
+                        <StatusPill Text="@AssetDisplay.WarrantyText(context.WarrantyEnd, Today)" Tone="@AssetDisplay.WarrantyTone(status)" NoDot="true" />
+                    }
+                }
+            </Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private const string ActiveFilter = "active";
+    private const string WarrantyFilter = "warranty";
+    private AssetOverview? _overview;
+    private PagedResult<AssetSummary>? _page;
+    private PageRequest _request = new() { PageSize = 25, SortBy = "Number", SortDescending = true };
+    private AssetCategory? _category;
+    private AssetState? _state;
+    private string? _filter;
+    private bool _loading;
+
+    /// <summary>Gets or sets the quick filter from the URL (<c>warranty</c>, <c>active</c>, <c>license</c>).</summary>
+    [SupplyParameterFromQuery(Name = "filter")] public string? FilterParameter { get; set; }
+
+    private DateOnly Today => DateOnly.FromDateTime(Clock.UtcNow.UtcDateTime);
+
+    private bool IsAll => _category is null && _state is null && _filter == null;
+
+    private KeyValuePair<string, decimal>? TopCurrency => _overview is { ActiveValue.Count: > 0 } o ? o.ActiveValue.MaxBy(v => v.Value) : null;
+
+    private string ActiveValueText => _overview is null ? "–" : TopCurrency is { } top ? AssetDisplay.Money(top.Value, top.Key, compact: true) : "0";
+
+    private string ActiveValueCaption => _overview is null ? "purchase value"
+        : _overview.ActiveValue.Count > 1 ? $"+ {_overview.ActiveValue.Count - 1} other currencies · {_overview.Total:N0} assets"
+        : $"purchase value of {ActiveCount:N0} active assets";
+
+    private int ActiveCount => _overview is null ? 0 : AssetLifecycle.OrderedStates.Where(AssetLifecycle.IsActive).Sum(s => _overview.ByState.GetValueOrDefault(s));
+
+    private string LicenseText => _overview is null ? "–" : $"{_overview.LicenseInstalls:N0} / {_overview.LicenseEntitlements:N0}";
+
+    private string LicenseCaption => _overview is null ? "installs vs. entitlements"
+        : _overview.OverDeployedLicenses > 0 ? $"{_overview.OverDeployedLicenses} license(s) over-deployed" : "all licenses compliant";
+
+    private IReadOnlyList<ChartSlice> StateSlices => AssetLifecycle.OrderedStates
+        .Select(s => new ChartSlice(AssetLifecycle.Label(s), _overview?.ByState.GetValueOrDefault(s) ?? 0, StateColor(s)))
+        .Where(s => s.Value > 0)
+        .ToList();
+
+    private IReadOnlyList<ChartSeries> PurchaseSeries => [new ChartSeries("Purchases", _overview?.PurchasesPerMonth.Select(p => (double)p.Count).ToList() ?? [])];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        switch (FilterParameter)
+        {
+            case WarrantyFilter or ActiveFilter:
+                _filter = FilterParameter;
+                break;
+            case "license":
+                _category = AssetCategory.License;
+                break;
+        }
+
+        var overview = await AssetService.GetOverviewAsync();
+        if (overview.Succeeded)
+        {
+            _overview = overview.Value;
+        }
+
+        await LoadAsync();
+    }
+
+    private static string StateColor(AssetState state) => state switch
+    {
+        AssetState.InStock => "#3b82f6",
+        AssetState.InUse => "#22c55e",
+        AssetState.InRepair => "#f59e0b",
+        AssetState.Retired => "#94a3b8",
+        _ => "#475569",
+    };
+
+    private string StateCount(AssetState state) => _overview?.ByState.GetValueOrDefault(state).ToString("N0") ?? "–";
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await AssetService.ListAsync(new AssetQuery
+        {
+            Category = _category,
+            State = _state,
+            ActiveOnly = _filter == ActiveFilter,
+            WarrantyExpiringOnly = _filter == WarrantyFilter,
+            Page = _request,
+        });
+        _loading = false;
+        if (result.Succeeded)
+        {
+            _page = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Assets could not be loaded", result.Error);
+        }
+    }
+
+    private async Task ReloadFirstPageAsync()
+    {
+        _request = _request with { Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task ClearFiltersAsync()
+    {
+        _category = null;
+        _state = null;
+        _filter = null;
+        await ReloadFirstPageAsync();
+    }
+
+    private async Task SetCategoryAsync(AssetCategory category)
+    {
+        _category = _category == category ? null : category;
+        await ReloadFirstPageAsync();
+    }
+
+    private async Task SetStateAsync(AssetState? state)
+    {
+        _state = state;
+        await ReloadFirstPageAsync();
+    }
+
+    private async Task SetFilterAsync(string filter)
+    {
+        _filter = _filter == filter ? null : filter;
+        await ReloadFirstPageAsync();
+    }
+
+    private Task OnStateChangedAsync(ChangeEventArgs e) =>
+        SetStateAsync(Enum.TryParse<AssetState>(e.Value?.ToString(), out var state) ? state : null);
+
+    private async Task GoToPageAsync(int page)
+    {
+        _request = _request with { Page = page };
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        _request = _request with { SortBy = sort.SortBy, SortDescending = sort.Descending, Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _request = _request with { Search = term, Page = 1 };
+        await LoadAsync();
+    }
+}

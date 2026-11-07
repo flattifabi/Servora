@@ -1,0 +1,34 @@
+@* Icon chooser: a select over a curated subset of the design system icon set with a live preview. *@
+<div class="flex items-center gap-2">
+    <span class="page-icon" style="width:38px;height:38px;border-radius:10px;flex-shrink:0"><Icon Name="@Value" Size="18" /></span>
+    <select class="select" value="@Value" @onchange="ChangedAsync">
+        @foreach (var name in Options.Contains(Value) ? Options : Options.Prepend(Value))
+        {
+            <option value="@name">@name</option>
+        }
+    </select>
+</div>
+
+@code {
+    private static readonly string[] s_defaults =
+    [
+        "book-open", "file-text", "folder", "rocket", "key", "lock", "shield", "mail", "message-square", "globe", "network", "laptop",
+        "monitor", "server", "database", "cloud", "cpu", "hard-drive", "grid", "layers", "box", "package", "users", "user-plus",
+        "building", "wrench", "settings", "life-buoy", "lightbulb", "target", "zap", "phone", "calendar", "shopping-cart", "heart-pulse",
+    ];
+
+    /// <summary>Gets or sets the selected icon name.</summary>
+    [Parameter] public string Value { get; set; } = "box";
+
+    /// <summary>Raised when the icon changes.</summary>
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets the selectable icon names (defaults to a curated list).</summary>
+    [Parameter] public IReadOnlyList<string> Options { get; set; } = s_defaults;
+
+    private async Task ChangedAsync(ChangeEventArgs e)
+    {
+        Value = e.Value?.ToString() ?? "box";
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

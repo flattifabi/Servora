@@ -1,0 +1,328 @@
+@page "/knowledge/new"
+@page "/knowledge/edit/{Id:guid}"
+@* Knowledge article editor: metadata form plus Markdown editor with formatting toolbar and live, XSS-safe preview. *@
+@attribute [RequirePermission(Permissions.Knowledge.Write)]
+@implements IAsyncDisposable
+@inject IKnowledgeService Knowledge
+@inject NavigationManager Nav
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>@(IsNew ? "New article" : $"Edit {_number}") · Knowledge · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="@(IsNew ? "New knowledge article" : $"Edit {_number}")" Subtitle="Write in Markdown – the preview shows exactly what readers will see." Icon="edit">
+    <Breadcrumbs>
+        <a href="/knowledge">Knowledge</a> <Icon Name="chevron-right" Size="12" />
+        @if (IsNew)
+        {
+            <span>New article</span>
+        }
+        else
+        {
+            <a href="/knowledge/@Id">@_number</a> <Icon Name="chevron-right" Size="12" /> <span>Edit</span>
+        }
+    </Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="@(IsNew ? "/knowledge" : $"/knowledge/{Id}")">Cancel</a>
+        <button class="btn btn-secondary" disabled="@(_saving || !_loaded)" @onclick="() => SaveAsync(false)">
+            <Icon Name="save" Size="16" /> Save draft
+        </button>
+        @if (IsNew || _state == KnowledgeArticleState.Draft)
+        {
+            <button class="btn btn-primary" disabled="@(_saving || !_loaded)" @onclick="() => SaveAsync(true)">
+                @if (_saving)
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="send" Size="16" />
+                }
+                Save &amp; submit for review
+            </button>
+        }
+    </Actions>
+</PageHeader>
+
+@if (!_loaded)
+{
+    <div class="card card-body"><Skeleton Lines="10" /></div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger mb-4"><Icon Name="alert-circle" Size="16" /> <div>@_error</div></div>
+    }
+
+    <div class="card mb-6">
+        <div class="card-header"><h3><Icon Name="sliders" Size="16" /> Details</h3>
+            @if (!IsNew)
+            {
+                <StatusPill Text="@KnowledgeWorkflow.Label(_state)" />
+            }
+        </div>
+        <div class="card-body">
+            <div class="form-grid cols-3">
+                <FormField Label="Title" Required="true" Class="span-all" Error="@(_showErrors && string.IsNullOrWhiteSpace(_input.Title) ? "The title is required." : null)">
+                    <input class="input kb-title-input" @bind="_input.Title" @bind:event="oninput" maxlength="250" placeholder="e.g. How to reset your password" />
+                </FormField>
+                <FormField Label="Summary" Class="span-all" Help="Shown in search results and as the article lead.">
+                    <textarea class="textarea" rows="2" @bind="_input.Summary" @bind:event="oninput" maxlength="1000" placeholder="One or two sentences that answer the question."></textarea>
+                </FormField>
+                <FormField Label="Knowledge base" Required="true">
+                    <select class="select" value="@_input.KnowledgeBaseId" @onchange="OnBaseChanged">
+                        @foreach (var knowledgeBase in _bases)
+                        {
+                            <option value="@knowledgeBase.Id">@knowledgeBase.Name</option>
+                        }
+                    </select>
+                </FormField>
+                <FormField Label="Category">
+                    <select class="select" value="@(_input.CategoryId?.ToString() ?? string.Empty)" @onchange="OnCategoryChanged">
+                        <option value="">— None —</option>
+                        @foreach (var category in _categories.Where(c => c.KnowledgeBaseId == _input.KnowledgeBaseId))
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </select>
+                </FormField>
+                <FormField Label="Valid to" Help="Hidden from readers after this date.">
+                    <input class="input" type="date" @bind="_input.ValidTo" />
+                </FormField>
+                <FormField Label="Keywords" Class="span-2" Help="Comma separated – boosts search ranking.">
+                    <input class="input" @bind="_input.Keywords" maxlength="500" placeholder="password, reset, locked" />
+                </FormField>
+                @if (!IsNew)
+                {
+                    <FormField Label="Change note" Help="Stored with the new version.">
+                        <input class="input" @bind="_input.ChangeNote" maxlength="500" placeholder="What changed?" />
+                    </FormField>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="card kb-editor-card">
+        <div class="kb-editor-toolbar">
+            <div class="btn-group kb-format">
+                <button class="icon-btn" title="Heading" @onclick="@(() => BlockAsync("## Heading"))"><b>H2</b></button>
+                <button class="icon-btn" title="Sub-heading" @onclick="@(() => BlockAsync("### Sub-heading"))"><b>H3</b></button>
+                <button class="icon-btn" title="Bold" @onclick="@(() => WrapAsync("**", "**", "bold text"))"><b>B</b></button>
+                <button class="icon-btn" title="Italic" @onclick="@(() => WrapAsync("*", "*", "italic text"))"><i>I</i></button>
+                <button class="icon-btn" title="Strikethrough" @onclick="@(() => WrapAsync("~~", "~~", "text"))"><s>S</s></button>
+                <button class="icon-btn" title="Inline code" @onclick="@(() => WrapAsync("`", "`", "code"))"><Icon Name="code" Size="16" /></button>
+                <span class="divider-v"></span>
+                <button class="icon-btn" title="Bulleted list" @onclick="@(() => BlockAsync("- First item\n- Second item"))"><Icon Name="list" Size="16" /></button>
+                <button class="icon-btn" title="Numbered list" @onclick="@(() => BlockAsync("1. First step\n2. Second step"))"><Icon Name="clipboard-list" Size="16" /></button>
+                <button class="icon-btn" title="Quote / tip" @onclick="@(() => BlockAsync("> **Tip:** "))"><Icon Name="message-square" Size="16" /></button>
+                <button class="icon-btn" title="Code block" @onclick="@(() => BlockAsync("```powershell\nGet-Service\n```"))"><Icon Name="terminal" Size="16" /></button>
+                <button class="icon-btn" title="Table" @onclick="@(() => BlockAsync("| Column | Column |\n|---|---|\n| Value | Value |"))"><Icon Name="table" Size="16" /></button>
+                <button class="icon-btn" title="Link" @onclick="@(() => WrapAsync("[", "](https://)", "link text"))"><Icon Name="link" Size="16" /></button>
+                <button class="icon-btn" title="Divider" @onclick="@(() => BlockAsync("---"))"><Icon Name="minus" Size="16" /></button>
+            </div>
+            <div class="spacer"></div>
+            <span class="tiny faint">@_input.Body.Length.ToString("N0") / 100,000</span>
+            <div class="segmented">
+                <button class="@(_view == "write" ? "active" : null)" @onclick="@(() => _view = "write")">Write</button>
+                <button class="@(_view == "split" ? "active" : null)" @onclick="@(() => _view = "split")">Split</button>
+                <button class="@(_view == "preview" ? "active" : null)" @onclick="@(() => _view = "preview")">Preview</button>
+            </div>
+        </div>
+        <div class="kb-editor view-@_view">
+            <div class="kb-editor-pane">
+                <textarea @ref="_textarea" class="kb-editor-input" spellcheck="true" @bind="_input.Body" @bind:event="oninput" maxlength="100000"
+                          placeholder="Start writing… Use the toolbar or Markdown: ## Heading, **bold**, - list, `code`, [link](https://…)"></textarea>
+            </div>
+            <div class="kb-editor-preview">
+                <div class="kb-preview-label"><Icon Name="eye" Size="13" /> Live preview</div>
+                @if (string.IsNullOrWhiteSpace(_input.Body))
+                {
+                    <div class="small faint">Nothing to preview yet.</div>
+                }
+                else
+                {
+                    <MarkdownView Markdown="@_input.Body" />
+                }
+            </div>
+        </div>
+        <div class="kb-editor-foot">
+            <Icon Name="shield-check" Size="14" /> Raw HTML is never rendered. Links are limited to http, https, mailto and site-relative paths.
+        </div>
+    </div>
+}
+
+@code {
+    private readonly KnowledgeArticleInput _input = new();
+    private IReadOnlyList<KnowledgeBaseDto> _bases = [];
+    private IReadOnlyList<KnowledgeCategoryDto> _categories = [];
+    private KnowledgeArticleState _state = KnowledgeArticleState.Draft;
+    private ElementReference _textarea;
+    private IJSObjectReference? _module;
+    private string _view = "split";
+    private string? _number;
+    private string? _error;
+    private bool _loaded;
+    private bool _saving;
+    private bool _showErrors;
+
+    /// <summary>Gets or sets the article id (edit mode).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool IsNew => Id is null;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var bases = await Knowledge.GetBasesAsync();
+        var categories = await Knowledge.GetCategoriesAsync();
+        _bases = bases.Value ?? [];
+        _categories = categories.Value ?? [];
+
+        if (Id is { } id)
+        {
+            var result = await Knowledge.GetAsync(id);
+            if (!result.Succeeded)
+            {
+                Toasts.Error("The article could not be loaded", result.Error);
+                Nav.NavigateTo("/knowledge");
+                return;
+            }
+
+            var article = result.Value!;
+            if (!article.CanEdit)
+            {
+                Toasts.Warning("This article cannot be edited", "Published and retired articles need a new revision first.");
+                Nav.NavigateTo($"/knowledge/{id}");
+                return;
+            }
+
+            _number = article.Number;
+            _state = article.State;
+            _input.Title = article.Title;
+            _input.Summary = article.Summary;
+            _input.Body = article.Body;
+            _input.KnowledgeBaseId = article.KnowledgeBaseId;
+            _input.CategoryId = article.CategoryId;
+            _input.ValidTo = article.ValidTo;
+            _input.Keywords = article.Keywords;
+            _input.Version = article.Version;
+        }
+        else
+        {
+            _input.KnowledgeBaseId = _bases.FirstOrDefault()?.Id ?? Guid.Empty;
+            _input.Body = "## Overview\n\nDescribe the problem or task in one or two sentences.\n\n## Steps\n\n1. First step\n2. Second step\n\n> **Tip:** Add screenshots as attachments after saving.\n";
+        }
+
+        _loaded = true;
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_module is null && _loaded)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Knowledge/KnowledgeEditor.razor.js");
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is gone; nothing to clean up.
+            }
+        }
+    }
+
+    private async Task WrapAsync(string before, string after, string placeholder)
+    {
+        if (_module is not null)
+        {
+            await _module.InvokeVoidAsync("wrap", _textarea, before, after, placeholder);
+        }
+    }
+
+    private async Task BlockAsync(string snippet)
+    {
+        if (_module is not null)
+        {
+            await _module.InvokeVoidAsync("insertBlock", _textarea, snippet);
+        }
+    }
+
+    private void OnBaseChanged(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var baseId))
+        {
+            _input.KnowledgeBaseId = baseId;
+            _input.CategoryId = null;
+        }
+    }
+
+    private void OnCategoryChanged(ChangeEventArgs e) =>
+        _input.CategoryId = Guid.TryParse(e.Value?.ToString(), out var categoryId) ? categoryId : null;
+
+    private async Task SaveAsync(bool submit)
+    {
+        _showErrors = true;
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_input.Title))
+        {
+            _error = "Please enter a title.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            Guid id;
+            if (Id is { } existing)
+            {
+                var result = await Knowledge.UpdateAsync(existing, _input);
+                if (!result.Succeeded)
+                {
+                    _error = result.Error;
+                    return;
+                }
+
+                id = existing;
+            }
+            else
+            {
+                var result = await Knowledge.CreateAsync(_input);
+                if (!result.Succeeded)
+                {
+                    _error = result.Error;
+                    return;
+                }
+
+                id = result.Value;
+            }
+
+            if (submit)
+            {
+                var transition = await Knowledge.TransitionAsync(id, KnowledgeWorkflowAction.SubmitForReview);
+                Toasts.FromResult(transition, "Saved and submitted for review");
+            }
+            else
+            {
+                Toasts.Success("Draft saved");
+            }
+
+            Nav.NavigateTo($"/knowledge/{id}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

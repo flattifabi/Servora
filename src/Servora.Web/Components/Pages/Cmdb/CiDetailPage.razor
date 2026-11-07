@@ -1,0 +1,516 @@
+@page "/cmdb/new"
+@page "/cmdb/{Id:guid}"
+@* Configuration item record page: attributes form with class-specific fields, key facts, interactive dependency map,
+   relationship editor, related records, activity and attachments. *@
+@attribute [RequirePermission(Permissions.Cmdb.Read)]
+@inject ICmdbService Cmdb
+@inject ICiClassService Classes
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(IsNew ? "New configuration item" : _detail?.Values.Name ?? "Configuration item") · CMDB · Servora</PageTitle>
+<ModuleStyles />
+
+@if (_notFound)
+{
+    <EmptyState Icon="server" Title="Configuration item not found" Text="It may have been deleted.">
+        <a class="btn btn-primary" href="/cmdb"><Icon Name="arrow-left" Size="16" /> Back to the CMDB</a>
+    </EmptyState>
+}
+else if (_input is null)
+{
+    <Skeleton Lines="1" Height="34px" Width="40%" />
+    <div class="grid grid-sidebar mt-6">
+        <div class="card card-body"><Skeleton Lines="10" /></div>
+        <div class="card card-body"><Skeleton Lines="6" /></div>
+    </div>
+}
+else
+{
+    var cls = _classes.FirstOrDefault(c => c.Key == _input.ClassName);
+    <PageHeader Title="@(IsNew ? "New configuration item" : _detail!.Values.Name)">
+        <Breadcrumbs>
+            <a href="/cmdb">CMDB</a> <Icon Name="chevron-right" Size="12" />
+            @if (_detail is not null)
+            {
+                foreach (var label in _detail.ClassPath)
+                {
+                    var key = _classes.FirstOrDefault(c => c.Label == label)?.Key;
+                    <a href="/cmdb?class=@key">@label</a> <Icon Name="chevron-right" Size="12" />
+                }
+                <span>@_detail.Values.Name</span>
+            }
+            else
+            {
+                <span>New</span>
+            }
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (_detail is not null)
+            {
+                <div class="ci-meta">
+                    <CiClassBadge Label="@_detail.ClassLabel" Icon="@_detail.ClassIcon" Color="@_detail.ClassColor" />
+                    <StatusPill Text="@CmdbDisplay.Status(_detail.Values.OperationalStatus)" Tone="@CmdbDisplay.StatusTone(_detail.Values.OperationalStatus)" />
+                    <span class="faint"><Icon Name="arrow-left" Size="13" /> @_detail.UpstreamCount upstream</span>
+                    <span class="faint"><Icon Name="arrow-right" Size="13" /> @_detail.DownstreamCount downstream</span>
+                    <span class="faint">Updated <RelativeTime Value="_detail.UpdatedAt" /> by @_detail.UpdatedBy</span>
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (_canWrite)
+            {
+                <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                    @if (_saving)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="save" Size="16" />
+                    }
+                    @(IsNew ? "Create" : "Save")
+                </button>
+            }
+            @if (!IsNew && _canManage)
+            {
+                <button class="icon-btn" title="Delete" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="18" /></button>
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger mb-4"><Icon Name="alert-circle" Size="16" /> <div>@_error</div></div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="card">
+            <div class="card-body">
+                <div class="form-section">
+                    <div class="form-section-title">General</div>
+                    <div class="form-grid">
+                        <FormField Label="Name" Required="true"><input class="input" @bind="_input.Name" maxlength="255" disabled="@(!_canWrite)" /></FormField>
+                        <FormField Label="Class" Required="true">
+                            <select class="select" value="@_input.ClassName" @onchange="OnClassChangedAsync" disabled="@(!_canWrite)">
+                                @foreach (var c in _classes)
+                                {
+                                    <option value="@c.Key">@(c.ParentKey is null ? c.Label : $"↳ {c.Label}")</option>
+                                }
+                            </select>
+                        </FormField>
+                        <FormField Label="Operational status">
+                            <select class="select" value="@_input.OperationalStatus" @onchange="e => _input.OperationalStatus = Enum.Parse<OperationalStatus>(e.Value!.ToString()!)" disabled="@(!_canWrite)">
+                                @foreach (var status in Enum.GetValues<OperationalStatus>())
+                                {
+                                    <option value="@status">@CmdbDisplay.Status(status)</option>
+                                }
+                            </select>
+                        </FormField>
+                        <FormField Label="Environment">
+                            <select class="select" @bind="_input.Environment" disabled="@(!_canWrite)">
+                                <option value="">—</option>
+                                @foreach (var environment in s_environments)
+                                {
+                                    <option value="@environment">@environment</option>
+                                }
+                            </select>
+                        </FormField>
+                        <FormField Label="Criticality">
+                            <select class="select" @bind="_input.Criticality" disabled="@(!_canWrite)">
+                                @for (var c = 1; c <= 4; c++)
+                                {
+                                    <option value="@c">@CmdbDisplay.Criticality(c)</option>
+                                }
+                            </select>
+                        </FormField>
+                        <FormField Label="Location"><input class="input" @bind="_input.Location" maxlength="128" disabled="@(!_canWrite)" /></FormField>
+                        <FormField Label="Description" Class="span-all"><textarea class="textarea" rows="3" @bind="_input.Description" maxlength="4000" disabled="@(!_canWrite)"></textarea></FormField>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Ownership</div>
+                    <div class="form-grid">
+                        <FormField Label="Owned by"><UserPicker @bind-Value="_input.OwnedById" Disabled="!_canWrite" /></FormField>
+                        <FormField Label="Support group"><GroupPicker @bind-Value="_input.SupportGroupId" Disabled="!_canWrite" /></FormField>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Technical</div>
+                    <div class="form-grid cols-3">
+                        <FormField Label="IP address"><input class="input mono" @bind="_input.IpAddress" maxlength="64" placeholder="10.0.0.1" disabled="@(!_canWrite)" /></FormField>
+                        <FormField Label="FQDN" Class="span-2"><input class="input mono" @bind="_input.Fqdn" maxlength="255" disabled="@(!_canWrite)" /></FormField>
+                        <FormField Label="Manufacturer"><input class="input" @bind="_input.Manufacturer" maxlength="128" disabled="@(!_canWrite)" /></FormField>
+                        <FormField Label="Model"><input class="input" @bind="_input.Model" maxlength="128" disabled="@(!_canWrite)" /></FormField>
+                        <FormField Label="Serial number"><input class="input mono" @bind="_input.SerialNumber" maxlength="128" disabled="@(!_canWrite)" /></FormField>
+                    </div>
+                </div>
+
+                @if (_attributes.Count > 0)
+                {
+                    <div class="form-section mb-0">
+                        <div class="form-section-title">@(cls?.Label ?? "Class") attributes</div>
+                        <div class="form-grid cols-3">
+                            <CiAttributeFields Definitions="_attributes" Values="_input.Attributes" ReadOnly="!_canWrite" />
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <aside class="stack sticky-top" style="gap:16px">
+            <div class="card ci-hero-card" style="--cls:@CiColor.Sanitize(cls?.Color)">
+                <div class="card-body">
+                    <div class="flex items-center gap-3">
+                        <CiClassBadge Label="@(cls?.Label ?? _input.ClassName)" Icon="@(cls?.Icon ?? "box")" Color="@(cls?.Color ?? CiColor.Fallback)" IconOnly="true" Large="true" />
+                        <div style="min-width:0">
+                            <div class="eyebrow">@(cls?.Label ?? _input.ClassName)</div>
+                            <div class="ci-hero-name truncate">@(string.IsNullOrWhiteSpace(_input.Name) ? "Unnamed CI" : _input.Name)</div>
+                        </div>
+                    </div>
+                    @if (_detail is not null)
+                    {
+                        <div class="ci-counters mt-4">
+                            <div><b>@_detail.UpstreamCount</b><span>Upstream</span></div>
+                            <div><b>@_detail.DownstreamCount</b><span>Downstream</span></div>
+                            <div><b>@(_related?.Records.Count ?? 0)</b><span>Related</span></div>
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="info" Size="16" /> Key facts</h3></div>
+                <div class="card-body">
+                    <dl class="kv">
+                        <dt>Status</dt><dd><StatusPill Text="@CmdbDisplay.Status(_input.OperationalStatus)" Tone="@CmdbDisplay.StatusTone(_input.OperationalStatus)" /></dd>
+                        <dt>Criticality</dt><dd>@CmdbDisplay.Criticality(_input.Criticality)</dd>
+                        <dt>Environment</dt><dd>@(_input.Environment ?? "—")</dd>
+                        @if (_detail is not null)
+                        {
+                            <dt>Owner</dt><dd>@if (_detail.OwnerName is not null) { <span class="person"><Avatar Name="@_detail.OwnerName" Size="sm" /><span class="person-name">@_detail.OwnerName</span></span> } else { <span class="faint">—</span> }</dd>
+                            <dt>Support group</dt><dd>@(_detail.SupportGroupName ?? "—")</dd>
+                            <dt>Source</dt><dd>@(_detail.DiscoverySource ?? "—")</dd>
+                            <dt>Last discovered</dt><dd><RelativeTime Value="_detail.LastDiscoveredAt" /></dd>
+                            <dt>Created</dt><dd><RelativeTime Value="_detail.CreatedAt" /> · @_detail.CreatedBy</dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    @if (!IsNew)
+    {
+        <div class="mt-6">
+            <Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+        </div>
+        <div class="mt-4">
+            @switch (_tab)
+            {
+                case "map":
+                    <CiDependencyGraph @ref="_graph" RootId="Id!.Value" InitialDepth="2" />
+                    break;
+                case "relationships":
+                    <div class="card">
+                        @if (_canWrite)
+                        {
+                            <div class="card-body rel-add">
+                                <span class="rel-self"><Icon Name="@(cls?.Icon ?? "box")" Size="15" /> @_input.Name</span>
+                                <select class="select" style="width:auto" @bind="_newRelationship">
+                                    <optgroup label="Downstream (this CI → target)">
+                                        @foreach (var type in Enum.GetValues<CiRelationshipType>())
+                                        {
+                                            <option value="@($"d:{(int)type}")">@CiRelationshipTypes.Forward(type)</option>
+                                        }
+                                    </optgroup>
+                                    <optgroup label="Upstream (target → this CI)">
+                                        @foreach (var type in Enum.GetValues<CiRelationshipType>())
+                                        {
+                                            <option value="@($"u:{(int)type}")">@CiRelationshipTypes.Reverse(type)</option>
+                                        }
+                                    </optgroup>
+                                </select>
+                                <div style="flex:1;min-width:220px"><CiPicker @bind-Value="_relationshipTarget" Placeholder="Target configuration item…" /></div>
+                                <input class="input" style="max-width:200px" placeholder="Note (optional)" @bind="_relationshipNote" maxlength="500" />
+                                <button class="btn btn-primary" disabled="@(_relationshipTarget is null || _saving)" @onclick="AddRelationshipAsync"><Icon Name="plus" Size="16" /> Add</button>
+                            </div>
+                        }
+                        @if (_relationships is null)
+                        {
+                            <div class="card-body"><Skeleton Lines="4" Height="36px" /></div>
+                        }
+                        else if (_relationships.Count == 0)
+                        {
+                            <EmptyState Icon="network" Title="No relationships" Text="Connect this CI to the services it supports and the infrastructure it runs on." />
+                        }
+                        else
+                        {
+                            <div class="table-wrap">
+                                <table class="table">
+                                    <thead><tr><th style="width:130px">Direction</th><th>Relationship</th><th>Configuration item</th><th>Class</th><th>Note</th><th style="width:60px"></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var rel in _relationships)
+                                        {
+                                            var downstream = rel.ParentId == Id;
+                                            <tr @key="rel.Id">
+                                                <td><span class="pill @(downstream ? "pill-info" : "pill-purple") no-dot"><Icon Name="@(downstream ? "arrow-right" : "arrow-left")" Size="12" /> @(downstream ? "Downstream" : "Upstream")</span></td>
+                                                <td><span class="rel-type" style="--c:@CiColor.ForRelationship(rel.Type)">@(downstream ? CiRelationshipTypes.Forward(rel.Type) : CiRelationshipTypes.Reverse(rel.Type))</span></td>
+                                                <td><a class="cell-link" href="/cmdb/@(downstream ? rel.ChildId : rel.ParentId)">@(downstream ? rel.ChildName : rel.ParentName)</a></td>
+                                                <td class="muted">@(downstream ? rel.ChildClass : rel.ParentClass)</td>
+                                                <td class="muted">@rel.Note</td>
+                                                <td class="text-right">
+                                                    @if (_canWrite)
+                                                    {
+                                                        <button class="icon-btn" title="Remove relationship" @onclick="() => AskRemoveRelationship(rel)"><Icon Name="trash" Size="15" /></button>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                    break;
+                case "related":
+                    <div class="card">
+                        @if (_related is null)
+                        {
+                            <div class="card-body"><Skeleton Lines="4" Height="36px" /></div>
+                        }
+                        else
+                        {
+                            if (_related.UnavailableTables.Count > 0)
+                            {
+                                <div class="card-body pb-0"><div class="alert alert-info"><Icon Name="info" Size="16" /> <div>Not available: @string.Join(", ", _related.UnavailableTables) (module not installed or no access).</div></div></div>
+                            }
+                            if (_related.Records.Count == 0)
+                            {
+                                <EmptyState Icon="link" Title="No related records" Text="Incidents, problems, changes, knowledge articles and assets that reference this CI appear here." />
+                            }
+                            else
+                            {
+                                <div class="table-wrap">
+                                    <table class="table">
+                                        <thead><tr><th style="width:180px">Type</th><th style="width:150px">Number</th><th>Title</th><th style="width:140px">State</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var record in _related.Records)
+                                            {
+                                                <tr class="clickable" @onclick="() => Nav.NavigateTo(record.Url)" @key="record.Id">
+                                                    <td><span class="flex items-center gap-2"><Icon Name="@record.Icon" Size="15" /> @record.TableLabel</span></td>
+                                                    <td class="cell-link mono">@record.Number</td>
+                                                    <td class="cell-primary">@record.Title</td>
+                                                    <td>@if (record.State is not null) { <StatusPill Text="@record.State" /> }</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }
+                    </div>
+                    break;
+                case "activity":
+                    <div class="card card-body"><ActivityStream Table="@TableNames.ConfigurationItem" RecordId="Id!.Value" AllowPosting="_canWrite" /></div>
+                    break;
+                default:
+                    <div class="card card-body"><AttachmentList Table="@TableNames.ConfigurationItem" RecordId="Id!.Value" AllowUpload="_canWrite" AllowDelete="_canWrite" /></div>
+                    break;
+            }
+        </div>
+
+        <ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete configuration item?" ConfirmText="Delete"
+                       Message="@($"'{_detail?.Values.Name}' and all of its relationships will be deleted. Consider setting the status to Retired instead.")" OnConfirm="DeleteAsync" />
+        <ConfirmDialog @bind-Open="_confirmRemove" Danger="true" Title="Remove relationship?" ConfirmText="Remove"
+                       Message="@($"The relationship '{_removeText}' will be removed.")" OnConfirm="RemoveRelationshipAsync" />
+    }
+}
+
+@code {
+    private static readonly string[] s_environments = ["Production", "Staging", "Test", "Development"];
+    private IReadOnlyList<CiClassDto> _classes = [];
+    private IReadOnlyList<CiAttributeDefinition> _attributes = [];
+    private CiDetail? _detail;
+    private CiInput? _input;
+    private IReadOnlyList<CiRelationshipDto>? _relationships;
+    private CiRelatedRecords? _related;
+    private CiDependencyGraph? _graph;
+    private CiRelationshipDto? _removeCandidate;
+    private string _tab = "map";
+    private string _newRelationship = "d:1";
+    private Guid? _relationshipTarget;
+    private string? _relationshipNote;
+    private string? _removeText;
+    private string? _error;
+    private bool _notFound;
+    private bool _canWrite;
+    private bool _canManage;
+    private bool _saving;
+    private bool _confirmDelete;
+    private bool _confirmRemove;
+    private Guid? _loadedId = Guid.Empty;
+
+    /// <summary>Gets or sets the CI id (absent for a new CI).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    /// <summary>Gets or sets the class of a new CI from the URL.</summary>
+    [SupplyParameterFromQuery(Name = "class")] public string? ClassParameter { get; set; }
+
+    private bool IsNew => Id is null;
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("map", "Dependency map", "network"),
+        new("relationships", "Relationships", "git-branch", _relationships?.Count),
+        new("related", "Related records", "link", _related?.Records.Count),
+        new("activity", "Activity", "activity"),
+        new("attachments", "Attachments", "paperclip"),
+    ];
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id)
+        {
+            return;
+        }
+
+        _loadedId = Id;
+        _canWrite = await CurrentUser.HasPermissionAsync(Permissions.Cmdb.Write);
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Cmdb.Manage);
+        _classes = (await Classes.ListAsync()).Value ?? [];
+        _input = null;
+        _detail = null;
+        _relationships = null;
+        _related = null;
+        _error = null;
+        _tab = "map";
+
+        if (Id is { } id)
+        {
+            await LoadAsync(id);
+        }
+        else
+        {
+            _input = new CiInput { ClassName = _classes.Any(c => c.Key == ClassParameter) ? ClassParameter! : _classes.FirstOrDefault(c => c.Key == "server")?.Key ?? _classes.FirstOrDefault()?.Key ?? "server", Environment = "Production" };
+            await LoadAttributesAsync();
+        }
+    }
+
+    private async Task LoadAsync(Guid id)
+    {
+        var result = await Cmdb.GetAsync(id);
+        if (!result.Succeeded)
+        {
+            _notFound = true;
+            return;
+        }
+
+        _notFound = false;
+        _detail = result.Value!;
+        _input = _detail.Values;
+        _attributes = _detail.AttributeDefinitions;
+        _relationships = (await Cmdb.GetRelationshipsAsync(id)).Value ?? [];
+        _related = (await Cmdb.GetRelatedRecordsAsync(id)).Value;
+    }
+
+    private async Task LoadAttributesAsync()
+    {
+        _attributes = (await Classes.GetEffectiveAttributesAsync(_input!.ClassName)).Value ?? [];
+    }
+
+    private async Task OnClassChangedAsync(ChangeEventArgs e)
+    {
+        _input!.ClassName = e.Value?.ToString() ?? _input.ClassName;
+        await LoadAttributesAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            if (Id is { } id)
+            {
+                var result = await Cmdb.UpdateAsync(id, _input!);
+                if (!result.Succeeded)
+                {
+                    _error = result.Error;
+                    return;
+                }
+
+                Toasts.Success("Configuration item saved");
+                await LoadAsync(id);
+            }
+            else
+            {
+                var result = await Cmdb.CreateAsync(_input!);
+                if (!result.Succeeded)
+                {
+                    _error = result.Error;
+                    return;
+                }
+
+                Toasts.Success("Configuration item created");
+                Nav.NavigateTo($"/cmdb/{result.Value}");
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Toasts.FromResult(await Cmdb.DeleteAsync(Id!.Value), "Configuration item deleted"))
+        {
+            Nav.NavigateTo("/cmdb");
+        }
+    }
+
+    private async Task AddRelationshipAsync()
+    {
+        if (_relationshipTarget is not { } target || Id is not { } id)
+        {
+            return;
+        }
+
+        var parts = _newRelationship.Split(':');
+        var type = (CiRelationshipType)int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+        var input = parts[0] == "d" ? new CiRelationshipInput(id, target, type, _relationshipNote) : new CiRelationshipInput(target, id, type, _relationshipNote);
+        _saving = true;
+        var result = await Cmdb.AddRelationshipAsync(input);
+        _saving = false;
+        if (Toasts.FromResult(result, "Relationship added"))
+        {
+            _relationshipTarget = null;
+            _relationshipNote = null;
+            await LoadAsync(id);
+        }
+    }
+
+    private void AskRemoveRelationship(CiRelationshipDto relationship)
+    {
+        _removeCandidate = relationship;
+        _removeText = $"{relationship.ParentName} {CiRelationshipTypes.Forward(relationship.Type).ToLowerInvariant()} {relationship.ChildName}";
+        _confirmRemove = true;
+    }
+
+    private async Task RemoveRelationshipAsync()
+    {
+        if (_removeCandidate is null)
+        {
+            return;
+        }
+
+        if (Toasts.FromResult(await Cmdb.RemoveRelationshipAsync(_removeCandidate.Id), "Relationship removed"))
+        {
+            await LoadAsync(Id!.Value);
+        }
+    }
+}

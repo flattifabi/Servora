@@ -1,0 +1,183 @@
+@page "/knowledge/articles"
+@* Article list for authors and reviewers (readers see published articles only): state filters, KPIs, search, sort, paging. *@
+@attribute [RequirePermission(Permissions.Knowledge.Read)]
+@inject IKnowledgeService Knowledge
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Knowledge articles · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="Knowledge articles" Subtitle="Author, review and curate the knowledge base." Icon="file-text">
+    <Breadcrumbs><a href="/knowledge">Knowledge</a> <Icon Name="chevron-right" Size="12" /> <span>Articles</span></Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="/knowledge"><Icon Name="search" Size="16" /> Search knowledge</a>
+        <PermissionView Permission="@Permissions.Knowledge.Write">
+            <a class="btn btn-primary" href="/knowledge/new"><Icon Name="plus" Size="16" /> New article</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+@if (_isAuthor)
+{
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Published" Value="@Count(KnowledgeArticleState.Published)" Icon="check-circle" Tone="success" Caption="visible to readers" OnClick="() => SetStateAsync(KnowledgeArticleState.Published)" />
+        <StatCard Label="In review" Value="@Count(KnowledgeArticleState.Review)" Icon="clipboard-list" Tone="warning" Caption="waiting for a reviewer" OnClick="() => SetStateAsync(KnowledgeArticleState.Review)" />
+        <StatCard Label="Drafts" Value="@Count(KnowledgeArticleState.Draft)" Icon="edit" Tone="info" Caption="being written" OnClick="() => SetStateAsync(KnowledgeArticleState.Draft)" />
+        <StatCard Label="Retired" Value="@Count(KnowledgeArticleState.Retired)" Icon="x-circle" Tone="accent" Caption="archived" OnClick="() => SetStateAsync(KnowledgeArticleState.Retired)" />
+    </div>
+}
+
+<DataTable TItem="KnowledgeArticleSummary" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+           Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search number, title or summary…"
+           OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(a => Nav.NavigateTo($"/knowledge/{a.Id}"))"
+           EmptyIcon="book-open" EmptyTitle="No articles found" EmptyText="Adjust the filters or write the first article.">
+    <Toolbar>
+        @if (_isAuthor)
+        {
+            <div class="segmented">
+                <button class="@(_state is null && !_mine ? "active" : null)" @onclick="() => SetStateAsync(null)">All</button>
+                @foreach (var state in KnowledgeWorkflow.OrderedStates)
+                {
+                    var s = state;
+                    <button class="@(_state == s && !_mine ? "active" : null)" @onclick="() => SetStateAsync(s)">@KnowledgeWorkflow.Label(s)</button>
+                }
+                <button class="@(_mine ? "active" : null)" @onclick="ToggleMineAsync">Mine</button>
+            </div>
+        }
+        <select class="select" style="width:auto;min-width:180px" value="@(_baseId?.ToString() ?? string.Empty)" @onchange="OnBaseChangedAsync">
+            <option value="">All knowledge bases</option>
+            @foreach (var knowledgeBase in _bases)
+            {
+                <option value="@knowledgeBase.Id">@knowledgeBase.Name</option>
+            }
+        </select>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="Number" SortKey="Number" Width="120px"><Template><span class="cell-link mono">@context.Number</span></Template></DataColumn>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="Title" SortKey="Title">
+            <Template>
+                <div class="cell-primary">@context.Title</div>
+                <div class="cell-sub truncate" style="max-width:520px">@context.Summary</div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="State" SortKey="State" Width="120px"><Template><StatusPill Text="@KnowledgeWorkflow.Label(context.State)" /></Template></DataColumn>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="Category">
+            <Template>
+                <div>@(context.CategoryName ?? "—")</div>
+                <div class="cell-sub">@context.KnowledgeBaseName</div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="Author"><Template><span class="person"><Avatar Name="@context.AuthorName" Size="sm" /><span class="person-name">@context.AuthorName</span></span></Template></DataColumn>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="Views" SortKey="ViewCount" Align="right" Width="90px"><Template>@context.ViewCount.ToString("N0")</Template></DataColumn>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="Helpful" SortKey="HelpfulCount" Align="right" Width="100px">
+            <Template>
+                @if (context.HelpfulPercent is { } percent)
+                {
+                    <span class="@(percent >= 80 ? "text-success" : null)">@percent%</span>
+                }
+                else
+                {
+                    <span class="faint">—</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="KnowledgeArticleSummary" Title="Updated" SortKey="UpdatedAt" Width="120px"><Template><RelativeTime Value="context.UpdatedAt" /></Template></DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private readonly Dictionary<KnowledgeArticleState, int> _counts = [];
+    private PagedResult<KnowledgeArticleSummary>? _page;
+    private PageRequest _request = new() { PageSize = 25, SortBy = "UpdatedAt", SortDescending = true };
+    private IReadOnlyList<KnowledgeBaseDto> _bases = [];
+    private KnowledgeArticleState? _state;
+    private Guid? _baseId;
+    private bool _mine;
+    private bool _loading;
+    private bool _isAuthor;
+
+    /// <summary>Gets or sets the initial state filter from the URL.</summary>
+    [SupplyParameterFromQuery(Name = "state")] public string? StateParameter { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _isAuthor = await CurrentUser.HasPermissionAsync(Permissions.Knowledge.Write) || await CurrentUser.HasPermissionAsync(Permissions.Knowledge.Publish);
+        if (Enum.TryParse<KnowledgeArticleState>(StateParameter, true, out var state))
+        {
+            _state = state;
+        }
+
+        _bases = (await Knowledge.GetBasesAsync()).Value ?? [];
+        if (_isAuthor)
+        {
+            foreach (var s in KnowledgeWorkflow.OrderedStates)
+            {
+                var result = await Knowledge.ListAsync(new KnowledgeArticleQuery { State = s, Page = new PageRequest { PageSize = 1 } });
+                _counts[s] = result.Value?.TotalCount ?? 0;
+            }
+        }
+
+        await LoadAsync();
+    }
+
+    private string Count(KnowledgeArticleState state) => _counts.GetValueOrDefault(state).ToString("N0");
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Knowledge.ListAsync(new KnowledgeArticleQuery { State = _state, KnowledgeBaseId = _baseId, MineOnly = _mine, Page = _request });
+        _loading = false;
+        if (result.Succeeded)
+        {
+            _page = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Articles could not be loaded", result.Error);
+        }
+    }
+
+    private async Task SetStateAsync(KnowledgeArticleState? state)
+    {
+        _state = state;
+        _mine = false;
+        _request = _request with { Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task ToggleMineAsync()
+    {
+        _mine = !_mine;
+        _state = null;
+        _request = _request with { Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task OnBaseChangedAsync(ChangeEventArgs e)
+    {
+        _baseId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        _request = _request with { Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _request = _request with { Page = page };
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        _request = _request with { SortBy = sort.SortBy, SortDescending = sort.Descending, Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _request = _request with { Search = term, Page = 1 };
+        await LoadAsync();
+    }
+}

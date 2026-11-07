@@ -1,0 +1,27 @@
+@* Compact CI class badge: colored icon chip plus label. *@
+<span class="ci-class-badge" title="@Label">
+    <span class="chip" style="--cls:@SafeColor"><Icon Name="@Icon" Size="@(Large ? 18 : 13)" /></span>
+    @if (!IconOnly)
+    {
+        <span class="label">@Label</span>
+    }
+</span>
+
+@code {
+    /// <summary>Gets or sets the class label.</summary>
+    [Parameter] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the class icon name.</summary>
+    [Parameter] public string Icon { get; set; } = "box";
+
+    /// <summary>Gets or sets the class color (<c>#rrggbb</c>).</summary>
+    [Parameter] public string Color { get; set; } = "#7c6cff";
+
+    /// <summary>Gets or sets a value indicating whether only the icon chip is rendered.</summary>
+    [Parameter] public bool IconOnly { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a large chip is rendered.</summary>
+    [Parameter] public bool Large { get; set; }
+
+    private string SafeColor => CiColor.Sanitize(Color);
+}

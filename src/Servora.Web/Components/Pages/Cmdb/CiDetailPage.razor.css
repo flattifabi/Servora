@@ -1,0 +1,24 @@
+.ci-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 8px; font-size: 12.5px; }
+.ci-meta .faint { display: inline-flex; align-items: center; gap: 5px; }
+
+.ci-hero-card {
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(320px 160px at 100% 0%, color-mix(in srgb, var(--cls) 26%, transparent), transparent 70%),
+        var(--surface);
+}
+
+.ci-hero-name { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+
+.ci-counters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ci-counters > div { display: flex; flex-direction: column; align-items: center; padding: 10px 6px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.ci-counters b { font-family: var(--font-display); font-size: 20px; }
+.ci-counters span { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+
+.rel-add { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.rel-self { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; padding: 0 4px; }
+.rel-type { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+.rel-type::before { content: ""; width: 18px; height: 0; border-top: 2px solid var(--c); }
+
+.pb-0 { padding-bottom: 0; }

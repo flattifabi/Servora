@@ -1,0 +1,435 @@
+@* Interactive SVG dependency graph of a configuration item: layered or radial layout, upstream (impact) and downstream
+   (dependencies) traversal, depth, zoom, fullscreen, hover highlighting and click-to-navigate. *@
+@using System.Globalization
+@inject ICmdbService Cmdb
+@inject NavigationManager Nav
+
+<div class="ci-graph @(_fullscreen ? "fullscreen" : null)">
+    <div class="graph-toolbar">
+        <div class="segmented" title="Layout">
+            <button class="@(_layout == GraphLayoutMode.Layered ? "active" : null)" @onclick="() => SetLayout(GraphLayoutMode.Layered)"><Icon Name="git-branch" Size="14" /> Layered</button>
+            <button class="@(_layout == GraphLayoutMode.Radial ? "active" : null)" @onclick="() => SetLayout(GraphLayoutMode.Radial)"><Icon Name="target" Size="14" /> Radial</button>
+        </div>
+        <div class="segmented" title="Direction">
+            <button class="@(_direction == CiGraphDirection.Both ? "active" : null)" @onclick="() => SetDirectionAsync(CiGraphDirection.Both)">Both</button>
+            <button class="@(_direction == CiGraphDirection.Upstream ? "active" : null)" @onclick="() => SetDirectionAsync(CiGraphDirection.Upstream)" title="CIs that depend on this CI – what is impacted when it fails">
+                <Icon Name="arrow-left" Size="13" /> Impact
+            </button>
+            <button class="@(_direction == CiGraphDirection.Downstream ? "active" : null)" @onclick="() => SetDirectionAsync(CiGraphDirection.Downstream)" title="CIs this CI depends on – where a root cause may be">
+                Dependencies <Icon Name="arrow-right" Size="13" />
+            </button>
+        </div>
+        <div class="segmented" title="Depth">
+            @for (var d = 1; d <= 4; d++)
+            {
+                var depth = d;
+                <button class="@(_depth == depth ? "active" : null)" @onclick="() => SetDepthAsync(depth)">@depth</button>
+            }
+        </div>
+        <span class="graph-stats">
+            @if (_graph is not null)
+            {
+                <span><b>@_graph.Nodes.Count</b> CIs</span>
+                <span class="sep"></span>
+                <span><b>@_graph.Edges.Count</b> relationships</span>
+                @if (_graph.Truncated)
+                {
+                    <span class="pill pill-warning no-dot">Limited to @_graph.Nodes.Count nodes</span>
+                }
+            }
+        </span>
+        <div class="zoom">
+            <button class="icon-btn" title="Zoom out" disabled="@(_zoom is > 0 and <= 0.5)" @onclick="() => Zoom(-1)"><Icon Name="minus" Size="16" /></button>
+            <button class="zoom-label" title="Fit to screen" @onclick="() => _zoom = 0">@(_zoom == 0 ? "Fit" : $"{_zoom * 100:0}%")</button>
+            <button class="icon-btn" title="Zoom in" disabled="@(_zoom >= 2)" @onclick="() => Zoom(1)"><Icon Name="plus" Size="16" /></button>
+            <button class="icon-btn" title="@(_fullscreen ? "Exit full screen" : "Full screen")" @onclick="() => _fullscreen = !_fullscreen"><Icon Name="@(_fullscreen ? "x" : "maximize")" Size="16" /></button>
+        </div>
+    </div>
+
+    <div class="graph-canvas @(_zoom == 0 ? "fit" : "zoomed")" style="@($"height:{(_fullscreen ? "calc(100vh - 150px)" : Height + "px")}")">
+        @if (_loading && _graph is null)
+        {
+            <div class="graph-loading"><span class="spinner lg"></span><span class="small muted">Mapping dependencies…</span></div>
+        }
+        else if (_error is not null)
+        {
+            <EmptyState Icon="alert-triangle" Title="The map could not be loaded" Text="@_error" />
+        }
+        else if (_graph is null || _graph.Nodes.Count <= 1)
+        {
+            <EmptyState Icon="network" Title="No relationships yet" Text="@EmptyText" />
+        }
+        else
+        {
+            var w = F(_layoutResult!.Width);
+            var h = F(_layoutResult.Height);
+            <svg class="graph-svg" viewBox="0 0 @w @h" preserveAspectRatio="xMidYMid meet"
+                 width="@(_zoom == 0 ? "100%" : F(_layoutResult.Width * _zoom))" height="@(_zoom == 0 ? "100%" : F(_layoutResult.Height * _zoom))"
+                 role="img" aria-label="Dependency graph">
+                <defs>
+                    <pattern id="@Id("dots")" width="22" height="22" patternUnits="userSpaceOnUse">
+                        <circle cx="1.5" cy="1.5" r="1.1" class="grid-dot" />
+                    </pattern>
+                    <linearGradient id="@Id("focus")" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#7c6cff" />
+                        <stop offset="55%" stop-color="#a855f7" />
+                        <stop offset="100%" stop-color="#22d3ee" />
+                    </linearGradient>
+                    <filter id="@Id("glow")" x="-40%" y="-40%" width="180%" height="180%">
+                        <feGaussianBlur stdDeviation="8" result="blur" />
+                        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                    </filter>
+                    @foreach (var type in Enum.GetValues<CiRelationshipType>())
+                    {
+                        <marker id="@Id("arrow-" + (int)type)" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M0,0 L10,5 L0,10 z" fill="@CiColor.ForRelationship(type)" />
+                        </marker>
+                    }
+                </defs>
+                <rect width="100%" height="100%" fill="url(#@Id("dots"))" />
+
+                @if (_layout == GraphLayoutMode.Layered)
+                {
+                    @foreach (var column in _columns)
+                    {
+                        <g><text class="column-label @(column.Level == 0 ? "focus" : null)" x="@F(column.X)" y="20" text-anchor="middle">@column.Label</text></g>
+                    }
+                }
+                else
+                {
+                    @foreach (var ring in _rings)
+                    {
+                        <circle class="ring" cx="@F(ring.Cx)" cy="@F(ring.Cy)" r="@F(ring.R)" />
+                    }
+                }
+
+                @foreach (var edge in _graph.Edges)
+                {
+                    if (!_positions.ContainsKey(edge.ParentId) || !_positions.ContainsKey(edge.ChildId))
+                    {
+                        continue;
+                    }
+
+                    var geometry = EdgeGeometry(edge);
+                    var highlighted = _hover is { } hoverId && (edge.ParentId == hoverId || edge.ChildId == hoverId);
+                    <g class="edge t-@((int)edge.Type) @(highlighted ? "hl" : _hover is null ? null : "dim")" @key="edge.Id">
+                        <path class="edge-line" d="@geometry.Path" stroke="@CiColor.ForRelationship(edge.Type)" marker-end="url(#@Id("arrow-" + (int)edge.Type))" />
+                        @if (highlighted)
+                        {
+                            var label = CiRelationshipTypes.Forward(edge.Type);
+                            var lw = (label.Length * 6.4) + 14;
+                            <g>
+                                <rect class="edge-label-bg" x="@F(geometry.Mid.X - (lw / 2))" y="@F(geometry.Mid.Y - 10)" width="@F(lw)" height="20" rx="10" stroke="@CiColor.ForRelationship(edge.Type)" />
+                                <text class="edge-label" x="@F(geometry.Mid.X)" y="@F(geometry.Mid.Y + 4)" text-anchor="middle">@label</text>
+                            </g>
+                        }
+                    </g>
+                }
+
+                @foreach (var node in _graph.Nodes.OrderBy(n => n.Id == _hover ? 1 : 0))
+                {
+                    var p = _positions[node.Id];
+                    var isRoot = node.Id == _graph.RootId;
+                    var related = _hover is null || node.Id == _hover || _neighbours.GetValueOrDefault(_hover.Value)?.Contains(node.Id) == true;
+                    var color = CiColor.Sanitize(node.Color);
+                    var statusColor = CiColor.ForStatus(node.Status);
+                    var css = $"node {(isRoot ? "root" : null)} {(related ? null : "dim")} {(node.Id == _hover ? "hover" : null)} {(node.Status == OperationalStatus.NonOperational ? "down" : null)}";
+                    if (_layout == GraphLayoutMode.Layered)
+                    {
+                        <g class="@css" transform="translate(@F(p.X - (NodeWidth / 2)),@F(p.Y - (NodeHeight / 2)))" @key="node.Id"
+                           @onclick="() => OpenAsync(node)" @onmouseenter="() => _hover = node.Id" @onmouseleave="() => _hover = null">
+                            <title>@node.Name · @node.ClassLabel · @CmdbDisplay.Status(node.Status)</title>
+                            @if (isRoot)
+                            {
+                                <rect class="focus-glow" x="-3" y="-3" width="@(NodeWidth + 6)" height="@(NodeHeight + 6)" rx="17" stroke="url(#@Id("focus"))" filter="url(#@Id("glow"))" />
+                            }
+                            <rect class="node-bg" width="@NodeWidth" height="@NodeHeight" rx="14" />
+                            <rect x="0" y="12" width="3" height="@(NodeHeight - 24)" rx="1.5" fill="@color" />
+                            <rect x="13" y="13" width="32" height="32" rx="9" fill="@color" fill-opacity="0.16" stroke="@color" stroke-opacity="0.35" />
+                            <svg x="19" y="19" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="@color" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">@((MarkupString)IconPaths.Get(node.Icon))</svg>
+                            <text class="node-name" x="56" y="26">@Truncate(node.Name, 21)</text>
+                            <text class="node-class" x="56" y="43">@Truncate(node.ClassLabel, 18)@(isRoot ? " · focus" : null)</text>
+                            @if (node.Status == OperationalStatus.NonOperational)
+                            {
+                                <circle class="pulse" cx="@(NodeWidth - 15)" cy="15" r="4" fill="@statusColor" />
+                            }
+                            <circle cx="@(NodeWidth - 15)" cy="15" r="4" fill="@statusColor" />
+                        </g>
+                    }
+                    else
+                    {
+                        var r = isRoot ? 32 : RadialRadius;
+                        <g class="@css" transform="translate(@F(p.X),@F(p.Y))" @key="node.Id"
+                           @onclick="() => OpenAsync(node)" @onmouseenter="() => _hover = node.Id" @onmouseleave="() => _hover = null">
+                            <title>@node.Name · @node.ClassLabel · @CmdbDisplay.Status(node.Status)</title>
+                            @if (isRoot)
+                            {
+                                <circle class="focus-glow" r="@(r + 5)" stroke="url(#@Id("focus"))" filter="url(#@Id("glow"))" />
+                            }
+                            <circle class="node-bg" r="@r" />
+                            <circle r="@(r - 5)" fill="@color" fill-opacity="0.15" stroke="@color" stroke-opacity="0.55" stroke-width="1.5" />
+                            <svg x="@(-(r * 0.42))" y="@(-(r * 0.42))" width="@F(r * 0.84)" height="@F(r * 0.84)" viewBox="0 0 24 24" fill="none" stroke="@color" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">@((MarkupString)IconPaths.Get(node.Icon))</svg>
+                            @if (node.Status == OperationalStatus.NonOperational)
+                            {
+                                <circle class="pulse" cx="@F(r * 0.7)" cy="@F(-r * 0.7)" r="4.5" fill="@statusColor" />
+                            }
+                            <circle cx="@F(r * 0.7)" cy="@F(-r * 0.7)" r="4.5" fill="@statusColor" class="status-dot" />
+                            <text class="node-name radial" y="@(r + 17)" text-anchor="middle">@Truncate(node.Name, 22)</text>
+                            <text class="node-class" y="@(r + 31)" text-anchor="middle">@node.ClassLabel</text>
+                        </g>
+                    }
+                }
+            </svg>
+
+            @if (HoveredNode is { } hovered)
+            {
+                <div class="hover-card">
+                    <div class="flex items-center gap-2">
+                        <CiClassBadge Label="@hovered.ClassLabel" Icon="@hovered.Icon" Color="@hovered.Color" IconOnly="true" />
+                        <b class="truncate">@hovered.Name</b>
+                    </div>
+                    <div class="tiny muted mt-1">@hovered.ClassLabel · <span style="color:@CiColor.ForStatus(hovered.Status)">@CmdbDisplay.Status(hovered.Status)</span></div>
+                    <div class="tiny faint mt-1">@LevelText(hovered.Level)</div>
+                    @if (hovered.Id != _graph.RootId || NavigateOnRootClick)
+                    {
+                        <div class="tiny mt-2" style="color:var(--primary)">Click to open</div>
+                    }
+                </div>
+            }
+        }
+    </div>
+
+    <div class="graph-legend">
+        @foreach (var type in Enum.GetValues<CiRelationshipType>())
+        {
+            <span class="legend-item"><span class="line t-@((int)type)" style="--c:@CiColor.ForRelationship(type)"></span>@CiRelationshipTypes.Forward(type)</span>
+        }
+        <span class="legend-sep"></span>
+        @foreach (var status in new[] { OperationalStatus.Operational, OperationalStatus.Maintenance, OperationalStatus.NonOperational, OperationalStatus.Planned })
+        {
+            <span class="legend-item"><span class="dot" style="background:@CiColor.ForStatus(status)"></span>@CmdbDisplay.Status(status)</span>
+        }
+    </div>
+</div>
+
+@code {
+    private const double NodeWidth = 210;
+    private const double NodeHeight = 58;
+    private const double RadialRadius = 24;
+    private static readonly double[] s_zoomSteps = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+    private readonly string _uid = Guid.NewGuid().ToString("N")[..8];
+    private CiGraph? _graph;
+    private CiGraphLayoutResult? _layoutResult;
+    private IReadOnlyDictionary<Guid, CiGraphPoint> _positions = new Dictionary<Guid, CiGraphPoint>();
+    private Dictionary<Guid, HashSet<Guid>> _neighbours = [];
+    private List<GraphColumn> _columns = [];
+    private List<GraphRing> _rings = [];
+    private GraphLayoutMode _layout = GraphLayoutMode.Layered;
+    private CiGraphDirection _direction = CiGraphDirection.Both;
+    private int _depth = 2;
+    private double _zoom;
+    private bool _fullscreen;
+    private bool _loading;
+    private string? _error;
+    private Guid? _hover;
+    private Guid _loadedRoot;
+
+    /// <summary>Gets or sets the focus CI.</summary>
+    [Parameter, EditorRequired] public Guid RootId { get; set; }
+
+    /// <summary>Gets or sets the initial depth (1–4).</summary>
+    [Parameter] public int InitialDepth { get; set; } = 2;
+
+    /// <summary>Gets or sets the initial direction.</summary>
+    [Parameter] public CiGraphDirection InitialDirection { get; set; } = CiGraphDirection.Both;
+
+    /// <summary>Gets or sets the canvas height in pixels (outside full screen).</summary>
+    [Parameter] public int Height { get; set; } = 540;
+
+    /// <summary>Gets or sets a value indicating whether clicking the focus node navigates to it as well.</summary>
+    [Parameter] public bool NavigateOnRootClick { get; set; }
+
+    /// <summary>Gets or sets the text of the empty state.</summary>
+    [Parameter] public string EmptyText { get; set; } = "Add relationships to see how this configuration item connects to services and infrastructure.";
+
+    private CiGraphNode? HoveredNode => _hover is { } id ? _graph?.Nodes.FirstOrDefault(n => n.Id == id) : null;
+
+    /// <summary>Reloads the graph (for example after relationships changed).</summary>
+    /// <returns>A task that completes when reloaded.</returns>
+    public async Task ReloadAsync()
+    {
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedRoot != RootId)
+        {
+            if (_loadedRoot == Guid.Empty)
+            {
+                _depth = Math.Clamp(InitialDepth, 1, 4);
+                _direction = InitialDirection;
+            }
+
+            _loadedRoot = RootId;
+            _hover = null;
+            await LoadAsync();
+        }
+    }
+
+    private static string F(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "…";
+
+    private static string LevelText(int level) => level switch
+    {
+        0 => "Focus configuration item",
+        < 0 => $"Upstream · {-level} hop{(level == -1 ? string.Empty : "s")} – depends on the focus CI",
+        _ => $"Downstream · {level} hop{(level == 1 ? string.Empty : "s")} – the focus CI depends on it",
+    };
+
+    private string Id(string name) => $"g{_uid}-{name}";
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        var result = await Cmdb.GetGraphAsync(RootId, _depth, _direction);
+        _loading = false;
+        if (!result.Succeeded)
+        {
+            _graph = null;
+            _error = result.Error;
+            return;
+        }
+
+        _graph = result.Value;
+        _neighbours = _graph!.Nodes.ToDictionary(n => n.Id, _ => new HashSet<Guid>());
+        foreach (var edge in _graph.Edges)
+        {
+            if (_neighbours.TryGetValue(edge.ParentId, out var a) && _neighbours.TryGetValue(edge.ChildId, out var b))
+            {
+                a.Add(edge.ChildId);
+                b.Add(edge.ParentId);
+            }
+        }
+
+        ComputeLayout();
+    }
+
+    private void ComputeLayout()
+    {
+        if (_graph is null)
+        {
+            return;
+        }
+
+        if (_layout == GraphLayoutMode.Layered)
+        {
+            _layoutResult = CiGraphLayout.Layered(_graph, NodeWidth, NodeHeight);
+            _positions = _layoutResult.Positions;
+            _columns = _graph.Nodes.GroupBy(n => n.Level).OrderBy(g => g.Key)
+                .Select(g => new GraphColumn(g.Key, _positions[g.First().Id].X, g.Key switch
+                {
+                    0 => "FOCUS",
+                    < 0 => $"UPSTREAM · {-g.Key}",
+                    _ => $"DOWNSTREAM · {g.Key}",
+                }))
+                .ToList();
+            _rings = [];
+        }
+        else
+        {
+            _layoutResult = CiGraphLayout.Radial(_graph);
+            _positions = _layoutResult.Positions;
+            var center = _positions[_graph.RootId];
+            _rings = _graph.Nodes.Where(n => n.Level != 0).GroupBy(n => Math.Abs(n.Level))
+                .Select(g => g.Max(n => Math.Sqrt(Math.Pow(_positions[n.Id].X - center.X, 2) + Math.Pow(_positions[n.Id].Y - center.Y, 2))))
+                .Distinct()
+                .Select(r => new GraphRing(center.X, center.Y, r))
+                .ToList();
+            _columns = [];
+        }
+    }
+
+    private GraphEdgeGeometry EdgeGeometry(CiGraphEdge edge)
+    {
+        var p = _positions[edge.ParentId];
+        var c = _positions[edge.ChildId];
+        if (_layout == GraphLayoutMode.Radial)
+        {
+            var dx = c.X - p.X;
+            var dy = c.Y - p.Y;
+            var length = Math.Max(1, Math.Sqrt((dx * dx) + (dy * dy)));
+            var ux = dx / length;
+            var uy = dy / length;
+            var parentRadius = (edge.ParentId == _graph!.RootId ? 32 : RadialRadius) + 2;
+            var childRadius = (edge.ChildId == _graph.RootId ? 32 : RadialRadius) + 6;
+            var sx = p.X + (ux * parentRadius);
+            var sy = p.Y + (uy * parentRadius);
+            var ex = c.X - (ux * childRadius);
+            var ey = c.Y - (uy * childRadius);
+            var mx = ((sx + ex) / 2) - (uy * length * 0.08);
+            var my = ((sy + ey) / 2) + (ux * length * 0.08);
+            return new GraphEdgeGeometry($"M{F(sx)},{F(sy)} Q{F(mx)},{F(my)} {F(ex)},{F(ey)}", new CiGraphPoint(((sx + ex) / 2 + mx) / 2, ((sy + ey) / 2 + my) / 2));
+        }
+
+        const double half = NodeWidth / 2;
+        if (Math.Abs(p.X - c.X) < 1)
+        {
+            // Same column: arc on the right side.
+            var x = p.X + half;
+            var bulge = 46 + (Math.Abs(p.Y - c.Y) * 0.15);
+            return new GraphEdgeGeometry($"M{F(x)},{F(p.Y)} C{F(x + bulge)},{F(p.Y)} {F(x + bulge)},{F(c.Y)} {F(x + 4)},{F(c.Y)}", new CiGraphPoint(x + (bulge * 0.75), (p.Y + c.Y) / 2));
+        }
+
+        var forward = p.X < c.X;
+        var startX = forward ? p.X + half : p.X - half;
+        var endX = forward ? c.X - half - 2 : c.X + half + 2;
+        var control = (endX - startX) / 2;
+        return new GraphEdgeGeometry(
+            $"M{F(startX)},{F(p.Y)} C{F(startX + control)},{F(p.Y)} {F(endX - control)},{F(c.Y)} {F(endX)},{F(c.Y)}",
+            new CiGraphPoint((startX + endX) / 2, (p.Y + c.Y) / 2));
+    }
+
+    private void SetLayout(GraphLayoutMode layout)
+    {
+        _layout = layout;
+        _hover = null;
+        ComputeLayout();
+    }
+
+    private async Task SetDirectionAsync(CiGraphDirection direction)
+    {
+        _direction = direction;
+        await LoadAsync();
+    }
+
+    private async Task SetDepthAsync(int depth)
+    {
+        _depth = depth;
+        await LoadAsync();
+    }
+
+    private void Zoom(int step)
+    {
+        var current = _zoom == 0 ? 1 : _zoom;
+        var index = Array.FindIndex(s_zoomSteps, z => Math.Abs(z - current) < 0.01);
+        index = Math.Clamp((index < 0 ? 2 : index) + step, 0, s_zoomSteps.Length - 1);
+        _zoom = s_zoomSteps[index];
+    }
+
+    private Task OpenAsync(CiGraphNode node)
+    {
+        if (node.Id != _graph?.RootId || NavigateOnRootClick)
+        {
+            _fullscreen = false;
+            Nav.NavigateTo($"/cmdb/{node.Id}");
+        }
+
+        return Task.CompletedTask;
+    }
+}

@@ -1,0 +1,15 @@
+@* Renders Markdown through the XSS-safe in-house renderer (SafeMarkdown) with article typography. Never pass unsanitized HTML. *@
+<div class="md-body @Class">@((MarkupString)RenderedHtml)</div>
+
+@code {
+    /// <summary>Gets or sets the Markdown source (rendered with <see cref="SafeMarkdown"/>).</summary>
+    [Parameter] public string? Markdown { get; set; }
+
+    /// <summary>Gets or sets HTML that was already produced by <see cref="SafeMarkdown"/> (takes precedence over <see cref="Markdown"/>).</summary>
+    [Parameter] public string? SafeHtml { get; set; }
+
+    /// <summary>Gets or sets additional CSS classes.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    private string RenderedHtml => SafeHtml ?? SafeMarkdown.ToHtml(Markdown);
+}

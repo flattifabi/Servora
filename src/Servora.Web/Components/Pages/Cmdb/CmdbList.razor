@@ -1,0 +1,173 @@
+@page "/cmdb"
+@* CMDB list: KPIs by status, class filter chips, searchable / sortable configuration item table. *@
+@attribute [RequirePermission(Permissions.Cmdb.Read)]
+@inject ICmdbService Cmdb
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>CMDB · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="Configuration Management" Subtitle="Every service, application and piece of infrastructure – and how they depend on each other." Icon="server">
+    <Actions>
+        <a class="btn btn-secondary" href="/cmdb/map"><Icon Name="network" Size="16" /> Service map</a>
+        <a class="btn btn-secondary" href="/cmdb/classes"><Icon Name="layers" Size="16" /> CI classes</a>
+        <PermissionView Permission="@Permissions.Cmdb.Write">
+            <a class="btn btn-primary" href="/cmdb/new"><Icon Name="plus" Size="16" /> New CI</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Configuration items" Value="@(_overview?.Total.ToString("N0") ?? "–")" Icon="server" Caption="@($"{_overview?.RelationshipCount ?? 0:N0} relationships")" OnClick="() => SetStatusAsync(null)" />
+    <StatCard Label="Operational" Value="@StatusCount(OperationalStatus.Operational)" Icon="check-circle" Tone="success" Caption="@OperationalShare" OnClick="() => SetStatusAsync(OperationalStatus.Operational)" />
+    <StatCard Label="Non-operational" Value="@StatusCount(OperationalStatus.NonOperational)" Icon="alert-octagon" Tone="danger" Caption="outages right now" OnClick="() => SetStatusAsync(OperationalStatus.NonOperational)" />
+    <StatCard Label="In maintenance" Value="@StatusCount(OperationalStatus.Maintenance)" Icon="wrench" Tone="warning" Caption="@($"{_overview?.MissionCritical ?? 0} mission critical CIs")" OnClick="() => SetStatusAsync(OperationalStatus.Maintenance)" />
+</div>
+
+@if (_overview is not null)
+{
+    <div class="cmdb-chips mb-4">
+        <button class="cmdb-chip @(_classKey is null ? "active" : null)" @onclick="() => SetClassAsync(null)">
+            <Icon Name="grid" Size="14" /> All classes <span class="count">@_overview.Total</span>
+        </button>
+        @foreach (var cls in _overview.ByClass.Where(c => c.Count > 0 || _classKey == c.Key))
+        {
+            <button class="cmdb-chip @(_classKey == cls.Key ? "active" : null)" style="--cls:@CiColor.Sanitize(cls.Color)" @onclick="() => SetClassAsync(cls.Key)" @key="cls.Key">
+                <Icon Name="@cls.Icon" Size="14" /> @cls.Label <span class="count">@cls.Count</span>
+            </button>
+        }
+    </div>
+}
+
+<DataTable TItem="CiSummary" Items="_page?.Items" TotalCount="_page?.TotalCount ?? 0" PageNumber="_request.Page" PageSize="_request.PageSize"
+           Loading="_loading" SortBy="@_request.SortBy" SortDescending="_request.SortDescending" SearchPlaceholder="Search name, FQDN, IP or description…"
+           OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync" OnRowClick="@(c => Nav.NavigateTo($"/cmdb/{c.Id}"))"
+           EmptyIcon="server" EmptyTitle="No configuration items found" EmptyText="Change the filters or register a new configuration item.">
+    <Toolbar>
+        <select class="select" style="width:auto;min-width:170px" value="@(_status?.ToString() ?? string.Empty)" @onchange="OnStatusChangedAsync">
+            <option value="">Any status</option>
+            @foreach (var status in Enum.GetValues<OperationalStatus>())
+            {
+                <option value="@status">@CmdbDisplay.Status(status)</option>
+            }
+        </select>
+        <select class="select" style="width:auto;min-width:150px" value="@(_environment ?? string.Empty)" @onchange="OnEnvironmentChangedAsync">
+            <option value="">Any environment</option>
+            @foreach (var environment in s_environments)
+            {
+                <option value="@environment">@environment</option>
+            }
+        </select>
+    </Toolbar>
+    <Columns>
+        <DataColumn TItem="CiSummary" Title="Name" SortKey="Name">
+            <Template>
+                <div class="flex items-center gap-3">
+                    <CiClassBadge Label="@context.ClassLabel" Icon="@context.ClassIcon" Color="@context.ClassColor" IconOnly="true" />
+                    <div style="min-width:0">
+                        <div class="cell-primary">@context.Name</div>
+                        <div class="cell-sub mono">@(context.Fqdn ?? context.IpAddress ?? "")</div>
+                    </div>
+                </div>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="CiSummary" Title="Class" SortKey="ClassName"><Template>@context.ClassLabel</Template></DataColumn>
+        <DataColumn TItem="CiSummary" Title="Status" SortKey="Status"><Template><StatusPill Text="@CmdbDisplay.Status(context.Status)" Tone="@CmdbDisplay.StatusTone(context.Status)" /></Template></DataColumn>
+        <DataColumn TItem="CiSummary" Title="Environment" SortKey="Environment"><Template>@(context.Environment ?? "—")</Template></DataColumn>
+        <DataColumn TItem="CiSummary" Title="IP address"><Template><span class="mono">@(context.IpAddress ?? "—")</span></Template></DataColumn>
+        <DataColumn TItem="CiSummary" Title="Criticality" SortKey="Criticality">
+            <Template><span class="crit crit-@context.Criticality" title="@CmdbDisplay.Criticality(context.Criticality)">@CmdbDisplay.Criticality(context.Criticality)</span></Template>
+        </DataColumn>
+        <DataColumn TItem="CiSummary" Title="Support group"><Template>@(context.SupportGroupName ?? "—")</Template></DataColumn>
+        <DataColumn TItem="CiSummary" Title="Updated" SortKey="UpdatedAt"><Template><RelativeTime Value="context.UpdatedAt" /></Template></DataColumn>
+    </Columns>
+</DataTable>
+
+@code {
+    private static readonly string[] s_environments = ["Production", "Staging", "Test", "Development"];
+    private CmdbOverview? _overview;
+    private PagedResult<CiSummary>? _page;
+    private PageRequest _request = new() { PageSize = 25, SortBy = "Name" };
+    private string? _classKey;
+    private OperationalStatus? _status;
+    private string? _environment;
+    private bool _loading;
+
+    /// <summary>Gets or sets the class filter from the URL.</summary>
+    [SupplyParameterFromQuery(Name = "class")] public string? ClassParameter { get; set; }
+
+    private string OperationalShare => _overview is { Total: > 0 } o ? $"{o.ByStatus.GetValueOrDefault(OperationalStatus.Operational) * 100 / o.Total}% of all CIs" : "of all CIs";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _classKey = string.IsNullOrWhiteSpace(ClassParameter) ? null : ClassParameter;
+        var overview = await Cmdb.GetOverviewAsync();
+        if (overview.Succeeded)
+        {
+            _overview = overview.Value;
+        }
+
+        await LoadAsync();
+    }
+
+    private string StatusCount(OperationalStatus status) => _overview?.ByStatus.GetValueOrDefault(status).ToString("N0") ?? "–";
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Cmdb.ListAsync(new CiQuery { ClassKey = _classKey, Status = _status, Environment = _environment, Page = _request });
+        _loading = false;
+        if (result.Succeeded)
+        {
+            _page = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Configuration items could not be loaded", result.Error);
+        }
+    }
+
+    private async Task SetClassAsync(string? classKey)
+    {
+        _classKey = classKey;
+        _request = _request with { Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task SetStatusAsync(OperationalStatus? status)
+    {
+        _status = status;
+        _request = _request with { Page = 1 };
+        await LoadAsync();
+    }
+
+    private Task OnStatusChangedAsync(ChangeEventArgs e) =>
+        SetStatusAsync(Enum.TryParse<OperationalStatus>(e.Value?.ToString(), out var status) ? status : null);
+
+    private async Task OnEnvironmentChangedAsync(ChangeEventArgs e)
+    {
+        _environment = string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString();
+        _request = _request with { Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _request = _request with { Page = page };
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        _request = _request with { SortBy = sort.SortBy, SortDescending = sort.Descending, Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _request = _request with { Search = term, Page = 1 };
+        await LoadAsync();
+    }
+}

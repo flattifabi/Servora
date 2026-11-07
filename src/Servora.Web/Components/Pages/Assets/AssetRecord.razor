@@ -1,0 +1,469 @@
+@page "/assets/new"
+@page "/assets/{Id:guid}"
+@* Asset record page: lifecycle state flow and transitions, two-column form, financial / warranty / license key facts,
+   linked CI, activity and attachments. *@
+@attribute [RequirePermission(Permissions.Assets.Read)]
+@inject IAssetService AssetService
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>@(IsNew ? "New asset" : _detail?.Number ?? "Asset") · Assets · Servora</PageTitle>
+<ModuleStyles />
+
+@if (_notFound)
+{
+    <EmptyState Icon="box" Title="Asset not found" Text="It may have been deleted.">
+        <a class="btn btn-primary" href="/assets"><Icon Name="arrow-left" Size="16" /> Back to assets</a>
+    </EmptyState>
+}
+else if (_input is null)
+{
+    <Skeleton Lines="1" Height="34px" Width="40%" />
+    <div class="grid grid-sidebar mt-6">
+        <div class="card card-body"><Skeleton Lines="10" /></div>
+        <div class="card card-body"><Skeleton Lines="6" /></div>
+    </div>
+}
+else
+{
+    var readOnly = !_canWrite || _detail?.State == AssetState.Disposed;
+    <PageHeader Title="@(IsNew ? "New asset" : _detail!.Values.DisplayName)">
+        <Breadcrumbs>
+            <a href="/assets">Assets</a> <Icon Name="chevron-right" Size="12" /> <span>@(_detail?.Number ?? "New")</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (_detail is not null)
+            {
+                <div class="asset-meta">
+                    <span class="mono asset-number">@_detail.Number</span>
+                    <StatusPill Text="@AssetLifecycle.Label(_detail.State)" Tone="@AssetDisplay.StateTone(_detail.State)" />
+                    <span class="tag"><Icon Name="@AssetDisplay.CategoryIcon(_detail.Values.Category)" Size="12" /> @AssetDisplay.Category(_detail.Values.Category)</span>
+                    <span class="faint">Updated <RelativeTime Value="_detail.UpdatedAt" /> by @_detail.UpdatedBy</span>
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (_detail is not null && _canWrite)
+            {
+                @foreach (var target in _detail.AllowedTransitions)
+                {
+                    var t = target;
+                    <button class="btn @(t is AssetState.Disposed ? "btn-outline-danger" : t is AssetState.Retired ? "btn-ghost" : "btn-secondary")" disabled="@_saving" @onclick="() => AskTransition(t)">
+                        <Icon Name="@AssetDisplay.TransitionIcon(t)" Size="16" /> @AssetDisplay.TransitionAction(t)
+                    </button>
+                }
+            }
+            @if (!readOnly)
+            {
+                <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                    @if (_saving)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="save" Size="16" />
+                    }
+                    @(IsNew ? "Create" : "Save")
+                </button>
+            }
+            @if (!IsNew && _canManage)
+            {
+                <button class="icon-btn" title="Delete" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="18" /></button>
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (_detail is not null)
+    {
+        <div class="mb-4"><StateFlow States="@(AssetLifecycle.OrderedStates.Select(AssetLifecycle.Label).ToList())" Current="@AssetLifecycle.Label(_detail.State)" /></div>
+    }
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger mb-4"><Icon Name="alert-circle" Size="16" /> <div>@_error</div></div>
+    }
+    @if (_detail?.State == AssetState.Disposed)
+    {
+        <div class="alert alert-info mb-4"><Icon Name="lock" Size="16" /> <div>This asset has been disposed and is read-only.</div></div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="card">
+            <div class="card-body">
+                <div class="form-section">
+                    <div class="form-section-title">General</div>
+                    <div class="form-grid">
+                        <FormField Label="Display name" Required="true" Class="span-all">
+                            <input class="input" @bind="_input.DisplayName" maxlength="250" placeholder="MacBook Pro 14 – Jane Smith" disabled="@readOnly" />
+                        </FormField>
+                        <FormField Label="Category" Required="true">
+                            <div class="segmented asset-category">
+                                @foreach (var category in Enum.GetValues<AssetCategory>())
+                                {
+                                    var c = category;
+                                    <button type="button" class="@(_input.Category == c ? "active" : null)" disabled="@readOnly" @onclick="() => _input.Category = c">
+                                        <Icon Name="@AssetDisplay.CategoryIcon(c)" Size="14" /> @AssetDisplay.Category(c)
+                                    </button>
+                                }
+                            </div>
+                        </FormField>
+                        @if (IsNew)
+                        {
+                            <FormField Label="Initial state">
+                                <select class="select" @bind="_input.State">
+                                    <option value="@AssetState.InStock">@AssetLifecycle.Label(AssetState.InStock)</option>
+                                    <option value="@AssetState.InUse">@AssetLifecycle.Label(AssetState.InUse)</option>
+                                </select>
+                            </FormField>
+                        }
+                        else
+                        {
+                            <FormField Label="State" Help="Use the lifecycle actions in the header to change the state.">
+                                <div class="readonly-value"><StatusPill Text="@AssetLifecycle.Label(_detail!.State)" Tone="@AssetDisplay.StateTone(_detail.State)" /></div>
+                            </FormField>
+                        }
+                        <FormField Label="Manufacturer / publisher"><input class="input" @bind="_input.Manufacturer" maxlength="128" disabled="@readOnly" /></FormField>
+                        <FormField Label="Model / product"><input class="input" @bind="_input.Model" maxlength="150" disabled="@readOnly" /></FormField>
+                        <FormField Label="Serial number"><input class="input mono" @bind="_input.SerialNumber" maxlength="128" disabled="@readOnly" /></FormField>
+                        <FormField Label="Asset tag" Help="Must be unique."><input class="input mono" @bind="_input.AssetTag" maxlength="64" disabled="@readOnly" /></FormField>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Assignment</div>
+                    <div class="form-grid">
+                        <FormField Label="Assigned to" Help="@(_input.Category == AssetCategory.Hardware ? "Required before hardware can be put in use." : null)">
+                            <UserPicker @bind-Value="_input.AssignedToId" Disabled="readOnly" />
+                        </FormField>
+                        <FormField Label="Location"><input class="input" @bind="_input.Location" maxlength="128" placeholder="Vienna HQ · Floor 3" disabled="@readOnly" /></FormField>
+                        <FormField Label="Configuration item" Class="span-all" Help="The CMDB representation of this asset (for example the server or application).">
+                            <CiPicker @bind-Value="_input.ConfigurationItemId" Disabled="readOnly" />
+                        </FormField>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Financial</div>
+                    <div class="form-grid cols-3">
+                        <FormField Label="Cost"><input class="input mono" type="number" min="0" step="0.01" @bind="_input.Cost" disabled="@readOnly" /></FormField>
+                        <FormField Label="Currency"><input class="input mono" @bind="_input.Currency" maxlength="3" placeholder="EUR" disabled="@readOnly" /></FormField>
+                        <FormField Label="Vendor"><input class="input" @bind="_input.Vendor" maxlength="128" disabled="@readOnly" /></FormField>
+                        <FormField Label="Purchase date"><input class="input" type="date" @bind="_input.PurchaseDate" disabled="@readOnly" /></FormField>
+                        <FormField Label="@(_input.Category == AssetCategory.License ? "License expiry" : "Warranty end")"><input class="input" type="date" @bind="_input.WarrantyEnd" disabled="@readOnly" /></FormField>
+                    </div>
+                </div>
+
+                @if (_input.Category == AssetCategory.License)
+                {
+                    <div class="form-section">
+                        <div class="form-section-title">License compliance</div>
+                        <div class="form-grid cols-3">
+                            <FormField Label="Entitlements" Help="Purchased seats."><input class="input mono" type="number" min="0" @bind="_input.Entitlements" disabled="@readOnly" /></FormField>
+                            <FormField Label="Installations" Help="Seats in use."><input class="input mono" type="number" min="0" @bind="_input.Installs" disabled="@readOnly" /></FormField>
+                            <FormField Label="Compliance">
+                                <div class="readonly-value">
+                                    @if (Utilisation is { } u)
+                                    {
+                                        <StatusPill Text="@(u > 100 ? $"Over-deployed ({u}%)" : $"Compliant ({u}%)")" Tone="@(u > 100 ? "danger" : u >= 90 ? "warning" : "success")" />
+                                    }
+                                    else
+                                    {
+                                        <span class="faint">—</span>
+                                    }
+                                </div>
+                            </FormField>
+                        </div>
+                    </div>
+                }
+
+                <div class="form-section mb-0">
+                    <div class="form-section-title">Notes</div>
+                    <textarea class="textarea" rows="3" @bind="_input.Notes" maxlength="4000" disabled="@readOnly"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <aside class="stack sticky-top" style="gap:16px">
+            <div class="card asset-hero cat-@((int)_input.Category)">
+                <div class="card-body">
+                    <div class="flex items-center gap-3">
+                        <span class="asset-hero-icon"><Icon Name="@AssetDisplay.CategoryIcon(_input.Category)" Size="22" /></span>
+                        <div style="min-width:0">
+                            <div class="eyebrow">@AssetDisplay.Category(_input.Category)</div>
+                            <div class="asset-hero-name truncate">@(string.IsNullOrWhiteSpace(_input.DisplayName) ? "Unnamed asset" : _input.DisplayName)</div>
+                        </div>
+                    </div>
+                    <div class="asset-value mt-4">
+                        <span class="faint small">Purchase value</span>
+                        <b>@AssetDisplay.Money(_input.Cost, _input.Currency)</b>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="shield-check" Size="16" /> @(_input.Category == AssetCategory.License ? "License" : "Warranty")</h3></div>
+                <div class="card-body">
+                    @{ var warranty = AssetDisplay.WarrantyStatus(_input.WarrantyEnd, Today); }
+                    <StatusPill Text="@AssetDisplay.WarrantyText(_input.WarrantyEnd, Today)" Tone="@AssetDisplay.WarrantyTone(warranty)" />
+                    @if (WarrantyProgress is { } progress)
+                    {
+                        <div class="progress @(warranty == "expired" ? "danger" : warranty == "expiring" ? "warning" : "success") mt-3"><span style="width:@progress%"></span></div>
+                        <div class="flex justify-between tiny faint mt-2">
+                            <span>@_input.PurchaseDate?.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</span>
+                            <span>@_input.WarrantyEnd?.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</span>
+                        </div>
+                    }
+                    @if (_input.Category == AssetCategory.License)
+                    {
+                        <div class="seat-block mt-4">
+                            <div class="flex justify-between small"><span class="muted">Seats in use</span><b>@(_input.Installs ?? 0) / @(_input.Entitlements ?? 0)</b></div>
+                            <div class="progress @(Utilisation > 100 ? "danger" : Utilisation >= 90 ? "warning" : "success") mt-2"><span style="width:@Math.Min(100, Utilisation ?? 0)%"></span></div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="info" Size="16" /> Key facts</h3></div>
+                <div class="card-body">
+                    <dl class="kv">
+                        <dt>Assigned to</dt>
+                        <dd>
+                            @if (_detail?.AssignedToName is { } assignee)
+                            {
+                                <span class="person"><Avatar Name="@assignee" Size="sm" /><span class="person-name">@assignee</span></span>
+                            }
+                            else
+                            {
+                                <span class="faint">—</span>
+                            }
+                        </dd>
+                        <dt>Location</dt><dd>@(_input.Location ?? "—")</dd>
+                        <dt>CI</dt>
+                        <dd>
+                            @if (_detail?.Values.ConfigurationItemId is { } ciId)
+                            {
+                                <a class="cell-link" href="/cmdb/@ciId"><Icon Name="server" Size="13" /> @(_detail.ConfigurationItemName ?? "Configuration item")</a>
+                            }
+                            else
+                            {
+                                <span class="faint">—</span>
+                            }
+                        </dd>
+                        @if (_detail is not null)
+                        {
+                            @if (_detail.RetiredAt is { } retired)
+                            {
+                                <dt>Retired</dt><dd><RelativeTime Value="retired" /></dd>
+                            }
+                            <dt>Created</dt><dd><RelativeTime Value="_detail.CreatedAt" /> · @_detail.CreatedBy</dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    @if (!IsNew)
+    {
+        <div class="mt-6">
+            <Tabs Items="TabItems" @bind-ActiveKey="_tab" />
+        </div>
+        <div class="mt-4">
+            @if (_tab == "activity")
+            {
+                <div class="card card-body"><ActivityStream Table="@TableNames.Asset" RecordId="Id!.Value" AllowPosting="_canWrite" /></div>
+            }
+            else
+            {
+                <div class="card card-body"><AttachmentList Table="@TableNames.Asset" RecordId="Id!.Value" AllowUpload="_canWrite" AllowDelete="_canWrite" /></div>
+            }
+        </div>
+
+        <Modal Open="_transitionOpen" OpenChanged="v => _transitionOpen = v" Title="@($"{AssetDisplay.TransitionAction(_transitionTarget)}?")"
+               Subtitle="@($"{AssetLifecycle.Label(_detail!.State)} → {AssetLifecycle.Label(_transitionTarget)}")" Icon="@AssetDisplay.TransitionIcon(_transitionTarget)">
+            <ChildContent>
+                @if (_transitionTarget == AssetState.InStock && _detail.AssignedToName is not null)
+                {
+                    <div class="alert alert-info mb-4"><Icon Name="info" Size="16" /> <div>Returning to stock removes the assignment to @_detail.AssignedToName.</div></div>
+                }
+                @if (_transitionTarget == AssetState.Disposed)
+                {
+                    <div class="alert alert-warning mb-4"><Icon Name="alert-triangle" Size="16" /> <div>Disposal is final. The asset becomes read-only.</div></div>
+                }
+                <FormField Label="Note" Help="Written to the activity stream (optional, max 1000 characters).">
+                    <textarea class="textarea" rows="3" @bind="_transitionNote" maxlength="1000"></textarea>
+                </FormField>
+            </ChildContent>
+            <Footer>
+                <button class="btn btn-secondary" @onclick="() => _transitionOpen = false">Cancel</button>
+                <button class="btn @(_transitionTarget == AssetState.Disposed ? "btn-danger" : "btn-primary")" disabled="@_saving" @onclick="TransitionAsync">
+                    <Icon Name="@AssetDisplay.TransitionIcon(_transitionTarget)" Size="16" /> @AssetDisplay.TransitionAction(_transitionTarget)
+                </button>
+            </Footer>
+        </Modal>
+
+        <ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete asset?" ConfirmText="Delete"
+                       Message="@($"{_detail?.Number} '{_detail?.Values.DisplayName}' will be deleted permanently. Consider retiring it instead to keep its history.")" OnConfirm="DeleteAsync" />
+    }
+}
+
+@code {
+    private AssetDetail? _detail;
+    private AssetInput? _input;
+    private string _tab = "activity";
+    private string? _error;
+    private string? _transitionNote;
+    private AssetState _transitionTarget;
+    private bool _notFound;
+    private bool _canWrite;
+    private bool _canManage;
+    private bool _saving;
+    private bool _confirmDelete;
+    private bool _transitionOpen;
+    private Guid? _loadedId = Guid.Empty;
+
+    /// <summary>Gets or sets the asset id (absent for a new asset).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    /// <summary>Gets or sets the category of a new asset from the URL (<c>hardware</c>, <c>software</c>, <c>license</c>).</summary>
+    [SupplyParameterFromQuery(Name = "category")] public string? CategoryParameter { get; set; }
+
+    private bool IsNew => Id is null;
+
+    private DateOnly Today => DateOnly.FromDateTime(Clock.UtcNow.UtcDateTime);
+
+    private int? Utilisation => _input is null ? null : AssetDisplay.LicenseUtilisation(_input.Entitlements, _input.Installs);
+
+    private int? WarrantyProgress
+    {
+        get
+        {
+            if (_input?.PurchaseDate is not { } start || _input.WarrantyEnd is not { } end || end <= start)
+            {
+                return null;
+            }
+
+            var total = end.DayNumber - start.DayNumber;
+            var elapsed = Math.Clamp(Today.DayNumber - start.DayNumber, 0, total);
+            return (int)Math.Round(elapsed * 100.0 / total);
+        }
+    }
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("activity", "Activity", "activity"),
+        new("attachments", "Attachments", "paperclip"),
+    ];
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id)
+        {
+            return;
+        }
+
+        _loadedId = Id;
+        _canWrite = await CurrentUser.HasPermissionAsync(Permissions.Assets.Write);
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Assets.Manage);
+        _input = null;
+        _detail = null;
+        _error = null;
+        _notFound = false;
+        _tab = "activity";
+
+        if (Id is { } id)
+        {
+            await LoadAsync(id);
+        }
+        else
+        {
+            _input = new AssetInput
+            {
+                Category = Enum.TryParse<AssetCategory>(CategoryParameter, ignoreCase: true, out var category) && Enum.IsDefined(category) ? category : AssetCategory.Hardware,
+                PurchaseDate = Today,
+            };
+        }
+    }
+
+    private async Task LoadAsync(Guid id)
+    {
+        var result = await AssetService.GetAsync(id);
+        if (!result.Succeeded)
+        {
+            _notFound = true;
+            return;
+        }
+
+        _detail = result.Value!;
+        _input = _detail.Values;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            if (Id is { } id)
+            {
+                var result = await AssetService.UpdateAsync(id, _input!);
+                if (!result.Succeeded)
+                {
+                    _error = result.Error;
+                    return;
+                }
+
+                Toasts.Success("Asset saved");
+                await LoadAsync(id);
+            }
+            else
+            {
+                var result = await AssetService.CreateAsync(_input!);
+                if (!result.Succeeded)
+                {
+                    _error = result.Error;
+                    return;
+                }
+
+                Toasts.Success("Asset registered");
+                Nav.NavigateTo($"/assets/{result.Value}");
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void AskTransition(AssetState target)
+    {
+        _transitionTarget = target;
+        _transitionNote = null;
+        _transitionOpen = true;
+    }
+
+    private async Task TransitionAsync()
+    {
+        _saving = true;
+        var result = await AssetService.ChangeStateAsync(Id!.Value, _transitionTarget, _transitionNote);
+        _saving = false;
+        if (Toasts.FromResult(result, $"Asset is now {AssetLifecycle.Label(_transitionTarget).ToLowerInvariant()}"))
+        {
+            _transitionOpen = false;
+            await LoadAsync(Id.Value);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Toasts.FromResult(await AssetService.DeleteAsync(Id!.Value), "Asset deleted"))
+        {
+            Nav.NavigateTo("/assets");
+        }
+    }
+}

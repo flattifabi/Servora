@@ -1,0 +1,327 @@
+@page "/knowledge"
+@* Knowledge home: search-first hero with ranked results, knowledge bases and categories, popular and new articles. *@
+@attribute [RequirePermission(Permissions.Knowledge.Read)]
+@implements IDisposable
+@inject IKnowledgeService Knowledge
+@inject IKnowledgeSearchService Search
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>Knowledge · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="Knowledge Base" Subtitle="Answers, how-tos and runbooks – written by the people who fix things." Icon="book-open">
+    <Actions>
+        <a class="btn btn-secondary" href="/knowledge/articles"><Icon Name="list" Size="16" /> All articles</a>
+        <PermissionView Permission="@Permissions.Knowledge.Manage">
+            <a class="btn btn-secondary" href="/knowledge/admin"><Icon Name="settings" Size="16" /> Bases &amp; categories</a>
+        </PermissionView>
+        <PermissionView Permission="@Permissions.Knowledge.Write">
+            <a class="btn btn-primary" href="/knowledge/new"><Icon Name="plus" Size="16" /> New article</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<section class="kb-hero">
+    <div class="kb-hero-glow"></div>
+    <div class="kb-hero-inner">
+        <div class="eyebrow">Self-service knowledge</div>
+        <h2 class="kb-hero-title">How can we <span class="gradient-text">help</span> you today?</h2>
+        <div class="kb-search">
+            <Icon Name="search" Size="20" />
+            <input id="kb-search" placeholder="Search articles – e.g. reset password, VPN, outlook signature…" value="@_query" @oninput="OnQueryInput" autocomplete="off" />
+            @if (_searching)
+            {
+                <span class="spinner"></span>
+            }
+            else if (!string.IsNullOrEmpty(_query))
+            {
+                <button class="icon-btn" title="Clear" @onclick="ClearSearch"><Icon Name="x" Size="16" /></button>
+            }
+        </div>
+        <div class="kb-suggestions">
+            <span class="faint small">Popular:</span>
+            @foreach (var suggestion in s_suggestions)
+            {
+                <button class="kb-chip" @onclick="() => RunSuggestionAsync(suggestion)">@suggestion</button>
+            }
+        </div>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_query))
+{
+    <div class="card mt-6">
+        <div class="card-header">
+            <h3><Icon Name="sparkles" Size="18" /> Results for “@_query”</h3>
+            <span class="small faint">@(_hits?.Count ?? 0) matching article@((_hits?.Count ?? 0) == 1 ? "" : "s") · ranked by relevance</span>
+        </div>
+        <div class="card-body kb-results">
+            @if (_hits is null)
+            {
+                <Skeleton Lines="4" Height="52px" />
+            }
+            else if (_hits.Count == 0)
+            {
+                <EmptyState Icon="search" Title="No articles found" Text="Try different or fewer words. You can also report an issue and our service desk will help." />
+            }
+            else
+            {
+                @foreach (var hit in _hits)
+                {
+                    <a class="kb-hit" href="/knowledge/@hit.Id" @key="hit.Id">
+                        <div class="kb-hit-head">
+                            <span class="kb-hit-title"><HighlightedText Text="@hit.Title" Terms="_terms" /></span>
+                            <span class="kb-score" title="Relevance score">@hit.Score.ToString("0")</span>
+                        </div>
+                        <div class="kb-hit-snippet"><HighlightedText Text="@(string.IsNullOrEmpty(hit.Snippet) ? hit.Summary : hit.Snippet)" Terms="_terms" /></div>
+                        <div class="kb-hit-meta">
+                            <span class="mono">@hit.Number</span>
+                            <span>· @hit.KnowledgeBaseName</span>
+                            @if (hit.CategoryName is not null)
+                            {
+                                <span>· @hit.CategoryName</span>
+                            }
+                            <span>· <Icon Name="eye" Size="12" /> @hit.ViewCount.ToString("N0")</span>
+                            <span>· <Icon Name="thumbs-up" Size="12" /> @hit.HelpfulCount</span>
+                        </div>
+                    </a>
+                }
+            }
+        </div>
+    </div>
+}
+else if (_home is null)
+{
+    <div class="grid grid-4 mt-6">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="card card-body"><Skeleton Lines="2" Height="22px" /></div>
+        }
+    </div>
+}
+else
+{
+    <div class="grid grid-4 mt-6">
+        <StatCard Label="Published articles" Value="@_home.PublishedCount.ToString("N0")" Icon="book-open" Caption="ready to read" />
+        <StatCard Label="Article views" Value="@_home.TotalViews.ToString("N0")" Icon="eye" Tone="info" Caption="all time" />
+        <StatCard Label="Helpfulness" Value="@(_home.HelpfulPercent is { } p ? $"{p}%" : "—")" Icon="thumbs-up" Tone="success" Caption="of readers found answers" />
+        @if (_home.DraftCount + _home.ReviewCount > 0)
+        {
+            <StatCard Label="Awaiting review" Value="@_home.ReviewCount.ToString()" Icon="clipboard-list" Tone="warning" Caption="@($"{_home.DraftCount} draft(s) in progress")" OnClick="@(() => Nav.NavigateTo("/knowledge/articles?state=Review"))" />
+        }
+        else
+        {
+            <StatCard Label="Knowledge bases" Value="@_home.Bases.Count.ToString()" Icon="layers" Tone="accent" Caption="@($"{_home.Categories.Count} categories")" />
+        }
+    </div>
+
+    @if (SelectedCategory is { } category)
+    {
+        <div class="card mt-6">
+            <div class="card-header">
+                <h3><span class="kb-cat-icon sm"><Icon Name="@category.Icon" Size="15" /></span> @category.Name</h3>
+                <a class="btn btn-ghost btn-sm" href="/knowledge"><Icon Name="arrow-left" Size="14" /> All categories</a>
+            </div>
+            <div class="card-body p-0">
+                @if (_categoryArticles is null)
+                {
+                    <div class="card-body"><Skeleton Lines="4" Height="40px" /></div>
+                }
+                else if (_categoryArticles.Count == 0)
+                {
+                    <EmptyState Icon="folder" Title="No articles in this category yet" Text="Articles appear here once they are published." />
+                }
+                else
+                {
+                    <div class="kb-list">
+                        @foreach (var article in _categoryArticles)
+                        {
+                            <KnowledgeArticleRow Article="article" ShowSummary="true" @key="article.Id" />
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        @foreach (var knowledgeBase in _home.Bases)
+        {
+            var categories = _home.Categories.Where(c => c.KnowledgeBaseId == knowledgeBase.Id).ToList();
+            <section class="mt-8" @key="knowledgeBase.Id">
+                <div class="kb-section-head">
+                    <div class="flex items-center gap-3">
+                        <div class="page-icon" style="width:36px;height:36px;border-radius:10px"><Icon Name="@knowledgeBase.Icon" Size="18" /></div>
+                        <div>
+                            <h3>@knowledgeBase.Name</h3>
+                            <div class="small muted">@knowledgeBase.Description</div>
+                        </div>
+                    </div>
+                    <span class="badge">@knowledgeBase.ArticleCount articles</span>
+                </div>
+                @if (categories.Count == 0)
+                {
+                    <div class="small faint mt-3">No categories yet.</div>
+                }
+                else
+                {
+                    <div class="kb-categories mt-4">
+                        @foreach (var cat in categories)
+                        {
+                            <a class="kb-cat card interactive" href="/knowledge?category=@cat.Id" @key="cat.Id">
+                                <span class="kb-cat-icon"><Icon Name="@cat.Icon" Size="18" /></span>
+                                <span class="kb-cat-body">
+                                    <span class="kb-cat-name">@cat.Name</span>
+                                    <span class="kb-cat-desc">@cat.Description</span>
+                                </span>
+                                <span class="kb-cat-count">@cat.ArticleCount</span>
+                            </a>
+                        }
+                    </div>
+                }
+            </section>
+        }
+
+        <div class="grid grid-2 mt-8">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="flame" Size="18" /> Most viewed</h3></div>
+                <div class="card-body kb-list">
+                    @if (_home.Popular.Count == 0)
+                    {
+                        <div class="small faint">Nothing published yet.</div>
+                    }
+                    @foreach (var article in _home.Popular)
+                    {
+                        <KnowledgeArticleRow Article="article" @key="article.Id" />
+                    }
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="sparkles" Size="18" /> Recently published</h3></div>
+                <div class="card-body kb-list">
+                    @if (_home.Newest.Count == 0)
+                    {
+                        <div class="small faint">Nothing published yet.</div>
+                    }
+                    @foreach (var article in _home.Newest)
+                    {
+                        <KnowledgeArticleRow Article="article" @key="article.Id" />
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private static readonly string[] s_suggestions = ["reset password", "VPN", "MFA", "Outlook", "onboarding", "outage runbook"];
+    private KnowledgeHomeData? _home;
+    private IReadOnlyList<KnowledgeSearchHit>? _hits;
+    private IReadOnlyList<KnowledgeArticleSummary>? _categoryArticles;
+    private IReadOnlyList<string> _terms = [];
+    private string _query = string.Empty;
+    private bool _searching;
+    private CancellationTokenSource? _debounce;
+    private Guid? _loadedCategory;
+
+    /// <summary>Gets or sets the search query from the URL.</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? QueryParameter { get; set; }
+
+    /// <summary>Gets or sets the selected category from the URL.</summary>
+    [SupplyParameterFromQuery(Name = "category")] public Guid? CategoryParameter { get; set; }
+
+    private KnowledgeCategoryDto? SelectedCategory => CategoryParameter is { } id ? _home?.Categories.FirstOrDefault(c => c.Id == id) : null;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Knowledge.GetHomeAsync();
+        if (result.Succeeded)
+        {
+            _home = result.Value;
+        }
+        else
+        {
+            Toasts.Error("Knowledge could not be loaded", result.Error);
+        }
+
+        if (!string.IsNullOrWhiteSpace(QueryParameter))
+        {
+            _query = QueryParameter;
+            await RunSearchAsync();
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CategoryParameter != _loadedCategory)
+        {
+            _loadedCategory = CategoryParameter;
+            _categoryArticles = null;
+            if (CategoryParameter is { } categoryId)
+            {
+                var result = await Knowledge.ListAsync(new KnowledgeArticleQuery
+                {
+                    CategoryId = categoryId,
+                    State = KnowledgeArticleState.Published,
+                    Page = new PageRequest { PageSize = 100, SortBy = "ViewCount", SortDescending = true },
+                });
+                _categoryArticles = result.Succeeded ? result.Value!.Items : [];
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _debounce?.Cancel();
+
+    private async Task OnQueryInput(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString() ?? string.Empty;
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        try
+        {
+            await Task.Delay(250, token);
+            await RunSearchAsync();
+        }
+        catch (TaskCanceledException)
+        {
+            // Superseded by a newer keystroke.
+        }
+    }
+
+    private async Task RunSuggestionAsync(string suggestion)
+    {
+        _query = suggestion;
+        await RunSearchAsync();
+    }
+
+    private void ClearSearch()
+    {
+        _query = string.Empty;
+        _hits = null;
+        _terms = [];
+    }
+
+    private async Task RunSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_query))
+        {
+            _hits = null;
+            return;
+        }
+
+        _searching = true;
+        _terms = KnowledgeRanker.Tokenize(_query);
+        var result = await Search.SearchAsync(new KnowledgeSearchRequest(_query, 20));
+        _searching = false;
+        _hits = result.Succeeded ? result.Value : [];
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Search failed", result.Error);
+        }
+    }
+}

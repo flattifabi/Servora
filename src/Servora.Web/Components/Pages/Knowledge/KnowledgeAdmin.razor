@@ -1,0 +1,234 @@
+@page "/knowledge/admin"
+@* Administration of knowledge bases and categories. *@
+@attribute [RequirePermission(Permissions.Knowledge.Manage)]
+@inject IKnowledgeService Knowledge
+@inject ToastService Toasts
+
+<PageTitle>Knowledge bases · Servora</PageTitle>
+<ModuleStyles />
+
+<PageHeader Title="Knowledge bases &amp; categories" Subtitle="Structure the knowledge base so readers find answers by browsing." Icon="layers">
+    <Breadcrumbs><a href="/knowledge">Knowledge</a> <Icon Name="chevron-right" Size="12" /> <span>Administration</span></Breadcrumbs>
+    <Actions>
+        <button class="btn btn-primary" @onclick="NewBase"><Icon Name="plus" Size="16" /> New knowledge base</button>
+    </Actions>
+</PageHeader>
+
+@if (_bases is null)
+{
+    <div class="card card-body"><Skeleton Lines="6" /></div>
+}
+else if (_bases.Count == 0)
+{
+    <div class="card"><EmptyState Icon="layers" Title="No knowledge bases yet" Text="Create a knowledge base to start organising articles."><button class="btn btn-primary" @onclick="NewBase">Create knowledge base</button></EmptyState></div>
+}
+else
+{
+    <div class="stack" style="gap:20px">
+        @foreach (var knowledgeBase in _bases)
+        {
+            var categories = _categories.Where(c => c.KnowledgeBaseId == knowledgeBase.Id).ToList();
+            <div class="card" @key="knowledgeBase.Id">
+                <div class="card-header">
+                    <div class="flex items-center gap-3">
+                        <div class="page-icon" style="width:38px;height:38px;border-radius:11px"><Icon Name="@knowledgeBase.Icon" Size="18" /></div>
+                        <div>
+                            <h3>@knowledgeBase.Name @if (!knowledgeBase.IsActive) { <StatusPill Text="Inactive" Tone="neutral" /> }</h3>
+                            <div class="card-subtitle">@knowledgeBase.Description · @knowledgeBase.ArticleCount published article(s)</div>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="btn btn-secondary btn-sm" @onclick="() => NewCategory(knowledgeBase.Id)"><Icon Name="plus" Size="14" /> Category</button>
+                        <button class="icon-btn" title="Edit" @onclick="() => EditBase(knowledgeBase)"><Icon Name="edit" Size="16" /></button>
+                        <button class="icon-btn" title="Delete" @onclick="() => AskDeleteBase(knowledgeBase)"><Icon Name="trash" Size="16" /></button>
+                    </div>
+                </div>
+                @if (categories.Count == 0)
+                {
+                    <div class="card-body small faint">No categories yet.</div>
+                }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="table compact">
+                            <thead><tr><th style="width:44px"></th><th>Category</th><th>Description</th><th class="num">Order</th><th class="num">Published</th><th>Status</th><th style="width:90px"></th></tr></thead>
+                            <tbody>
+                                @foreach (var category in categories)
+                                {
+                                    <tr @key="category.Id">
+                                        <td><span class="page-icon" style="width:30px;height:30px;border-radius:8px"><Icon Name="@category.Icon" Size="15" /></span></td>
+                                        <td class="cell-primary">@category.Name</td>
+                                        <td class="muted">@category.Description</td>
+                                        <td class="num">@category.SortOrder</td>
+                                        <td class="num">@category.ArticleCount</td>
+                                        <td><StatusPill Text="@(category.IsActive ? "Active" : "Inactive")" /></td>
+                                        <td class="text-right">
+                                            <button class="icon-btn" title="Edit" @onclick="() => EditCategory(category)"><Icon Name="edit" Size="15" /></button>
+                                            <button class="icon-btn" title="Delete" @onclick="() => AskDeleteCategory(category)"><Icon Name="trash" Size="15" /></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+<Modal Open="_baseModal" OpenChanged="v => _baseModal = v" Title="@(_editBaseId is null ? "New knowledge base" : "Edit knowledge base")" Icon="layers">
+    <ChildContent>
+        <div class="form-grid">
+            <FormField Label="Name" Required="true" Class="span-all"><input class="input" @bind="_baseInput.Name" maxlength="150" /></FormField>
+            <FormField Label="Description" Class="span-all"><textarea class="textarea" rows="2" @bind="_baseInput.Description" maxlength="1000"></textarea></FormField>
+            <FormField Label="Icon"><IconSelect @bind-Value="_baseInput.Icon" /></FormField>
+            <FormField Label="Order"><input class="input" type="number" @bind="_baseInput.SortOrder" /></FormField>
+            <FormField Class="span-all"><Switch @bind-Value="_baseInput.IsActive" Label="Active (visible on the knowledge home page)" /></FormField>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _baseModal = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveBaseAsync">Save</button>
+    </Footer>
+</Modal>
+
+<Modal Open="_categoryModal" OpenChanged="v => _categoryModal = v" Title="@(_editCategoryId is null ? "New category" : "Edit category")" Icon="folder">
+    <ChildContent>
+        <div class="form-grid">
+            <FormField Label="Knowledge base" Required="true" Class="span-all">
+                <select class="select" value="@_categoryInput.KnowledgeBaseId" @onchange="e => _categoryInput.KnowledgeBaseId = Guid.Parse(e.Value!.ToString()!)">
+                    @foreach (var knowledgeBase in _bases ?? [])
+                    {
+                        <option value="@knowledgeBase.Id">@knowledgeBase.Name</option>
+                    }
+                </select>
+            </FormField>
+            <FormField Label="Name" Required="true" Class="span-all"><input class="input" @bind="_categoryInput.Name" maxlength="150" /></FormField>
+            <FormField Label="Description" Class="span-all"><textarea class="textarea" rows="2" @bind="_categoryInput.Description" maxlength="1000"></textarea></FormField>
+            <FormField Label="Icon"><IconSelect @bind-Value="_categoryInput.Icon" /></FormField>
+            <FormField Label="Order"><input class="input" type="number" @bind="_categoryInput.SortOrder" /></FormField>
+            <FormField Class="span-all"><Switch @bind-Value="_categoryInput.IsActive" Label="Active" /></FormField>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _categoryModal = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveCategoryAsync">Save</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @bind-Open="_confirmOpen" Danger="true" Title="@_confirmTitle" Message="@_confirmMessage" ConfirmText="Delete" OnConfirm="ConfirmDeleteAsync" />
+
+@code {
+    private IReadOnlyList<KnowledgeBaseDto>? _bases;
+    private IReadOnlyList<KnowledgeCategoryDto> _categories = [];
+    private KnowledgeBaseInput _baseInput = new();
+    private KnowledgeCategoryInput _categoryInput = new();
+    private Guid? _editBaseId;
+    private Guid? _editCategoryId;
+    private bool _baseModal;
+    private bool _categoryModal;
+    private bool _saving;
+    private bool _confirmOpen;
+    private string _confirmTitle = string.Empty;
+    private string _confirmMessage = string.Empty;
+    private Func<Task<Result>>? _confirmAction;
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _bases = (await Knowledge.GetBasesAsync(includeInactive: true)).Value ?? [];
+        _categories = (await Knowledge.GetCategoriesAsync(includeInactive: true)).Value ?? [];
+    }
+
+    private void NewBase()
+    {
+        _editBaseId = null;
+        _baseInput = new KnowledgeBaseInput { SortOrder = ((_bases?.Count ?? 0) + 1) * 10 };
+        _baseModal = true;
+    }
+
+    private void EditBase(KnowledgeBaseDto knowledgeBase)
+    {
+        _editBaseId = knowledgeBase.Id;
+        _baseInput = new KnowledgeBaseInput { Name = knowledgeBase.Name, Description = knowledgeBase.Description, Icon = knowledgeBase.Icon, IsActive = knowledgeBase.IsActive, SortOrder = knowledgeBase.SortOrder };
+        _baseModal = true;
+    }
+
+    private void NewCategory(Guid baseId)
+    {
+        _editCategoryId = null;
+        _categoryInput = new KnowledgeCategoryInput { KnowledgeBaseId = baseId, SortOrder = (_categories.Count(c => c.KnowledgeBaseId == baseId) + 1) * 10 };
+        _categoryModal = true;
+    }
+
+    private void EditCategory(KnowledgeCategoryDto category)
+    {
+        _editCategoryId = category.Id;
+        _categoryInput = new KnowledgeCategoryInput
+        {
+            KnowledgeBaseId = category.KnowledgeBaseId,
+            Name = category.Name,
+            Description = category.Description,
+            Icon = category.Icon,
+            SortOrder = category.SortOrder,
+            IsActive = category.IsActive,
+        };
+        _categoryModal = true;
+    }
+
+    private async Task SaveBaseAsync()
+    {
+        _saving = true;
+        var result = await Knowledge.SaveBaseAsync(_editBaseId, _baseInput);
+        _saving = false;
+        if (Toasts.FromResult(result, "Knowledge base saved"))
+        {
+            _baseModal = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task SaveCategoryAsync()
+    {
+        _saving = true;
+        var result = await Knowledge.SaveCategoryAsync(_editCategoryId, _categoryInput);
+        _saving = false;
+        if (Toasts.FromResult(result, "Category saved"))
+        {
+            _categoryModal = false;
+            await LoadAsync();
+        }
+    }
+
+    private void AskDeleteBase(KnowledgeBaseDto knowledgeBase)
+    {
+        _confirmTitle = "Delete knowledge base?";
+        _confirmMessage = $"'{knowledgeBase.Name}' will be deleted. Only empty knowledge bases (without categories and articles) can be deleted.";
+        _confirmAction = () => Knowledge.DeleteBaseAsync(knowledgeBase.Id);
+        _confirmOpen = true;
+    }
+
+    private void AskDeleteCategory(KnowledgeCategoryDto category)
+    {
+        _confirmTitle = "Delete category?";
+        _confirmMessage = $"'{category.Name}' will be deleted. Its articles stay in the knowledge base without a category.";
+        _confirmAction = () => Knowledge.DeleteCategoryAsync(category.Id);
+        _confirmOpen = true;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_confirmAction is null)
+        {
+            return;
+        }
+
+        if (Toasts.FromResult(await _confirmAction(), "Deleted"))
+        {
+            await LoadAsync();
+        }
+    }
+}
