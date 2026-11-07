@@ -14,3 +14,5 @@ All notable changes to this project are documented here. The format follows
 - Premium design system with dark/light themes, app shell, command palette (Ctrl+K), toasts and 30+ components
   including SVG charts.
 - Windows Service hosting and setup guard for first-run configuration.
+- `ServoraSetup.exe` installer/updater (install, update with backup and automatic rollback, uninstall, status), hardened
+  directory ACLs, virtual service account, GitHub CI and release workflows, `build/publish.ps1`, operations documentation.

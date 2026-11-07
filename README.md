@@ -31,7 +31,7 @@ To try the first-run setup wizard, use the launch profile `Servora (setup wizard
 
 ## Installation (production)
 
-Download `ServoraSetup-<version>.exe` from GitHub Releases and run it as administrator. It installs Servora as the
+Download `ServoraSetup-<version>-win-x64.exe` from GitHub Releases and run it as administrator. It installs Servora as the
 Windows Service `Servora` or updates an existing installation in place (with backup and rollback). See
 [`docs/operations/installation.md`](docs/operations/installation.md).
 
@@ -55,6 +55,7 @@ agent/                         Orchestration protocol, task board, decisions
 - [Architecture overview](docs/architecture/overview.md)
 - [UI guidelines & component catalog](docs/development/ui-guidelines.md)
 - [Orchestration protocol](agent/ORCHESTRATION.md) · [Task board](agent/TASKS.md) · [Decisions](agent/DECISIONS.md)
+- [Operations: installation](docs/operations/installation.md) · [upgrade](docs/operations/upgrade.md) · [Windows service](docs/operations/windows-service.md) · [backup & restore](docs/operations/backup-restore.md) · [configuration](docs/operations/configuration.md) · [troubleshooting](docs/operations/troubleshooting.md)
 - [Product specification](PROJECT_SPEC.md)
 
 ## License

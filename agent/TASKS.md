@@ -34,7 +34,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-09 | Observability & Analytics: logging + debug switch, log viewer, audit viewer, health, dashboards, report builder | Observability Agent | T-01 | 🔨 In Progress |
 | T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | 🔨 In Progress |
 | T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ⏳ Planned |
-| T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | 🔨 In Progress |
+| T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
 
@@ -427,7 +427,7 @@ can use it fully; data access restricted to own records.
 
 ---
 
-## T-12 Installer, Windows Service & Release 🔨
+## T-12 Installer, Windows Service & Release ✅
 
 **Owned paths:** `src/Servora.Installer/**` (new console project – request orchestrator to add it to the solution
 if you cannot), `.github/workflows/**`, `build/**`, `docs/operations/**`.
@@ -452,6 +452,16 @@ if you cannot), `.github/workflows/**`, `build/**`, `docs/operations/**`.
 **Acceptance criteria:** `build/publish.ps1` produces artifacts locally; installer `status` works without admin,
 install/update logic unit-tested via abstractions (file system + service controller interfaces); workflows valid YAML.
 
+**Result (validated by orchestrator, merged `ae96d51`):** `ServoraSetup.exe` with install / update (backup, health
+check, automatic rollback, backup pruning, downgrade guard) / uninstall / status, interactive menu and silent mode;
+embedded payload zip (single download); virtual account `NT SERVICE\Servora`, quoted binary path, delayed auto start,
+recovery actions, hardened ACLs, firewall rule (domain/private only). `ci.yml`, `release.yml`, `build/publish.ps1`,
+six operations docs. Deviation accepted: manifest `asInvoker` + UAC self-relaunch (so `status` runs unelevated).
+**Evidence:** 98 files all in owned paths; build 0 errors / 0 warnings; tests 162 passed (139 new installer tests);
+publish produced `Servora-0.1.0-win-x64.zip` and `ServoraSetup-0.1.0-win-x64.exe`.
+**Open follow-ups:** end-to-end install on an elevated VM; code signing; pin GitHub Action SHAs; forwarded-headers
+config (T-13); keep `/health` anonymous while unconfigured (T-03/T-09 – already anonymous in kernel).
+
 ---
 
 ## T-13 Integration ⏳ (Orchestrator)
@@ -471,3 +481,4 @@ Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings
 | Date | Change |
 |------|--------|
 | 2026-11-07 | Board created; T-01 completed by orchestrator; T-02…T-10, T-12 dispatched in parallel. |
+| 2026-11-07 | T-12 validated and merged (✅). |
