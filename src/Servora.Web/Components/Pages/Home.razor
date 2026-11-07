@@ -1,19 +1,272 @@
 @page "/"
-@* Placeholder "My Work" dashboard. Owned by T-04 (Incident & Problem Management), which replaces it with the real workspace. *@
+@* "My Work": personalised workspace with greeting, KPIs, my work list, recent activity and the 14-day incident trend. Owned by T-04. *@
+@using System.Globalization
+@using Servora.Application.Itsm
+@using Servora.Domain.Activity
+@using Servora.Domain.Itsm
+@using Servora.Web.Components.Itsm
+@inject IMyWorkService MyWork
+@inject ICurrentUser CurrentUser
+@inject NavigationManager Nav
+@inject ToastService Toasts
 
 <PageTitle>My Work · Servora</PageTitle>
 
-<PageHeader Title="@($"Good {DayPart}, {CurrentUser.DisplayName.Split(' ')[0]}")" Subtitle="Here is what needs your attention today." Icon="home" />
-
-<div class="grid grid-4">
-    <StatCard Label="Assigned to me" Value="0" Icon="inbox" Tone="primary" Caption="open work items" Trend="@([2, 4, 3, 5, 4, 6, 5])" />
-    <StatCard Label="Critical incidents" Value="0" Icon="flame" Tone="danger" Caption="P1 open" Trend="@([1, 0, 2, 1, 0, 1, 0])" />
-    <StatCard Label="Pending approvals" Value="0" Icon="check-square" Tone="warning" Caption="awaiting you" />
-    <StatCard Label="SLA compliance" Value="100%" Icon="timer" Tone="success" Caption="last 30 days" Trend="@([96, 97, 98, 97, 99, 98, 100])" />
+<div class="card highlight mb-6" style="overflow:hidden">
+    <div class="card-body" style="padding:26px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;background:radial-gradient(600px 220px at 100% 0%, rgba(124,108,255,.16), transparent 70%), radial-gradient(500px 200px at 0% 100%, rgba(34,211,238,.08), transparent 70%)">
+        <div style="min-width:0">
+            <div class="eyebrow">@DateTime.Now.ToString("dddd, d MMMM", CultureInfo.InvariantCulture)</div>
+            <h1 style="margin-top:6px;font-size:30px">Good @DayPart, <span class="gradient-text">@FirstName</span></h1>
+            <div class="muted mt-2" style="font-size:14.5px">@Summary</div>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+            @if (_data?.CanReadIncidents == true)
+            {
+                <a class="btn btn-secondary" href="/incidents?filter=my"><Icon Name="inbox" Size="16" /> My queue</a>
+            }
+            <PermissionView Permission="@Permissions.Incidents.Create">
+                <a class="btn btn-primary" href="/incidents/new"><Icon Name="plus" Size="16" /> New incident</a>
+            </PermissionView>
+        </div>
+    </div>
 </div>
 
+@if (_data is null)
+{
+    <div class="grid grid-4 mb-6">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    </div>
+    <div class="grid grid-sidebar">
+        <div class="card card-body"><Skeleton Lines="6" Height="34px" /></div>
+        <div class="card card-body"><Skeleton Lines="6" Height="22px" /></div>
+    </div>
+}
+else
+{
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="Assigned to me" Value="@_data.AssignedToMe.ToString("N0")" Icon="inbox" Tone="primary"
+                  Caption="@($"{_data.AssignedHighPriority} high priority")" OnClick="@(() => Go("/incidents?filter=my"))" />
+        <StatCard Label="My groups' queue" Value="@_data.GroupUnassigned.ToString("N0")" Icon="users" Tone="warning"
+                  Caption="@(_data.GroupCount == 0 ? "you are not in a group yet" : $"unassigned in {_data.GroupCount} group{(_data.GroupCount == 1 ? "" : "s")}")"
+                  OnClick="@(() => Go("/incidents?filter=groups"))" />
+        <StatCard Label="Critical incidents" Value="@_data.CriticalOpen.ToString("N0")" Icon="flame" Tone="danger"
+                  Caption="@($"P1 open · {_data.MajorOpen} major")" OnClick="@(() => Go("/incidents?filter=high"))" />
+        <StatCard Label="Pending approvals" Value="@(_data.PendingApprovals?.ToString("N0") ?? "—")" Icon="check-square" Tone="accent"
+                  Caption="@(_data.PendingApprovals is null ? "open your approvals inbox" : "awaiting your decision")" OnClick="@(() => Go("/approvals"))" />
+    </div>
+
+    @if (!_data.CanReadIncidents && !_data.CanReadProblems)
+    {
+        <div class="card">
+            <EmptyState Icon="life-buoy" Title="Welcome to Servora" Text="Your workspace fills up as soon as you work on incidents or problems. Need help? Visit the self-service portal.">
+                <a class="btn btn-primary" href="/portal"><Icon Name="life-buoy" Size="16" /> Open the portal</a>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="grid grid-sidebar mb-6">
+            <div class="card" style="min-width:0">
+                <div class="card-header">
+                    <div>
+                        <h3><Icon Name="clipboard-list" Size="18" /> My work <span class="badge">@_data.AssignedToMe</span></h3>
+                        <div class="card-subtitle">Open incidents and problems assigned to you, most urgent first.</div>
+                    </div>
+                    @if (_data.CanReadIncidents)
+                    {
+                        <a class="btn btn-ghost btn-sm" href="/incidents?filter=my">View all <Icon Name="arrow-right" Size="14" /></a>
+                    }
+                </div>
+                @if (_data.Items.Count == 0)
+                {
+                    <EmptyState Icon="award" Title="You're all caught up" Text="Nothing is assigned to you right now. Pick up unassigned work from your groups' queue.">
+                        @if (_data.CanReadIncidents)
+                        {
+                            <a class="btn btn-secondary" href="/incidents?filter=unassigned"><Icon Name="user-plus" Size="16" /> Unassigned incidents</a>
+                        }
+                    </EmptyState>
+                }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead>
+                                <tr><th>Number</th><th>Priority</th><th>State</th><th>Short description</th><th class="num">Updated</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in _data.Items)
+                                {
+                                    <tr class="clickable" @onclick="() => Go(item.Route)">
+                                        <td>
+                                            <span class="flex items-center gap-2">
+                                                <Icon Name="@(item.Table == "problem" ? "lightbulb" : "alert-triangle")" Size="14" Class="faint" />
+                                                <span class="cell-link">@item.Number</span>
+                                                @if (item.IsFlagged)
+                                                {
+                                                    <span class="@(item.Table == "problem" ? "text-primary" : "text-danger")" title="@(item.Table == "problem" ? "Known error" : "Major incident")">
+                                                        <Icon Name="@(item.Table == "problem" ? "book-open" : "flame")" Size="13" />
+                                                    </span>
+                                                }
+                                            </span>
+                                        </td>
+                                        <td><PriorityBadge Priority="item.Priority" Compact="true" /></td>
+                                        <td><StatusPill Text="@item.StateLabel" /></td>
+                                        <td>
+                                            <span class="cell-primary truncate" style="display:block;max-width:min(400px, 26vw)">@item.ShortDescription</span>
+                                            <span class="cell-sub">@(item.GroupName ?? "No group") · opened <RelativeTime Value="item.OpenedAt" /></span>
+                                        </td>
+                                        <td class="num"><RelativeTime Value="item.UpdatedAt" Class="small muted" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+            <div class="card" style="min-width:0">
+                <div class="card-header">
+                    <div>
+                        <h3><Icon Name="activity" Size="18" /> Recent activity</h3>
+                        <div class="card-subtitle">On records you work on</div>
+                    </div>
+                    <span class="live-dot" title="Updated when the page loads"></span>
+                </div>
+                <div class="card-body" style="max-height:470px;overflow-y:auto">
+                    @if (_data.RecentActivity.Count == 0)
+                    {
+                        <div class="small faint text-center" style="padding:28px 0">No recent activity on your records.</div>
+                    }
+                    else
+                    {
+                        <div class="stack" style="gap:14px">
+                            @foreach (var entry in _data.RecentActivity)
+                            {
+                                <div class="flex gap-3" style="min-width:0">
+                                    <div class="activity-icon" style="width:30px;height:30px;@IconTone(entry.Type)"><Icon Name="@IconFor(entry.Type)" Size="14" /></div>
+                                    <div style="min-width:0;flex:1">
+                                        <div class="small">
+                                            <b>@entry.AuthorName</b> <span class="faint">@VerbFor(entry.Type)</span>
+                                            <a class="mono" href="@entry.Route">@entry.RecordNumber</a>
+                                        </div>
+                                        <div class="small muted" style="overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">@entry.Text</div>
+                                        <div class="tiny faint mt-1"><RelativeTime Value="entry.CreatedAt" /></div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        @if (_data.CanReadIncidents)
+        {
+            <div class="grid grid-sidebar">
+                <div class="card" style="min-width:0">
+                    <div class="card-header">
+                        <div>
+                            <h3><Icon Name="trending-up" Size="18" /> Incidents opened vs resolved</h3>
+                            <div class="card-subtitle">Last 14 days, all groups</div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="text-right"><div class="tiny faint">Opened</div><div style="font-weight:700;font-size:18px">@_data.OpenedPerDay.Sum().ToString("0")</div></div>
+                            <div class="text-right"><div class="tiny faint">Resolved</div><div style="font-weight:700;font-size:18px" class="text-success">@_data.ResolvedPerDay.Sum().ToString("0")</div></div>
+                            <div class="text-right"><div class="tiny faint">Net backlog</div><div style="font-weight:700;font-size:18px" class="@(NetBacklog > 0 ? "text-danger" : "text-success")">@(NetBacklog > 0 ? "+" : null)@NetBacklog.ToString("0")</div></div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <LineChart Labels="_data.TrendLabels" Height="260" ValueFormat="0"
+                                   Series="@([new ChartSeries("Opened", _data.OpenedPerDay, "#7c6cff"), new ChartSeries("Resolved", _data.ResolvedPerDay, "#22c55e")])" />
+                    </div>
+                </div>
+                <div class="card" style="min-width:0">
+                    <div class="card-header">
+                        <div>
+                            <h3><Icon Name="pie-chart" Size="18" /> Open by priority</h3>
+                            <div class="card-subtitle">Current incident backlog</div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        @if (_data.OpenByPriority.Sum() == 0)
+                        {
+                            <EmptyState Icon="check-circle" Title="No open incidents" Text="The backlog is empty." />
+                        }
+                        else
+                        {
+                            <DonutChart Slices="PrioritySlices" CenterLabel="open" Size="160" />
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    }
+}
+
 @code {
-    [Inject] private ICurrentUser CurrentUser { get; set; } = default!;
+    private static readonly string[] s_priorityColors = ["#f43f5e", "#f97316", "#f59e0b", "#3b82f6", "#64748b"];
+
+    private MyWorkDashboard? _data;
 
     private static string DayPart => DateTime.Now.Hour switch { < 12 => "morning", < 18 => "afternoon", _ => "evening" };
+
+    private string FirstName => CurrentUser.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? CurrentUser.Name;
+
+    private double NetBacklog => _data is null ? 0 : _data.OpenedPerDay.Sum() - _data.ResolvedPerDay.Sum();
+
+    private string Summary => _data switch
+    {
+        null => "Loading your workspace…",
+        { AssignedToMe: 0, CriticalOpen: 0 } => "Nothing urgent on your plate – a great moment to pick up work from your groups.",
+        { AssignedToMe: 0 } d => $"No work assigned to you, but {d.CriticalOpen} critical incident{(d.CriticalOpen == 1 ? " needs" : "s need")} attention.",
+        var d => $"You have {d.AssignedToMe} open item{(d.AssignedToMe == 1 ? "" : "s")}{(d.AssignedHighPriority > 0 ? $", {d.AssignedHighPriority} of them high priority" : string.Empty)}. You resolved {d.ResolvedByMeThisWeek} incident{(d.ResolvedByMeThisWeek == 1 ? "" : "s")} this week.",
+    };
+
+    private IReadOnlyList<ChartSlice> PrioritySlices => _data is null
+        ? []
+        : _data.OpenByPriority.Select((count, index) => new ChartSlice(ItsmLabels.For((Priority)(index + 1)), count, s_priorityColors[index])).Where(s => s.Value > 0).ToList();
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await MyWork.GetAsync();
+        if (result.Succeeded)
+        {
+            _data = result.Value;
+        }
+        else
+        {
+            _data = new MyWorkDashboard();
+            Toasts.Error("Could not load your workspace", result.Error);
+        }
+    }
+
+    private void Go(string route) => Nav.NavigateTo(route);
+
+    private static string IconFor(ActivityType type) => type switch
+    {
+        ActivityType.Comment => "message-square",
+        ActivityType.WorkNote => "sticky-note",
+        ActivityType.FieldChange => "edit",
+        _ => "zap",
+    };
+
+    private static string IconTone(ActivityType type) => type switch
+    {
+        ActivityType.Comment => "background:var(--info-soft);color:var(--info)",
+        ActivityType.WorkNote => "background:var(--warning-soft);color:var(--warning)",
+        ActivityType.FieldChange => "background:var(--primary-soft);color:var(--primary)",
+        _ => "background:var(--accent-soft);color:var(--accent)",
+    };
+
+    private static string VerbFor(ActivityType type) => type switch
+    {
+        ActivityType.Comment => "commented on",
+        ActivityType.WorkNote => "added a work note to",
+        ActivityType.FieldChange => "updated",
+        _ => "on",
+    };
 }

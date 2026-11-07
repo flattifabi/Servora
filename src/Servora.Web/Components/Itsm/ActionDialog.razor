@@ -1,0 +1,147 @@
+@* Dialog for consequential record actions that need a choice and/or an explanation (resolve, put on hold, reopen, cancel). *@
+<Modal Open="Open" OpenChanged="OpenChanged" Title="@Title" Subtitle="@Subtitle" Icon="@Icon" CloseOnBackdrop="false">
+    <ChildContent>
+        <div class="stack" style="gap:16px">
+            @if (Options is { Count: > 0 })
+            {
+                <FormField Label="@ChoiceLabel" Required="true">
+                    <select class="select" @bind="_choice">
+                        <option value="0">Select…</option>
+                        @foreach (var option in Options)
+                        {
+                            <option value="@option.Key">@option.Value</option>
+                        }
+                    </select>
+                </FormField>
+            }
+            @if (!string.IsNullOrEmpty(TextLabel))
+            {
+                <FormField Label="@TextLabel" Required="TextRequired" Help="@TextHelp">
+                    <textarea class="textarea" rows="5" maxlength="8000" placeholder="@TextPlaceholder" @bind="_text" @bind:event="oninput"></textarea>
+                </FormField>
+            }
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger"><Icon Name="alert-circle" Size="16" /> <span>@_error</span></div>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="CloseAsync" disabled="@_busy">Cancel</button>
+        <button class="btn @ConfirmClass" disabled="@(_busy || !CanConfirm)" @onclick="ConfirmAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            else if (!string.IsNullOrEmpty(ConfirmIcon))
+            {
+                <Icon Name="@ConfirmIcon" Size="16" />
+            }
+            @ConfirmText
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private int _choice;
+    private string _text = string.Empty;
+    private string? _error;
+    private bool _busy;
+    private bool _wasOpen;
+
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the title.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the subtitle.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets the header icon.</summary>
+    [Parameter] public string Icon { get; set; } = "check-circle";
+
+    /// <summary>Gets or sets the selectable options (value → label); no select is shown when empty.</summary>
+    [Parameter] public IReadOnlyList<KeyValuePair<int, string>>? Options { get; set; }
+
+    /// <summary>Gets or sets the label of the select.</summary>
+    [Parameter] public string ChoiceLabel { get; set; } = "Reason";
+
+    /// <summary>Gets or sets the label of the text area; no text area is shown when empty.</summary>
+    [Parameter] public string? TextLabel { get; set; }
+
+    /// <summary>Gets or sets the placeholder of the text area.</summary>
+    [Parameter] public string? TextPlaceholder { get; set; }
+
+    /// <summary>Gets or sets the help text of the text area.</summary>
+    [Parameter] public string? TextHelp { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the text is mandatory.</summary>
+    [Parameter] public bool TextRequired { get; set; } = true;
+
+    /// <summary>Gets or sets the confirm button text.</summary>
+    [Parameter] public string ConfirmText { get; set; } = "Confirm";
+
+    /// <summary>Gets or sets the confirm button icon.</summary>
+    [Parameter] public string? ConfirmIcon { get; set; }
+
+    /// <summary>Gets or sets the confirm button CSS class, for example <c>btn-success</c> or <c>btn-danger</c>.</summary>
+    [Parameter] public string ConfirmClass { get; set; } = "btn-primary";
+
+    /// <summary>
+    /// Raised when the user confirms. Return <see langword="null"/> to close the dialog or an error message to keep it
+    /// open and show the message.
+    /// </summary>
+    [Parameter] public Func<int, string, Task<string?>>? OnConfirm { get; set; }
+
+    private bool CanConfirm =>
+        (Options is not { Count: > 0 } || _choice != 0)
+        && (string.IsNullOrEmpty(TextLabel) || !TextRequired || !string.IsNullOrWhiteSpace(_text));
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Open && !_wasOpen)
+        {
+            _choice = 0;
+            _text = string.Empty;
+            _error = null;
+        }
+
+        _wasOpen = Open;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (OnConfirm is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await OnConfirm(_choice, _text);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        if (_error is null)
+        {
+            await CloseAsync();
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        Open = false;
+        _wasOpen = false;
+        await OpenChanged.InvokeAsync(false);
+    }
+}

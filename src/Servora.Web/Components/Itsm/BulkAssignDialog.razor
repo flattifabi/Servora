@@ -1,0 +1,86 @@
+@* Bulk assignment dialog: choose an assignment group and/or an assignee for the selected records. *@
+<Modal Open="Open" OpenChanged="OpenChanged" Title="@($"Assign {Count} {RecordLabel}{(Count == 1 ? string.Empty : "s")}")"
+       Subtitle="Leave a field empty to keep the current value." Icon="users" CloseOnBackdrop="false">
+    <ChildContent>
+        @* The min-height leaves room for the picker result menus inside the scrollable modal body. *@
+        <div class="stack" style="gap:16px;min-height:360px">
+            <FormField Label="Assignment group">
+                <GroupPicker @bind-Value="_groupId" />
+            </FormField>
+            <FormField Label="Assigned to">
+                <UserPicker @bind-Value="_userId" />
+            </FormField>
+            <div class="alert alert-info" style="margin-top:auto">
+                <Icon Name="info" Size="16" />
+                <span>Each @RecordLabel gets its own activity entry; closed and cancelled records are skipped. Changing the group counts as a reassignment.</span>
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" disabled="@_busy" @onclick="CloseAsync">Cancel</button>
+        <button class="btn btn-primary" disabled="@(_busy || (_groupId is null && _userId is null))" @onclick="ConfirmAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <Icon Name="user-check" Size="16" />
+            }
+            Assign
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private Guid? _groupId;
+    private Guid? _userId;
+    private bool _busy;
+
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the number of selected records.</summary>
+    [Parameter] public int Count { get; set; }
+
+    /// <summary>Gets or sets the singular record label, for example <c>incident</c>.</summary>
+    [Parameter] public string RecordLabel { get; set; } = "record";
+
+    /// <summary>Raised with the chosen group and assignee. Return <see langword="true"/> to close the dialog.</summary>
+    [Parameter] public Func<Guid?, Guid?, Task<bool>>? OnAssign { get; set; }
+
+    private async Task ConfirmAsync()
+    {
+        if (OnAssign is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        bool close;
+        try
+        {
+            close = await OnAssign(_groupId, _userId);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        if (close)
+        {
+            _groupId = null;
+            _userId = null;
+            await CloseAsync();
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        Open = false;
+        await OpenChanged.InvokeAsync(false);
+    }
+}

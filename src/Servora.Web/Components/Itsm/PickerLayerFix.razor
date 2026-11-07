@@ -1,0 +1,6 @@
+@* Temporary workaround (requested from the orchestrator): the kernel's .click-catcher (z-index 70) covers the
+   .combo-menu (z-index 60) of ReferencePicker, so picker results cannot be clicked. While an ITSM page is shown, this
+   lifts the menu above the catcher. Remove once servora.css is fixed. *@
+<HeadContent>
+    <style>.combo > .combo-menu { z-index: 71; }</style>
+</HeadContent>

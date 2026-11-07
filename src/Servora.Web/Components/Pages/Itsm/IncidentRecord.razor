@@ -1,0 +1,828 @@
+@page "/incidents/new"
+@page "/incidents/{Id:guid}"
+@* Incident record page: header actions, state flow, two-column form with side cards (SLA, caller, key facts) and tabs. *@
+@attribute [RequirePermission(Permissions.Incidents.Read)]
+@using System.Text.Json
+@inject IIncidentService IncidentService
+@inject IProblemService ProblemService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(IsNew ? "New incident" : _details?.Number ?? "Incident") · Servora</PageTitle>
+<PickerLayerFix />
+
+@if (_notFound)
+{
+    <div class="card">
+        <EmptyState Icon="search" Title="Incident not found" Text="The incident does not exist or was deleted.">
+            <a class="btn btn-primary" href="/incidents"><Icon Name="arrow-left" Size="16" /> Back to incidents</a>
+        </EmptyState>
+    </div>
+}
+else if (_input is null || (!IsNew && _details is null))
+{
+    <div class="stack">
+        <Skeleton Lines="2" Height="28px" Width="40%" />
+        <div class="grid grid-sidebar">
+            <div class="card card-body"><Skeleton Lines="8" Height="38px" /></div>
+            <div class="card card-body"><Skeleton Lines="6" Height="18px" /></div>
+        </div>
+    </div>
+}
+else
+{
+    <PageHeader Title="@(IsNew ? "New incident" : _details!.Number)" Icon="alert-triangle">
+        <Breadcrumbs>
+            <a href="/incidents">Incidents</a> <Icon Name="chevron-right" Size="12" /> <span>@(IsNew ? "New" : _details!.Number)</span>
+        </Breadcrumbs>
+        <SubtitleContent>
+            @if (IsNew)
+            {
+                <div class="subtitle">Log a disruption so the right team can restore service quickly.</div>
+            }
+            else
+            {
+                <div class="subtitle" style="max-width:760px">@_details!.Fields.ShortDescription</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2">
+                    <StatusPill Text="@_details.StateLabel" />
+                    <PriorityBadge Priority="_details.Priority" />
+                    @if (_details.Fields.IsMajorIncident)
+                    {
+                        <span class="pill pill-danger no-dot"><Icon Name="flame" Size="12" /> Major incident</span>
+                    }
+                    @if (_details.OnHoldReason is { } hold && _details.State == IncidentState.OnHold)
+                    {
+                        <span class="pill pill-warning no-dot"><Icon Name="pause" Size="12" /> @ItsmLabels.For(hold)</span>
+                    }
+                    @if (_details.ProblemNumber is not null)
+                    {
+                        <a class="tag" href="/problems/@_details.ProblemId"><Icon Name="lightbulb" Size="12" /> @_details.ProblemNumber</a>
+                    }
+                    <span class="small faint">Opened <RelativeTime Value="_details.OpenedAt" /> · updated <RelativeTime Value="_details.UpdatedAt" /> by @_details.UpdatedBy</span>
+                </div>
+            }
+        </SubtitleContent>
+        <Actions>
+            @if (IsNew)
+            {
+                <a class="btn btn-secondary" href="/incidents">Cancel</a>
+                <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                    @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                    Create incident
+                </button>
+            }
+            else if (_canWrite)
+            {
+                var state = _details!.State;
+                var lockedTitle = IsDirty ? "Save or discard your changes first" : null;
+                if (_details.IsActive && _details.Fields.AssignedToId != CurrentUser.UserId && CurrentUser.UserId is not null)
+                {
+                    <button class="btn btn-secondary" disabled="@(_busy || IsDirty)" title="@lockedTitle" @onclick="AssignToMeAsync"><Icon Name="user-check" Size="16" /> Assign to me</button>
+                }
+                if (state is IncidentState.New or IncidentState.OnHold)
+                {
+                    <button class="btn btn-secondary" disabled="@(_busy || IsDirty)" title="@lockedTitle" @onclick="StartWorkAsync"><Icon Name="play" Size="16" /> @(state == IncidentState.OnHold ? "Resume" : "Start work")</button>
+                }
+                if (state is IncidentState.New or IncidentState.InProgress)
+                {
+                    <button class="btn btn-secondary" disabled="@(_busy || IsDirty)" title="@lockedTitle" @onclick="() => _holdOpen = true"><Icon Name="pause" Size="16" /> Put on hold</button>
+                }
+                if (IncidentStateMachine.IsOpen(state))
+                {
+                    <button class="btn btn-success" disabled="@(_busy || IsDirty)" title="@lockedTitle" @onclick="() => _resolveOpen = true"><Icon Name="check-circle" Size="16" /> Resolve</button>
+                }
+                if (state == IncidentState.Resolved)
+                {
+                    <button class="btn btn-secondary" disabled="@(_busy || IsDirty)" title="@lockedTitle" @onclick="() => _reopenOpen = true"><Icon Name="refresh" Size="16" /> Reopen</button>
+                    <button class="btn btn-primary" disabled="@(_busy || IsDirty)" title="@lockedTitle" @onclick="CloseIncidentAsync"><Icon Name="check-square" Size="16" /> Close</button>
+                }
+                if (_details.IsActive)
+                {
+                    <button class="btn btn-primary" disabled="@(_saving || !IsDirty)" @onclick="SaveAsync">
+                        @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                        Save
+                    </button>
+                }
+                <div class="dropdown">
+                    <button class="btn btn-secondary btn-icon" title="More actions" @onclick="() => _menuOpen = !_menuOpen"><Icon Name="more-horizontal" Size="18" /></button>
+                    @if (_menuOpen)
+                    {
+                        <div class="click-catcher" @onclick="() => _menuOpen = false"></div>
+                        <div class="dropdown-menu">
+                            @if (_canCreateProblem && _details.ProblemId is null)
+                            {
+                                <button class="dropdown-item" disabled="@IsDirty" @onclick="() => { _menuOpen = false; _createProblemOpen = true; }"><Icon Name="lightbulb" Size="16" /> Create problem</button>
+                            }
+                            <button class="dropdown-item" @onclick="() => ShowTabAsync(TabRelated)"><Icon Name="link" Size="16" /> Related records</button>
+                            @if (IncidentStateMachine.IsOpen(state))
+                            {
+                                <div class="dropdown-divider"></div>
+                                <button class="dropdown-item danger" disabled="@IsDirty" @onclick="() => { _menuOpen = false; _cancelOpen = true; }"><Icon Name="x-circle" Size="16" /> Cancel incident</button>
+                            }
+                            @if (_canDelete)
+                            {
+                                <div class="dropdown-divider"></div>
+                                <button class="dropdown-item danger" @onclick="() => { _menuOpen = false; _deleteOpen = true; }"><Icon Name="trash" Size="16" /> Delete</button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (!IsNew)
+    {
+        <div class="card card-body mb-6" style="padding:12px 16px">
+            <StateFlow States="FlowStates" Current="@_details!.StateLabel" />
+        </div>
+    }
+
+    <div class="grid grid-sidebar">
+        <div class="stack" style="min-width:0">
+            <div class="card">
+                <div class="card-body">
+                    <fieldset disabled="@ReadOnly" style="border:0;padding:0;margin:0;min-width:0">
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="file-text" Size="16" /> Summary</div>
+                            <div class="form-grid">
+                                <FormField Label="Short description" Required="true" Class="span-all" Error="@_shortDescriptionError">
+                                    <input class="input @(_shortDescriptionError is null ? null : "invalid")" maxlength="300" placeholder="Briefly describe what is not working" @bind="_input.ShortDescription" />
+                                </FormField>
+                                <FormField Label="Description" Class="span-all" Help="Symptoms, error messages, when it started and what was already tried.">
+                                    <textarea class="textarea" rows="5" maxlength="32000" @bind="_input.Description"></textarea>
+                                </FormField>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="tag" Size="16" /> Classification</div>
+                            <div class="form-grid">
+                                <FormField Label="Caller" Help="Defaults to you when left empty.">
+                                    <UserPicker @bind-Value="_input.CallerId" Disabled="ReadOnly" />
+                                </FormField>
+                                <FormField Label="Channel">
+                                    <select class="select" @bind="_input.Channel">
+                                        @foreach (var channel in Enum.GetValues<ContactChannel>())
+                                        {
+                                            <option value="@channel">@ItsmLabels.For(channel)</option>
+                                        }
+                                    </select>
+                                </FormField>
+                                <FormField Label="Category">
+                                    <select class="select" @bind="_input.Category" @bind:after="CategoryChanged">
+                                        <option value="">— None —</option>
+                                        @foreach (var category in _categories)
+                                        {
+                                            <option value="@category.Name">@category.Name</option>
+                                        }
+                                        @if (_input.Category is { Length: > 0 } current && _categories.All(c => c.Name != current))
+                                        {
+                                            <option value="@current">@current</option>
+                                        }
+                                    </select>
+                                </FormField>
+                                <FormField Label="Subcategory">
+                                    <select class="select" @bind="_input.Subcategory" disabled="@(ReadOnly || Subcategories.Count == 0)">
+                                        <option value="">— None —</option>
+                                        @foreach (var sub in Subcategories)
+                                        {
+                                            <option value="@sub">@sub</option>
+                                        }
+                                    </select>
+                                </FormField>
+                                <FormField Label="Configuration item">
+                                    <CiPicker @bind-Value="_input.ConfigurationItemId" Disabled="ReadOnly" />
+                                </FormField>
+                                <FormField Label="Business service">
+                                    <CiPicker @bind-Value="_input.BusinessServiceId" Disabled="ReadOnly" Placeholder="Search business services…" />
+                                </FormField>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="gauge" Size="16" /> Prioritization</div>
+                            <div class="form-grid cols-3">
+                                <FormField Label="Impact" Help="How many users are affected?">
+                                    <select class="select" @bind="_input.Impact">
+                                        @foreach (var impact in Enum.GetValues<Impact>())
+                                        {
+                                            <option value="@impact">@ItsmLabels.For(impact)</option>
+                                        }
+                                    </select>
+                                </FormField>
+                                <FormField Label="Urgency" Help="How quickly is a resolution needed?">
+                                    <select class="select" @bind="_input.Urgency">
+                                        @foreach (var urgency in Enum.GetValues<Urgency>())
+                                        {
+                                            <option value="@urgency">@ItsmLabels.For(urgency)</option>
+                                        }
+                                    </select>
+                                </FormField>
+                                <FormField Label="Priority" Help="Calculated from impact × urgency.">
+                                    <div class="readonly-value"><PriorityBadge Priority="CalculatedPriority" /></div>
+                                </FormField>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="users" Size="16" /> Assignment</div>
+                            <div class="form-grid">
+                                <FormField Label="Assignment group">
+                                    <GroupPicker @bind-Value="_input.AssignmentGroupId" Disabled="ReadOnly" />
+                                </FormField>
+                                <FormField Label="Assigned to">
+                                    <UserPicker @bind-Value="_input.AssignedToId" Disabled="ReadOnly" />
+                                </FormField>
+                                <FormField Label="Parent incident" Help="Link child incidents to a major incident.">
+                                    <ReferencePicker @bind-Value="_input.ParentIncidentId" Search="SearchIncidentsAsync" Resolve="ResolveParentAsync"
+                                                     Placeholder="Search incidents…" Icon="alert-triangle" Disabled="ReadOnly" />
+                                </FormField>
+                                <FormField Label="Major incident" Help="Wide business impact – triggers the major incident process.">
+                                    <div style="height:40px;display:flex;align-items:center"><Switch @bind-Value="_input.IsMajorIncident" Label="@(_input.IsMajorIncident ? "Yes" : "No")" Disabled="ReadOnly" /></div>
+                                </FormField>
+                                <FormField Label="Tags" Class="span-all" Help="Comma separated labels.">
+                                    <input class="input" maxlength="1000" placeholder="e.g. vpn, remote-work" @bind="_input.Tags" />
+                                </FormField>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    @if (_details is { ResolutionCode: { } code })
+                    {
+                        <div class="form-section">
+                            <div class="form-section-title"><Icon Name="check-circle" Size="16" /> Resolution</div>
+                            <div class="alert alert-success" style="flex-direction:column;gap:6px">
+                                <div class="flex items-center gap-2" style="font-weight:650"><Icon Name="award" Size="16" /> @ItsmLabels.For(code)</div>
+                                <div style="white-space:pre-wrap;color:var(--text-2)">@_details.ResolutionNotes</div>
+                                <div class="tiny faint">Resolved <RelativeTime Value="_details.ResolvedAt" /> @(_details.ResolvedByName is null ? null : $"by {_details.ResolvedByName}")</div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!IsNew && _details!.IsActive && _canWrite && IsDirty)
+                    {
+                        <div class="form-actions">
+                            <button class="btn btn-ghost" @onclick="Discard">Discard changes</button>
+                            <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                                @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                                Save changes
+                            </button>
+                        </div>
+                    }
+                    else if (IsNew)
+                    {
+                        <div class="form-actions">
+                            <a class="btn btn-ghost" href="/incidents">Cancel</a>
+                            <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                                @if (_saving) { <span class="spinner"></span> } else { <Icon Name="save" Size="16" /> }
+                                Create incident
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (!IsNew)
+            {
+                <div class="card">
+                    <div class="card-body">
+                        <Tabs Items="TabItems" ActiveKey="@_tab" ActiveKeyChanged="ShowTabAsync" />
+                        @switch (_tab)
+                        {
+                            case TabRelated:
+                                @RelatedTab
+                                break;
+                            case TabAttachments:
+                                <AttachmentList Table="@TableNames.Incident" RecordId="Id!.Value" AllowUpload="_canWrite" AllowDelete="_canWrite" />
+                                break;
+                            default:
+                                <ActivityStream @ref="_activity" Table="@TableNames.Incident" RecordId="Id!.Value" AllowPosting="_canWrite" />
+                                break;
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div>
+            <div class="stack sticky-top">
+                @if (IsNew)
+                {
+                    <div class="card">
+                        <div class="card-header"><h3><Icon Name="gauge" Size="16" /> Priority matrix</h3></div>
+                        <div class="card-body">
+                            <PriorityMatrixCard Impact="_input.Impact" Urgency="_input.Urgency" />
+                            <div class="flex items-center justify-between mt-4">
+                                <span class="small muted">Resulting priority</span>
+                                <PriorityBadge Priority="CalculatedPriority" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card card-body">
+                        <div class="eyebrow mb-3">Tips for a great ticket</div>
+                        <div class="stack small muted" style="gap:10px">
+                            <div class="flex gap-2"><Icon Name="check" Size="14" Class="text-success" /> Describe the symptom, not the suspected cause.</div>
+                            <div class="flex gap-2"><Icon Name="check" Size="14" Class="text-success" /> Mention since when and how many users are affected.</div>
+                            <div class="flex gap-2"><Icon Name="check" Size="14" Class="text-success" /> Link the affected configuration item so routing is faster.</div>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    var d = _details!;
+                    <div class="card">
+                        <div class="card-header"><h3><Icon Name="timer" Size="16" /> Service levels</h3></div>
+                        <div class="card-body"><SlaTimers Table="@TableNames.Incident" RecordId="d.Id" Revision="d.Version" /></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3><Icon Name="user" Size="16" /> Caller</h3></div>
+                        <div class="card-body">
+                            @if (d.Caller is { } caller)
+                            {
+                                <div class="flex items-center gap-3 mb-4">
+                                    <Avatar Name="@caller.DisplayName" Size="lg" />
+                                    <div style="min-width:0">
+                                        <div class="truncate" style="font-weight:650">@caller.DisplayName</div>
+                                        <div class="small faint truncate">@(caller.Title ?? "—")@(caller.Department is null ? null : $" · {caller.Department}")</div>
+                                    </div>
+                                </div>
+                                <div class="stack small" style="gap:8px">
+                                    @if (caller.Email is not null)
+                                    {
+                                        <a class="flex items-center gap-2 truncate" href="mailto:@caller.Email"><Icon Name="mail" Size="14" /> @caller.Email</a>
+                                    }
+                                    @if (caller.Phone is not null)
+                                    {
+                                        <span class="flex items-center gap-2 muted"><Icon Name="phone" Size="14" /> @caller.Phone</span>
+                                    }
+                                    @if (caller.Location is not null)
+                                    {
+                                        <span class="flex items-center gap-2 muted"><Icon Name="map-pin" Size="14" /> @caller.Location</span>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="small faint">No caller recorded.</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3><Icon Name="info" Size="16" /> Key facts</h3></div>
+                        <div class="card-body">
+                            <dl class="kv" style="grid-template-columns:120px 1fr;margin:0">
+                                <dt>Assigned to</dt>
+                                <dd><PersonCell Name="@d.AssignedToName" /></dd>
+                                <dt>Group</dt>
+                                <dd>@(d.AssignmentGroupName ?? "—")</dd>
+                                <dt>Channel</dt>
+                                <dd>@ItsmLabels.For(d.Fields.Channel)</dd>
+                                <dt>CI</dt>
+                                <dd>@(d.ConfigurationItemName ?? "—")@if (d.ConfigurationItemClass is not null) { <span class="tiny faint"> · @d.ConfigurationItemClass</span> }</dd>
+                                <dt>Service</dt>
+                                <dd>@(d.BusinessServiceName ?? "—")</dd>
+                                <dt>Opened</dt>
+                                <dd><RelativeTime Value="d.OpenedAt" /> @if (d.OpenedByName is not null) { <span class="faint">&nbsp;by @d.OpenedByName</span> }</dd>
+                                @if (d.ResolvedAt is not null)
+                                {
+                                    <dt>Resolved</dt>
+                                    <dd><RelativeTime Value="d.ResolvedAt" /></dd>
+                                }
+                                @if (d.ClosedAt is not null)
+                                {
+                                    <dt>Closed</dt>
+                                    <dd><RelativeTime Value="d.ClosedAt" /></dd>
+                                }
+                                <dt>Reassigned</dt>
+                                <dd>@d.ReassignmentCount×</dd>
+                                <dt>Reopened</dt>
+                                <dd>@d.ReopenCount×</dd>
+                                <dt>Problem</dt>
+                                <dd>
+                                    @if (d.ProblemNumber is not null)
+                                    {
+                                        <a class="mono" href="/problems/@d.ProblemId">@d.ProblemNumber</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="faint">—</span>
+                                    }
+                                </dd>
+                                <dt>Parent</dt>
+                                <dd>
+                                    @if (d.Fields.ParentIncidentId is { } parentId)
+                                    {
+                                        <a class="mono" href="/incidents/@parentId">@d.ParentIncidentNumber</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="faint">—</span>
+                                    }
+                                </dd>
+                                <dt>Children</dt>
+                                <dd>@d.ChildCount</dd>
+                            </dl>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    @if (!IsNew)
+    {
+        <ActionDialog @bind-Open="_resolveOpen" Title="@($"Resolve {_details!.Number}")" Subtitle="Document how service was restored." Icon="check-circle"
+                      Options="ResolutionOptions" ChoiceLabel="Resolution code" TextLabel="Resolution notes"
+                      TextPlaceholder="What was done to restore the service? This is visible to the caller."
+                      ConfirmText="Resolve" ConfirmIcon="check-circle" ConfirmClass="btn-success" OnConfirm="ResolveAsync" />
+        <ActionDialog @bind-Open="_holdOpen" Title="@($"Put {_details!.Number} on hold")" Subtitle="SLA timers may pause while the incident is on hold." Icon="pause"
+                      Options="HoldOptions" ChoiceLabel="On-hold reason" TextLabel="Work note" TextRequired="false"
+                      TextPlaceholder="Optional internal note, e.g. what you are waiting for." ConfirmText="Put on hold" ConfirmIcon="pause" OnConfirm="HoldAsync" />
+        <ActionDialog @bind-Open="_reopenOpen" Title="@($"Reopen {_details!.Number}")" Subtitle="The incident returns to In Progress and the resolution is cleared." Icon="refresh"
+                      TextLabel="Reason" TextPlaceholder="Why does the issue persist?" ConfirmText="Reopen" ConfirmIcon="refresh" OnConfirm="ReopenAsync" />
+        <ActionDialog @bind-Open="_cancelOpen" Title="@($"Cancel {_details!.Number}")" Subtitle="Use this for duplicates or incidents logged in error." Icon="x-circle"
+                      TextLabel="Reason" TextPlaceholder="Why is this incident cancelled?" ConfirmText="Cancel incident" ConfirmClass="btn-danger" OnConfirm="CancelIncidentAsync" />
+        <ConfirmDialog @bind-Open="_createProblemOpen" Title="Create problem" ConfirmText="Create problem"
+                       Message="@($"A new problem will be created from {_details!.Number} (summary, category, priority, CI and group are copied) and the incident is linked to it.")"
+                       OnConfirm="CreateProblemAsync" />
+        <ConfirmDialog @bind-Open="_deleteOpen" Title="Delete incident" Danger="true" ConfirmText="Delete permanently"
+                       Message="@($"{_details!.Number} and its activity stream will be deleted permanently. This cannot be undone.")"
+                       OnConfirm="DeleteAsync" />
+    }
+}
+
+@code {
+    private const string TabActivity = "activity";
+    private const string TabRelated = "related";
+    private const string TabAttachments = "attachments";
+
+    private static readonly IReadOnlyList<KeyValuePair<int, string>> ResolutionOptions =
+        Enum.GetValues<IncidentResolutionCode>().Select(c => new KeyValuePair<int, string>((int)c, ItsmLabels.For(c))).ToList();
+
+    private static readonly IReadOnlyList<KeyValuePair<int, string>> HoldOptions =
+        Enum.GetValues<OnHoldReason>().Select(r => new KeyValuePair<int, string>((int)r, ItsmLabels.For(r))).ToList();
+
+    private IncidentDetails? _details;
+    private IncidentInput? _input;
+    private string _originalJson = string.Empty;
+    private IReadOnlyList<CategoryOption> _categories = [];
+    private IReadOnlyList<IncidentListItem>? _children;
+    private ActivityStream? _activity;
+    private Guid? _loadedId;
+    private Guid? _linkProblemId;
+    private string _tab = TabActivity;
+    private string? _shortDescriptionError;
+    private bool _notFound;
+    private bool _saving;
+    private bool _busy;
+    private bool _canWrite;
+    private bool _canCreate;
+    private bool _canDelete;
+    private bool _canCreateProblem;
+    private bool _canReadProblems;
+    private bool _menuOpen;
+    private bool _resolveOpen;
+    private bool _holdOpen;
+    private bool _reopenOpen;
+    private bool _cancelOpen;
+    private bool _createProblemOpen;
+    private bool _deleteOpen;
+
+    /// <summary>Gets or sets the incident identifier; <see langword="null"/> on the "new incident" route.</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool IsNew => Id is null;
+
+    private bool ReadOnly => IsNew ? !_canCreate : !_canWrite || _details is null || !_details.IsActive;
+
+    private bool IsDirty => _input is not null && JsonSerializer.Serialize(_input) != _originalJson;
+
+    private Priority CalculatedPriority => _input is null ? Priority.Planning : PriorityMatrix.Calculate(_input.Impact, _input.Urgency);
+
+    private IReadOnlyList<string> Subcategories =>
+        _categories.FirstOrDefault(c => c.Name == _input?.Category)?.Subcategories ?? (_input?.Subcategory is { Length: > 0 } s ? [s] : []);
+
+    private IReadOnlyList<string> FlowStates => _details?.State switch
+    {
+        IncidentState.OnHold => ["New", "In Progress", "On Hold", "Resolved", "Closed"],
+        IncidentState.Cancelled => ["New", "Cancelled"],
+        _ => ["New", "In Progress", "Resolved", "Closed"],
+    };
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new(TabActivity, "Activity", "activity"),
+        new(TabRelated, "Related", "link", (_details?.ChildCount ?? 0) + (_details?.ProblemId is null ? 0 : 1)),
+        new(TabAttachments, "Attachments", "paperclip"),
+    ];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _canWrite = await CurrentUser.HasPermissionAsync(Permissions.Incidents.Write);
+        _canCreate = await CurrentUser.HasPermissionAsync(Permissions.Incidents.Create);
+        _canDelete = await CurrentUser.HasPermissionAsync(Permissions.Incidents.Delete);
+        _canReadProblems = await CurrentUser.HasPermissionAsync(Permissions.Problems.Read);
+        _canCreateProblem = _canWrite && await CurrentUser.HasPermissionAsync(Permissions.Problems.Create);
+        var categories = await IncidentService.GetCategoriesAsync();
+        _categories = categories.Succeeded ? categories.Value! : [];
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_input is not null && _loadedId == Id)
+        {
+            return;
+        }
+
+        _loadedId = Id;
+        _tab = TabActivity;
+        if (IsNew)
+        {
+            _details = null;
+            _input = new IncidentInput { CallerId = CurrentUser.UserId };
+            _originalJson = JsonSerializer.Serialize(_input);
+            return;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        var result = await IncidentService.GetAsync(Id!.Value);
+        if (!result.Succeeded)
+        {
+            _notFound = result.ErrorKind == ResultErrorKind.NotFound;
+            if (!_notFound)
+            {
+                Toasts.Error("Could not load the incident", result.Error);
+            }
+
+            return;
+        }
+
+        _notFound = false;
+        _details = result.Value!;
+        _input = _details.Fields;
+        _originalJson = JsonSerializer.Serialize(_input);
+        _shortDescriptionError = null;
+        _children = null;
+        if (_tab == TabRelated)
+        {
+            await LoadRelatedAsync();
+        }
+
+        if (_activity is not null)
+        {
+            await _activity.ReloadAsync();
+        }
+    }
+
+    private async Task LoadRelatedAsync()
+    {
+        var children = await IncidentService.GetChildrenAsync(Id!.Value);
+        _children = children.Succeeded ? children.Value : [];
+    }
+
+    private void CategoryChanged()
+    {
+        if (_input is not null && !Subcategories.Contains(_input.Subcategory ?? string.Empty))
+        {
+            _input.Subcategory = null;
+        }
+    }
+
+    private void Discard()
+    {
+        _input = JsonSerializer.Deserialize<IncidentInput>(_originalJson);
+        _shortDescriptionError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_input is null)
+        {
+            return;
+        }
+
+        _shortDescriptionError = string.IsNullOrWhiteSpace(_input.ShortDescription) ? "A short description is required." : null;
+        if (_shortDescriptionError is not null)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            if (IsNew)
+            {
+                var created = await IncidentService.CreateAsync(_input);
+                if (Toasts.FromResult(created, "Incident created"))
+                {
+                    Nav.NavigateTo($"/incidents/{created.Value}");
+                }
+            }
+            else
+            {
+                var updated = await IncidentService.UpdateAsync(Id!.Value, _details!.Version, _input);
+                if (Toasts.FromResult(updated, "Incident saved"))
+                {
+                    await ReloadAsync();
+                }
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RunAsync(Func<Task<Result>> action, string successTitle)
+    {
+        _busy = true;
+        try
+        {
+            if (Toasts.FromResult(await action(), successTitle))
+            {
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task AssignToMeAsync() => RunAsync(() => IncidentService.AssignToMeAsync(Id!.Value), "Assigned to you");
+
+    private Task StartWorkAsync() => RunAsync(() => IncidentService.StartWorkAsync(Id!.Value), "Work started");
+
+    private Task CloseIncidentAsync() => RunAsync(() => IncidentService.CloseAsync(Id!.Value), "Incident closed");
+
+    private async Task<string?> CompleteAsync(Result result, string successTitle)
+    {
+        if (!result.Succeeded)
+        {
+            return result.Error;
+        }
+
+        Toasts.Success(successTitle);
+        await ReloadAsync();
+        return null;
+    }
+
+    private async Task<string?> ResolveAsync(int code, string notes) =>
+        await CompleteAsync(await IncidentService.ResolveAsync(Id!.Value, (IncidentResolutionCode)code, notes), "Incident resolved");
+
+    private async Task<string?> HoldAsync(int reason, string note) =>
+        await CompleteAsync(await IncidentService.PutOnHoldAsync(Id!.Value, (OnHoldReason)reason, note), "Incident put on hold");
+
+    private async Task<string?> ReopenAsync(int _, string reason) =>
+        await CompleteAsync(await IncidentService.ReopenAsync(Id!.Value, reason), "Incident reopened");
+
+    private async Task<string?> CancelIncidentAsync(int _, string reason) =>
+        await CompleteAsync(await IncidentService.CancelAsync(Id!.Value, reason), "Incident cancelled");
+
+    private async Task CreateProblemAsync()
+    {
+        var result = await ProblemService.CreateFromIncidentAsync(Id!.Value);
+        if (Toasts.FromResult(result, "Problem created and linked"))
+        {
+            Nav.NavigateTo($"/problems/{result.Value}");
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var result = await IncidentService.DeleteAsync(Id!.Value);
+        if (Toasts.FromResult(result, "Incident deleted"))
+        {
+            Nav.NavigateTo("/incidents");
+        }
+    }
+
+    private async Task LinkProblemAsync(Guid? problemId)
+    {
+        _busy = true;
+        try
+        {
+            if (Toasts.FromResult(await IncidentService.LinkProblemAsync(Id!.Value, problemId), problemId is null ? "Problem unlinked" : "Problem linked"))
+            {
+                _linkProblemId = null;
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<IReadOnlyList<LookupItem>> SearchIncidentsAsync(string? term)
+    {
+        var result = await IncidentService.SearchAsync(term, Id);
+        return result.Succeeded ? result.Value! : [];
+    }
+
+    private Task<LookupItem?> ResolveParentAsync(Guid id) =>
+        Task.FromResult<LookupItem?>(_details?.Fields.ParentIncidentId == id && _details.ParentIncidentNumber is not null
+            ? new LookupItem(id, _details.ParentIncidentNumber)
+            : null);
+
+    private async Task<IReadOnlyList<LookupItem>> SearchProblemsAsync(string? term)
+    {
+        var result = await ProblemService.SearchAsync(term);
+        return result.Succeeded ? result.Value! : [];
+    }
+
+    private async Task ShowTabAsync(string tab)
+    {
+        _menuOpen = false;
+        _tab = tab;
+        if (tab == TabRelated && _children is null)
+        {
+            await LoadRelatedAsync();
+        }
+    }
+
+    private RenderFragment RelatedTab => __builder =>
+    {
+        var d = _details!;
+        <div class="stack">
+            <div>
+                <div class="eyebrow mb-3">Problem</div>
+                @if (d.ProblemId is { } problemId)
+                {
+                    <div class="attachment">
+                        <div class="file-icon" style="background:var(--purple-soft);color:var(--purple)"><Icon Name="lightbulb" Size="16" /></div>
+                        <div class="file-meta">
+                            <a class="mono" style="font-weight:650" href="/problems/@problemId">@d.ProblemNumber</a>
+                            <div class="small muted truncate">@d.ProblemShortDescription</div>
+                        </div>
+                        @if (d.ProblemState is { } problemState)
+                        {
+                            <StatusPill Text="@ItsmLabels.For(problemState)" />
+                        }
+                        @if (_canWrite)
+                        {
+                            <button class="btn btn-ghost btn-sm" disabled="@_busy" @onclick="() => LinkProblemAsync(null)"><Icon Name="x" Size="14" /> Unlink</button>
+                        }
+                    </div>
+                }
+                else if (_canWrite && _canReadProblems && d.IsActive)
+                {
+                    <div class="flex gap-2 items-center flex-wrap">
+                        <div class="flex-1" style="min-width:260px">
+                            <ReferencePicker @bind-Value="_linkProblemId" Search="SearchProblemsAsync" Placeholder="Search active problems…" Icon="lightbulb" />
+                        </div>
+                        <button class="btn btn-secondary" disabled="@(_linkProblemId is null || _busy)" @onclick="() => LinkProblemAsync(_linkProblemId)"><Icon Name="link" Size="16" /> Link</button>
+                        @if (_canCreateProblem)
+                        {
+                            <button class="btn btn-ghost" @onclick="() => _createProblemOpen = true"><Icon Name="plus" Size="16" /> Create problem</button>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="small faint">No problem linked.</div>
+                }
+            </div>
+
+            <div>
+                <div class="eyebrow mb-3">Child incidents</div>
+                @if (_children is null)
+                {
+                    <Skeleton Lines="3" Height="36px" />
+                }
+                else if (_children.Count == 0)
+                {
+                    <div class="small faint">No child incidents. Set this incident as parent on related incidents to track them here.</div>
+                }
+                else
+                {
+                    <div class="table-wrap" style="border:1px solid var(--border);border-radius:var(--r)">
+                        <table class="table compact">
+                            <thead><tr><th>Number</th><th>Priority</th><th>State</th><th>Short description</th><th>Assigned to</th></tr></thead>
+                            <tbody>
+                                @foreach (var child in _children)
+                                {
+                                    <tr class="clickable" @onclick="@(() => Nav.NavigateTo($"/incidents/{child.Id}"))">
+                                        <td><span class="cell-link">@child.Number</span></td>
+                                        <td><PriorityBadge Priority="child.Priority" Compact="true" /></td>
+                                        <td><StatusPill Text="@child.StateLabel" /></td>
+                                        <td class="cell-primary">@child.ShortDescription</td>
+                                        <td><PersonCell Name="@child.AssignedToName" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    };
+}

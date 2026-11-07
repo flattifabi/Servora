@@ -1,0 +1,259 @@
+@page "/incidents"
+@* Incident list: KPI row, saved quick filters, server-side paged/sorted/searchable table and bulk assignment. *@
+@attribute [RequirePermission(Permissions.Incidents.Read)]
+@inject IIncidentService IncidentService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Incidents Â· Servora</PageTitle>
+<PickerLayerFix />
+
+<PageHeader Title="Incidents" Subtitle="Restore normal service operation as quickly as possible." Icon="alert-triangle">
+    <Actions>
+        <button class="btn btn-secondary" @onclick="RefreshAsync" disabled="@_loading"><Icon Name="refresh" Size="16" /> Refresh</button>
+        <PermissionView Permission="@Permissions.Incidents.Create">
+            <a class="btn btn-primary" href="/incidents/new"><Icon Name="plus" Size="16" /> New incident</a>
+        </PermissionView>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    @if (_stats is null)
+    {
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card"><Skeleton Lines="3" Height="16px" /></div>
+        }
+    }
+    else
+    {
+        <StatCard Label="Open incidents" Value="@_stats.Open.ToString("N0")" Icon="inbox" Tone="primary"
+                  Caption="@($"{_stats.OpenedTrend.LastOrDefault():0} opened today")" Trend="_stats.OpenedTrend"
+                  OnClick="() => SetFilterAsync(IncidentQuickFilter.AllActive)" />
+        <StatCard Label="Critical (P1)" Value="@_stats.Critical.ToString("N0")" Icon="flame" Tone="danger"
+                  Caption="@($"{_stats.MajorOpen} major incident{(_stats.MajorOpen == 1 ? "" : "s")}")"
+                  OnClick="() => SetFilterAsync(IncidentQuickFilter.HighPriority)" />
+        <StatCard Label="Unassigned" Value="@_stats.Unassigned.ToString("N0")" Icon="user-plus" Tone="warning"
+                  Caption="waiting for an owner" OnClick="() => SetFilterAsync(IncidentQuickFilter.Unassigned)" />
+        <StatCard Label="SLA breached" Value="@_stats.SlaBreached.ToString("N0")" Icon="timer" Tone="@(_stats.SlaBreached > 0 ? "danger" : "success")"
+                  Caption="@($"{_stats.ResolvedLast24Hours} resolved in 24 h")" Trend="_stats.ResolvedTrend" />
+    }
+</div>
+
+<DataTable TItem="IncidentListItem" Items="_page.Items" TotalCount="_page.TotalCount" PageNumber="_page.Page" PageSize="_page.PageSize"
+           Loading="_loading" SortBy="@_sort" SortDescending="_desc" OnPageChanged="GoToPageAsync" OnSortChanged="SortAsync" OnSearch="SearchAsync"
+           OnRowClick="@(r => Nav.NavigateTo($"/incidents/{r.Id}"))" Selectable="_canWrite" @bind-SelectedItems="_selected"
+           SearchPlaceholder="Search number, summary, category or personâ€¦" EmptyIcon="check-circle" EmptyTitle="@EmptyTitle"
+           EmptyText="@EmptyText">
+    <Toolbar>
+        <div class="segmented" style="flex-wrap:wrap">
+            @foreach (var (filter, label) in s_filters)
+            {
+                <button class="@(_filter == filter ? "active" : null)" @onclick="() => SetFilterAsync(filter)">@label</button>
+            }
+        </div>
+    </Toolbar>
+    <BulkActions>
+        <button class="btn btn-secondary btn-sm" @onclick="AssignSelectedToMeAsync" disabled="@_bulkBusy"><Icon Name="user-check" Size="14" /> Assign to me</button>
+        <button class="btn btn-primary btn-sm" @onclick="() => _assignOpen = true"><Icon Name="users" Size="14" /> Assignâ€¦</button>
+        <button class="btn btn-ghost btn-sm" @onclick="() => _selected = []">Clear</button>
+    </BulkActions>
+    <EmptyContent>
+        @if (_filter != IncidentQuickFilter.All)
+        {
+            <button class="btn btn-secondary" @onclick="() => SetFilterAsync(IncidentQuickFilter.All)">Show all incidents</button>
+        }
+    </EmptyContent>
+    <Columns>
+        <DataColumn TItem="IncidentListItem" Title="Number" SortKey="Number" Width="130px">
+            <Template>
+                <span class="flex items-center gap-2">
+                    <span class="cell-link">@context.Number</span>
+                    @if (context.IsMajorIncident)
+                    {
+                        <span title="Major incident" class="text-danger"><Icon Name="flame" Size="14" /></span>
+                    }
+                </span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="IncidentListItem" Title="Priority" SortKey="Priority" Width="115px">
+            <Template><PriorityBadge Priority="context.Priority" /></Template>
+        </DataColumn>
+        <DataColumn TItem="IncidentListItem" Title="State" SortKey="State" Width="120px">
+            <Template><StatusPill Text="@context.StateLabel" /></Template>
+        </DataColumn>
+        <DataColumn TItem="IncidentListItem" Title="Short description" SortKey="ShortDescription">
+            <Template>
+                <span class="cell-primary truncate" style="display:block;max-width:min(380px, 23vw)" title="@context.ShortDescription">@context.ShortDescription</span>
+                <span class="cell-sub">@(context.Category ?? "Uncategorized")@(context.CallerName is null ? null : $" Â· {context.CallerName}") Â· opened <RelativeTime Value="context.OpenedAt" /></span>
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="IncidentListItem" Title="Caller" Width="70px">
+            <Template>
+                @if (context.CallerName is null)
+                {
+                    <span class="faint">â€”</span>
+                }
+                else
+                {
+                    <Avatar Name="@context.CallerName" Size="sm" />
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="IncidentListItem" Title="Assigned to">
+            <Template>
+                <PersonCell Name="@context.AssignedToName" />
+                @if (context.AssignmentGroupName is not null)
+                {
+                    <span class="cell-sub">@context.AssignmentGroupName</span>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="IncidentListItem" Title="Updated" SortKey="UpdatedAt" Width="120px">
+            <Template><RelativeTime Value="context.UpdatedAt" Class="small muted" /></Template>
+        </DataColumn>
+    </Columns>
+</DataTable>
+
+<BulkAssignDialog @bind-Open="_assignOpen" Count="_selected.Count" RecordLabel="incident" OnAssign="AssignSelectedAsync" />
+
+@code {
+    private static readonly (IncidentQuickFilter Filter, string Label)[] s_filters =
+    [
+        (IncidentQuickFilter.AllActive, "All active"),
+        (IncidentQuickFilter.MyOpen, "My open"),
+        (IncidentQuickFilter.Unassigned, "Unassigned"),
+        (IncidentQuickFilter.HighPriority, "P1 / P2"),
+        (IncidentQuickFilter.MyGroups, "My groups"),
+        (IncidentQuickFilter.Major, "Major"),
+        (IncidentQuickFilter.Resolved, "Resolved"),
+        (IncidentQuickFilter.All, "All"),
+    ];
+
+    private PagedResult<IncidentListItem> _page = PagedResult<IncidentListItem>.Empty();
+    private IncidentStats? _stats;
+    private HashSet<IncidentListItem> _selected = [];
+    private IncidentQuickFilter _filter = IncidentQuickFilter.AllActive;
+    private string _sort = "Priority";
+    private bool _desc;
+    private string? _search;
+    private int _pageNumber = 1;
+    private bool _loading = true;
+    private bool _canWrite;
+    private bool _assignOpen;
+    private bool _bulkBusy;
+
+    /// <summary>Gets or sets the initial quick filter from the query string (<c>my</c>, <c>unassigned</c>, <c>high</c>, <c>groups</c>, <c>major</c>, <c>resolved</c>, <c>all</c>).</summary>
+    [SupplyParameterFromQuery(Name = "filter")] public string? FilterParameter { get; set; }
+
+    private string EmptyTitle => string.IsNullOrWhiteSpace(_search) ? "No incidents here" : "No matching incidents";
+
+    private string EmptyText => _filter == IncidentQuickFilter.MyOpen
+        ? "You have no open incidents assigned. Nice work!"
+        : "No incidents match the current filter and search.";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _filter = FilterParameter?.ToLowerInvariant() switch
+        {
+            "my" => IncidentQuickFilter.MyOpen,
+            "unassigned" => IncidentQuickFilter.Unassigned,
+            "high" => IncidentQuickFilter.HighPriority,
+            "groups" => IncidentQuickFilter.MyGroups,
+            "major" => IncidentQuickFilter.Major,
+            "resolved" => IncidentQuickFilter.Resolved,
+            "all" => IncidentQuickFilter.All,
+            _ => IncidentQuickFilter.AllActive,
+        };
+        _canWrite = await CurrentUser.HasPermissionAsync(Permissions.Incidents.Write);
+        await Task.WhenAll(LoadAsync(), LoadStatsAsync());
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await IncidentService.ListAsync(_filter, new PageRequest { Page = _pageNumber, PageSize = 25, SortBy = _sort, SortDescending = _desc, Search = _search });
+        if (result.Succeeded)
+        {
+            _page = result.Value!;
+        }
+        else
+        {
+            Toasts.Error("Could not load incidents", result.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        var result = await IncidentService.GetStatsAsync();
+        if (result.Succeeded)
+        {
+            _stats = result.Value;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadAsync();
+        await LoadStatsAsync();
+    }
+
+    private async Task SetFilterAsync(IncidentQuickFilter filter)
+    {
+        _filter = filter;
+        _pageNumber = 1;
+        _selected = [];
+        await LoadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _pageNumber = page;
+        await LoadAsync();
+    }
+
+    private async Task SortAsync((string SortBy, bool Descending) sort)
+    {
+        (_sort, _desc) = sort;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task<bool> AssignSelectedAsync(Guid? groupId, Guid? userId)
+    {
+        var result = await IncidentService.AssignAsync(_selected.Select(s => s.Id).ToList(), groupId, userId);
+        if (!result.Succeeded)
+        {
+            Toasts.Error("Assignment failed", result.Error);
+            return false;
+        }
+
+        Toasts.Success($"{result.Value} incident{(result.Value == 1 ? "" : "s")} assigned");
+        _selected = [];
+        await RefreshAsync();
+        return true;
+    }
+
+    private async Task AssignSelectedToMeAsync()
+    {
+        if (CurrentUser.UserId is not { } me)
+        {
+            return;
+        }
+
+        _bulkBusy = true;
+        await AssignSelectedAsync(null, me);
+        _bulkBusy = false;
+    }
+}
