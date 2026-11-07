@@ -1,0 +1,571 @@
+@page "/analytics/reports/new"
+@page "/analytics/reports/{Id:guid}"
+@* Report builder: source table, filter, grouping, measure and visualization with live preview; save, share and pin. *@
+@attribute [RequirePermission(Permissions.Analytics.Read)]
+@implements IDisposable
+@inject IReportService ReportService
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(_report?.Name ?? "New report") · Reports · Servora</PageTitle>
+
+<PageHeader Title="@(_report?.Name ?? "New report")" Icon="@ChartAdapters.IconOf(_chartType)">
+    <Breadcrumbs>
+        <a href="/analytics">Analytics</a> <Icon Name="chevron-right" Size="12" />
+        <a href="/analytics/reports">Reports</a> <Icon Name="chevron-right" Size="12" />
+        @(_report is null ? "New" : _report.Name)
+    </Breadcrumbs>
+    <SubtitleContent>
+        <div class="flex items-center gap-2 mt-2 flex-wrap">
+            @if (_report is not null)
+            {
+                <span class="pill @(_report.Visibility == ReportVisibility.Private ? "pill-neutral" : _report.Visibility == ReportVisibility.Role ? "pill-info" : "pill-success")">
+                    @(_report.Visibility == ReportVisibility.Role ? $"Shared with {_report.SharedWithRole}" : _report.Visibility == ReportVisibility.Everyone ? "Shared with everyone" : "Private")
+                </span>
+                <span class="small muted">by @_report.OwnerName · updated <RelativeTime Value="_report.UpdatedAt" /></span>
+                @if (!_canEdit)
+                {
+                    <span class="pill pill-warning no-dot"><Icon Name="lock" Size="12" /> read only</span>
+                }
+            }
+            else
+            {
+                <span class="small muted">Choose a table, filter it, group it and pick a visualization. The preview updates live.</span>
+            }
+        </div>
+    </SubtitleContent>
+    <Actions>
+        @if (_report is not null)
+        {
+            <button class="btn btn-secondary" @onclick="TogglePin" disabled="@_busy">
+                <Icon Name="star" Size="16" /> @(_pinned ? "Unpin" : "Pin to dashboard")
+            </button>
+        }
+        @if (_report is not null && _canManage)
+        {
+            <button class="btn btn-secondary" @onclick="SaveCopy" disabled="@_busy"><Icon Name="copy" Size="16" /> Save as copy</button>
+        }
+        @if (_canEdit)
+        {
+            @if (_report is not null)
+            {
+                <button class="btn btn-outline-danger" @onclick="() => _confirmDelete = true" disabled="@_busy"><Icon Name="trash" Size="16" /> Delete</button>
+            }
+            <button class="btn btn-primary" @onclick="() => SaveAsync(copy: false)" disabled="@_busy">
+                @if (_busy)
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="save" Size="16" />
+                }
+                Save
+            </button>
+        }
+    </Actions>
+</PageHeader>
+
+@if (_tables is null)
+{
+    <div class="builder"><div class="card card-body"><Skeleton Lines="10" /></div><div class="card card-body"><Skeleton Lines="12" /></div></div>
+}
+else if (_tables.Count == 0)
+{
+    <div class="card"><EmptyState Icon="lock" Title="No tables available" Text="You do not have read access to any table that can be reported on." /></div>
+}
+else
+{
+    <div class="builder">
+        <aside class="stack builder-config" style="gap:16px">
+            <div class="card">
+                <div class="card-header"><h3><span class="step">1</span> Source</h3></div>
+                <div class="card-body">
+                    <FormField Label="Table" Required="true">
+                        <select class="select" value="@_tableName" @onchange="e => ChangeTable(e.Value?.ToString())" disabled="@(!_canEdit)">
+                            @foreach (var table in _tables)
+                            {
+                                <option value="@table.Table.Name">@table.Table.PluralLabel@(table.Table.IsCustom ? " (custom)" : null)</option>
+                            }
+                        </select>
+                    </FormField>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3><span class="step">2</span> Filter</h3>
+                    @if (!_condition.IsEmpty)
+                    {
+                        <span class="pill pill-primary no-dot">@CountRules(_condition) condition(s)</span>
+                    }
+                </div>
+                <div class="card-body">
+                    @if (Table is { } t)
+                    {
+                        @if (_canEdit)
+                        {
+                            <ConditionBuilder Condition="_condition" Fields="t.Table.Fields" ConditionChanged="OnConditionChanged" />
+                        }
+                        else if (_condition.IsEmpty)
+                        {
+                            <span class="small muted">All records.</span>
+                        }
+                        else
+                        {
+                            <pre class="mb-0">@ConditionSerializer.Serialize(_condition)</pre>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3><span class="step">3</span> Group &amp; measure</h3></div>
+                <div class="card-body stack" style="gap:14px">
+                    <FormField Label="Group by" Help="Choice, reference, date and text fields can be grouped.">
+                        <select class="select" value="@(_groupBy ?? string.Empty)" @onchange="e => Change(() => _groupBy = NullIfEmpty(e.Value))" disabled="@(!_canEdit)">
+                            <option value="">— No grouping (single value) —</option>
+                            @foreach (var field in Table?.GroupableFields ?? [])
+                            {
+                                <option value="@field.Name">@field.Label</option>
+                            }
+                        </select>
+                    </FormField>
+                    @if (GroupField is { } gf && ReportKeyFormatter.IsDateType(gf.Type))
+                    {
+                        <FormField Label="Date buckets">
+                            <div class="segmented w-full">
+                                @foreach (var interval in Enum.GetValues<ReportDateInterval>())
+                                {
+                                    <button class="@(_interval == interval ? "active" : null)" disabled="@(!_canEdit)" @onclick="() => Change(() => _interval = interval)">@interval</button>
+                                }
+                            </div>
+                        </FormField>
+                    }
+                    <div class="form-grid">
+                        <FormField Label="Measure">
+                            <select class="select" value="@_aggregate" @onchange="e => Change(() => _aggregate = Enum.Parse<ReportAggregate>(e.Value!.ToString()!))" disabled="@(!_canEdit)">
+                                @foreach (var aggregate in Enum.GetValues<ReportAggregate>())
+                                {
+                                    if (aggregate == ReportAggregate.Count || Table?.NumericFields.Count > 0)
+                                    {
+                                        <option value="@aggregate">@(aggregate == ReportAggregate.Count ? "Count of records" : aggregate.ToString())</option>
+                                    }
+                                }
+                            </select>
+                        </FormField>
+                        @if (_aggregate != ReportAggregate.Count)
+                        {
+                            <FormField Label="Of field">
+                                <select class="select" value="@(_aggregateField ?? string.Empty)" @onchange="e => Change(() => _aggregateField = NullIfEmpty(e.Value))" disabled="@(!_canEdit)">
+                                    <option value="">— Field —</option>
+                                    @foreach (var field in Table?.NumericFields ?? [])
+                                    {
+                                        <option value="@field.Name">@field.Label</option>
+                                    }
+                                </select>
+                            </FormField>
+                        }
+                        else
+                        {
+                            <FormField Label="Max. groups" Help="Smaller groups are combined into 'Other'.">
+                                <input class="input" type="number" min="2" max="@ReportSpec.MaxGroupLimit" value="@_maxGroups" disabled="@(!_canEdit)"
+                                       @onchange="e => Change(() => _maxGroups = int.TryParse(e.Value?.ToString(), out var v) ? Math.Clamp(v, 2, ReportSpec.MaxGroupLimit) : 12)" />
+                            </FormField>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3><span class="step">4</span> Visualization</h3></div>
+                <div class="card-body">
+                    <div class="chart-types">
+                        @foreach (var type in Enum.GetValues<ReportChartType>())
+                        {
+                            <button class="chart-type @(type == _chartType ? "active" : null)" disabled="@(!_canEdit)" @onclick="() => Change(() => _chartType = type)">
+                                <Icon Name="@ChartAdapters.IconOf(type)" Size="20" />
+                                <span>@ChartAdapters.LabelOf(type)</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @if (_canEdit)
+            {
+                <div class="card">
+                    <div class="card-header"><h3><span class="step">5</span> Save &amp; share</h3></div>
+                    <div class="card-body stack" style="gap:14px">
+                        <FormField Label="Name" Required="true" Error="@_nameError">
+                            <input class="input" maxlength="200" @bind="_name" placeholder="e.g. Open incidents by assignment group" />
+                        </FormField>
+                        <FormField Label="Description">
+                            <textarea class="textarea" rows="2" maxlength="2000" @bind="_description"></textarea>
+                        </FormField>
+                        <FormField Label="Visibility">
+                            <div class="segmented w-full">
+                                <button class="@(_visibility == ReportVisibility.Private ? "active" : null)" @onclick="() => _visibility = ReportVisibility.Private"><Icon Name="lock" Size="13" /> Private</button>
+                                <button class="@(_visibility == ReportVisibility.Role ? "active" : null)" @onclick="() => _visibility = ReportVisibility.Role"><Icon Name="shield" Size="13" /> Role</button>
+                                <button class="@(_visibility == ReportVisibility.Everyone ? "active" : null)" @onclick="() => _visibility = ReportVisibility.Everyone"><Icon Name="globe" Size="13" /> Everyone</button>
+                            </div>
+                        </FormField>
+                        @if (_visibility == ReportVisibility.Role)
+                        {
+                            <FormField Label="Share with role" Required="true" Help="Members of this role (directly or through a group) can view and pin the report.">
+                                <select class="select" @bind="_role">
+                                    <option value="">— Role —</option>
+                                    @foreach (var role in _roles)
+                                    {
+                                        <option value="@role.Name">@role.Label (@role.Name)</option>
+                                    }
+                                </select>
+                            </FormField>
+                        }
+                        <div class="small faint">Viewers only see data of tables they are allowed to read.</div>
+                    </div>
+                </div>
+            }
+        </aside>
+
+        <section class="stack" style="gap:16px;min-width:0">
+            <div class="card preview-card">
+                <div class="card-header">
+                    <div>
+                        <h3><Icon Name="sparkles" Size="16" /> Preview</h3>
+                        <div class="card-subtitle">
+                            @if (_result is { } r)
+                            {
+                                <span>@r.AggregateLabel of @r.TableLabel.ToLowerInvariant()@(r.GroupByLabel is null ? null : " by " + r.GroupByLabel.ToLowerInvariant()) · @r.RecordCount.ToString("N0") records · @r.DurationMs ms</span>
+                            }
+                            else
+                            {
+                                <span>Live result of the current configuration</span>
+                            }
+                        </div>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" @onclick="RunAsync" disabled="@_running">
+                        @if (_running)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="play" Size="14" />
+                        }
+                        Run
+                    </button>
+                </div>
+                <div class="card-body">
+                    @if (_error is not null)
+                    {
+                        <div class="alert alert-warning mb-4"><Icon Name="alert-triangle" Size="16" /><div>@_error</div></div>
+                    }
+                    @foreach (var warning in _result?.Warnings ?? [])
+                    {
+                        <div class="alert alert-info mb-4"><Icon Name="info" Size="16" /><div>@warning</div></div>
+                    }
+                    @if (_error is null)
+                    {
+                        <div class="@(_running ? "previewing" : null)">
+                            <ReportChart Result="_result" ChartType="_chartType" Height="320" />
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (_result is { Rows.Count: > 0 } data && _chartType is not ReportChartType.Table && _chartType is not ReportChartType.Metric)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <h3><Icon Name="table" Size="16" /> Data</h3>
+                        <span class="small muted">Total: <b>@ChartAdapters.FormatValue(data.Total)</b></span>
+                    </div>
+                    <ReportChart Result="data" ChartType="ReportChartType.Table" Height="280" />
+                </div>
+            }
+        </section>
+    </div>
+}
+
+<ConfirmDialog @bind-Open="_confirmDelete" Danger="true" Title="Delete report?" ConfirmText="Delete"
+               Message="@($"'{_report?.Name}' will be deleted for everyone it is shared with and removed from all dashboards. This cannot be undone.")"
+               OnConfirm="DeleteAsync" />
+
+@code {
+    private IReadOnlyList<ReportTableInfo>? _tables;
+    private IReadOnlyList<ShareableRole> _roles = [];
+    private ReportDefinition? _report;
+    private ReportResult? _result;
+    private CancellationTokenSource? _debounce;
+    private ConditionGroup _condition = new();
+    private string _tableName = string.Empty;
+    private string? _groupBy;
+    private ReportDateInterval _interval = ReportDateInterval.Day;
+    private ReportAggregate _aggregate = ReportAggregate.Count;
+    private string? _aggregateField;
+    private ReportChartType _chartType = ReportChartType.Bar;
+    private int _maxGroups = 12;
+    private string _name = string.Empty;
+    private string? _description;
+    private ReportVisibility _visibility = ReportVisibility.Private;
+    private string? _role;
+    private string? _error;
+    private string? _nameError;
+    private bool _canManage;
+    private bool _canEdit;
+    private bool _pinned;
+    private bool _busy;
+    private bool _running;
+    private bool _confirmDelete;
+
+    /// <summary>Gets or sets the report id (null for a new report).</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    private ReportTableInfo? Table => _tables?.FirstOrDefault(t => string.Equals(t.Table.Name, _tableName, StringComparison.OrdinalIgnoreCase));
+
+    private FieldDefinition? GroupField => _groupBy is null ? null : Table?.Table.FindField(_groupBy);
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _canManage = await CurrentUser.HasPermissionAsync(Permissions.Analytics.ManageReports);
+        var tables = await ReportService.GetTablesAsync();
+        IReadOnlyList<ReportTableInfo> available = tables.Succeeded && tables.Value is { } list ? list : [];
+        _tables = available;
+        if (_canManage)
+        {
+            var roles = await ReportService.GetShareableRolesAsync();
+            _roles = roles.Value ?? [];
+        }
+
+        if (Id is { } id)
+        {
+            var report = await ReportService.GetAsync(id);
+            if (!report.Succeeded)
+            {
+                Toasts.Error("Report unavailable", report.Error);
+                Nav.NavigateTo("/analytics/reports");
+                return;
+            }
+
+            Load(report.Value!);
+            _canEdit = _canManage && (report.Value!.OwnerId == CurrentUser.UserId || await CurrentUser.HasPermissionAsync(Permissions.All));
+            var pinned = await ReportService.GetPinnedAsync();
+            _pinned = pinned.Value?.Any(p => p.Report.Id == id) ?? false;
+        }
+        else
+        {
+            _report = null;
+            _canEdit = _canManage;
+            if (!_canManage)
+            {
+                Toasts.Warning("Read-only access", "You need the permission to manage reports to create new ones.");
+            }
+
+            ChangeTableCore(available.FirstOrDefault(t => t.Table.Name == Servora.Domain.Common.TableNames.ConfigurationItem)?.Table.Name ?? available.FirstOrDefault()?.Table.Name);
+        }
+
+        await RunAsync();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+
+    private static string? NullIfEmpty(object? value) => string.IsNullOrWhiteSpace(value?.ToString()) ? null : value.ToString();
+
+    private static int CountRules(ConditionGroup group) => group.Rules.Count + group.Groups.Sum(CountRules);
+
+    private void Load(ReportDefinition report)
+    {
+        _report = report;
+        _tableName = report.TableName;
+        _condition = ConditionSerializer.Deserialize(report.ConditionJson);
+        _groupBy = report.GroupBy;
+        _interval = report.DateInterval;
+        _aggregate = report.Aggregate;
+        _aggregateField = report.AggregateField;
+        _chartType = report.ChartType;
+        _maxGroups = report.MaxGroups;
+        _name = report.Name;
+        _description = report.Description;
+        _visibility = report.Visibility;
+        _role = report.SharedWithRole;
+    }
+
+    private ReportSpec BuildSpec() => new()
+    {
+        TableName = _tableName,
+        Condition = _condition,
+        GroupBy = _groupBy,
+        DateInterval = _interval,
+        Aggregate = _aggregate,
+        AggregateField = _aggregate == ReportAggregate.Count ? null : _aggregateField,
+        ChartType = _chartType,
+        MaxGroups = _maxGroups,
+    };
+
+    private void ChangeTableCore(string? tableName)
+    {
+        _tableName = tableName ?? string.Empty;
+        _condition = new ConditionGroup();
+        _aggregate = ReportAggregate.Count;
+        _aggregateField = null;
+        var table = Table;
+        var preferred = table?.GroupableFields.FirstOrDefault(f => f.Type == FieldType.Choice) ?? table?.GroupableFields.FirstOrDefault();
+        _groupBy = preferred?.Name;
+        if (_report is null && table is not null)
+        {
+            _name = preferred is null ? table.Table.PluralLabel : $"{table.Table.PluralLabel} by {preferred.Label.ToLowerInvariant()}";
+        }
+    }
+
+    private async Task ChangeTable(string? tableName)
+    {
+        ChangeTableCore(tableName);
+        await RunAsync();
+    }
+
+    private Task Change(Action change)
+    {
+        change();
+        if (_groupBy is null && _chartType is not (ReportChartType.Metric or ReportChartType.Table))
+        {
+            _chartType = ReportChartType.Metric;
+        }
+        else if (_groupBy is not null && _chartType == ReportChartType.Metric)
+        {
+            _chartType = GroupField is { } field && ReportKeyFormatter.IsDateType(field.Type) ? ReportChartType.Line : ReportChartType.Bar;
+        }
+
+        return SchedulePreviewAsync();
+    }
+
+    private Task OnConditionChanged(ConditionGroup _) => SchedulePreviewAsync();
+
+    private async Task SchedulePreviewAsync()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        try
+        {
+            await Task.Delay(350, token);
+            await RunAsync();
+        }
+        catch (TaskCanceledException)
+        {
+            // Superseded by a newer change.
+        }
+    }
+
+    private async Task RunAsync()
+    {
+        if (string.IsNullOrEmpty(_tableName))
+        {
+            return;
+        }
+
+        if (_aggregate != ReportAggregate.Count && string.IsNullOrEmpty(_aggregateField))
+        {
+            _error = "Choose the numeric field to aggregate.";
+            return;
+        }
+
+        _running = true;
+        StateHasChanged();
+        try
+        {
+            var result = await ReportService.RunAsync(BuildSpec());
+            _error = result.Succeeded ? null : result.Error;
+            _result = result.Succeeded ? result.Value : null;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private Task SaveCopy()
+    {
+        _name = "Copy of " + _name;
+        _visibility = ReportVisibility.Private;
+        return SaveAsync(copy: true);
+    }
+
+    private async Task SaveAsync(bool copy)
+    {
+        _nameError = string.IsNullOrWhiteSpace(_name) ? "Please enter a name." : null;
+        if (_nameError is not null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var request = new ReportSaveRequest(copy ? null : _report?.Id, _name, _description, BuildSpec(), _visibility, _role);
+            var result = await ReportService.SaveAsync(request);
+            if (Toasts.FromResult(result, copy ? "Copy saved" : "Report saved"))
+            {
+                if (copy || _report is null)
+                {
+                    Nav.NavigateTo($"/analytics/reports/{result.Value}");
+                }
+                else
+                {
+                    var reloaded = await ReportService.GetAsync(result.Value);
+                    if (reloaded.Succeeded)
+                    {
+                        Load(reloaded.Value!);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_report is null)
+        {
+            return;
+        }
+
+        if (Toasts.FromResult(await ReportService.DeleteAsync(_report.Id), "Report deleted"))
+        {
+            Nav.NavigateTo("/analytics/reports");
+        }
+    }
+
+    private async Task TogglePin()
+    {
+        if (_report is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = _pinned ? await ReportService.UnpinAsync(_report.Id) : await ReportService.PinAsync(_report.Id);
+            if (Toasts.FromResult(result, _pinned ? "Removed from your dashboard" : "Pinned to your dashboard"))
+            {
+                _pinned = !_pinned;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

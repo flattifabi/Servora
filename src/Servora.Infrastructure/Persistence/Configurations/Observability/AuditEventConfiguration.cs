@@ -25,7 +25,9 @@ internal sealed class AuditEventConfiguration : IEntityTypeConfiguration<AuditEv
         builder.Property(a => a.CorrelationId).HasMaxLength(64);
         builder.Property(a => a.PreviousHash).HasMaxLength(64);
         builder.Property(a => a.Hash).HasMaxLength(64);
+        builder.HasIndex(a => a.Sequence);
         builder.HasIndex(a => a.OccurredAt);
+        builder.HasIndex(a => a.ActorName);
         builder.HasIndex(a => new { a.Category, a.Action });
     }
 }

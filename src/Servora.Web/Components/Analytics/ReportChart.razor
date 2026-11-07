@@ -1,0 +1,94 @@
+@* Renders a report result with the requested visualization (bar, ranking, trend, donut, table or metric). *@
+@if (Result is null)
+{
+    <Skeleton Lines="6" Height="18px" />
+}
+else if (Result.Rows.Count == 0 || Result.RecordCount == 0)
+{
+    <AnalyticsState Availability="AnalyticsAvailability.NoData" Message="@($"No {Result.TableLabel.ToLowerInvariant()} match this report.")" MinHeight="Height" />
+}
+else
+{
+    switch (ChartType ?? Result.ChartType)
+    {
+        case ReportChartType.Metric:
+            <div class="report-metric" style="min-height:@(Height)px">
+                <div class="metric-value gradient-text">@ChartAdapters.FormatValue(Result.Total)</div>
+                <div class="metric-label">@Result.AggregateLabel · @Result.TableLabel</div>
+                <div class="metric-foot">@Result.RecordCount.ToString("N0") records evaluated</div>
+            </div>
+            break;
+        case ReportChartType.Donut:
+            <DonutChart Slices="ChartAdapters.ToSlices(Result.Rows)" CenterLabel="@(Result.Aggregate == ReportAggregate.Count ? "records" : Result.AggregateLabel)" ValueFormat="@Format" Size="@Math.Min(200, Height)" />
+            break;
+        case ReportChartType.Line:
+            <LineChart Labels="Labels" Series="Series" Height="Height" ValueFormat="@Format" />
+            break;
+        case ReportChartType.HorizontalBar:
+            <BarChart Labels="Labels" Series="Series" Horizontal="true" ValueFormat="@Format" />
+            break;
+        case ReportChartType.Table:
+            <div class="table-wrap" style="max-height:@(Math.Max(Height, 240))px">
+                <table class="table compact">
+                    <thead>
+                        <tr>
+                            <th>@(Result.GroupByLabel ?? "Group")</th>
+                            <th class="num">Records</th>
+                            @if (Result.Aggregate != ReportAggregate.Count)
+                            {
+                                <th class="num">@Result.AggregateLabel</th>
+                            }
+                            <th style="width:34%">Share</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in Result.Rows)
+                        {
+                            var share = ShareOf(row);
+                            <tr>
+                                <td class="cell-primary">@row.Label</td>
+                                <td class="num">@row.Count.ToString("N0")</td>
+                                @if (Result.Aggregate != ReportAggregate.Count)
+                                {
+                                    <td class="num">@ChartAdapters.FormatValue(row.Value)</td>
+                                }
+                                <td>
+                                    <div class="flex items-center gap-2">
+                                        <div class="progress flex-1"><span style="width:@(share.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span></div>
+                                        <span class="small muted" style="width:44px;text-align:right">@share.ToString("0.#")%</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            break;
+        default:
+            <BarChart Labels="Labels" Series="Series" Height="Height" ValueFormat="@Format" />
+            break;
+    }
+}
+
+@code {
+    /// <summary>Gets or sets the result (null renders a skeleton).</summary>
+    [Parameter] public ReportResult? Result { get; set; }
+
+    /// <summary>Gets or sets an explicit chart type (defaults to the result's chart type).</summary>
+    [Parameter] public ReportChartType? ChartType { get; set; }
+
+    /// <summary>Gets or sets the chart height in pixels.</summary>
+    [Parameter] public int Height { get; set; } = 260;
+
+    private IReadOnlyList<string> Labels => Result?.Rows.Select(r => r.Label).ToList() ?? [];
+
+    private IReadOnlyList<ChartSeries> Series => Result is null ? [] : [new ChartSeries(Result.AggregateLabel, Result.Rows.Select(r => r.Value).ToList())];
+
+    private string Format => Result is { Aggregate: ReportAggregate.Average } ? "0.##" : "0.#";
+
+    private double ShareOf(ReportRow row)
+    {
+        var total = Result!.Aggregate is ReportAggregate.Count or ReportAggregate.Sum ? Result.Rows.Sum(r => r.Value) : Result.Rows.Max(r => r.Value);
+        return total <= 0 ? 0 : row.Value / total * 100;
+    }
+}

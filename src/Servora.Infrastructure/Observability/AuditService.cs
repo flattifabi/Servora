@@ -1,10 +1,9 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Servora.Application.Common;
 using Servora.Application.Observability;
+using Servora.Domain.Configuration;
 using Servora.Domain.Observability;
 
 namespace Servora.Infrastructure.Observability;
@@ -25,27 +24,7 @@ public sealed class AuditService(IAppDbContextFactory dbFactory, ICurrentUser cu
     /// <summary>Computes the chain hash of an event.</summary>
     /// <param name="auditEvent">The event (with <see cref="AuditEvent.PreviousHash"/> set).</param>
     /// <returns>The lower-case hex SHA-256 hash.</returns>
-    public static string ComputeHash(AuditEvent auditEvent)
-    {
-        var canonical = string.Join('|',
-            auditEvent.Id.ToString("N"),
-            auditEvent.OccurredAt.ToUnixTimeMilliseconds(),
-            auditEvent.Category,
-            auditEvent.Action,
-            (int)auditEvent.Outcome,
-            auditEvent.ActorId,
-            auditEvent.ActorName,
-            auditEvent.ActorType,
-            auditEvent.TargetType,
-            auditEvent.TargetId,
-            auditEvent.TargetName,
-            auditEvent.Message,
-            auditEvent.DetailsJson,
-            auditEvent.IpAddress,
-            auditEvent.CorrelationId,
-            auditEvent.PreviousHash);
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
-    }
+    public static string ComputeHash(AuditEvent auditEvent) => AuditHasher.ComputeHash(auditEvent);
 
     /// <inheritdoc />
     public async Task WriteAsync(AuditEntry entry, CancellationToken cancellationToken = default)
@@ -59,8 +38,8 @@ public sealed class AuditService(IAppDbContextFactory dbFactory, ICurrentUser cu
             ActorId = currentUser.UserId?.ToString() ?? currentUser.ApiKeyId?.ToString(),
             ActorName = Truncate(entry.ActorNameOverride ?? currentUser.DisplayName, 256),
             ActorType = currentUser.ActorType.ToString().ToLowerInvariant(),
-            TargetType = entry.TargetType,
-            TargetId = entry.TargetId,
+            TargetType = entry.TargetType is null ? null : Truncate(entry.TargetType, 100),
+            TargetId = entry.TargetId is null ? null : Truncate(entry.TargetId, 64),
             TargetName = entry.TargetName is null ? null : Truncate(entry.TargetName, 256),
             Message = entry.Message is null ? null : Truncate(entry.Message, 2000),
             DetailsJson = entry.Details is null ? null : Truncate(JsonSerializer.Serialize(entry.Details, s_json), 16_000),
@@ -72,10 +51,17 @@ public sealed class AuditService(IAppDbContextFactory dbFactory, ICurrentUser cu
         try
         {
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-            auditEvent.PreviousHash = await db.Set<AuditEvent>().AsNoTracking()
-                .OrderByDescending(a => a.OccurredAt)
-                .Select(a => a.Hash)
+
+            // Chain position and timestamp are assigned while the lock is held so that sequence order, timestamp order
+            // and chain links always agree (see AuditChainVerifier).
+            var head = await db.Set<AuditEvent>().AsNoTracking()
+                .OrderByDescending(a => a.Sequence)
+                .ThenByDescending(a => a.OccurredAt)
+                .Select(a => new { a.Sequence, a.Hash })
                 .FirstOrDefaultAsync(cancellationToken);
+            auditEvent.Sequence = (head?.Sequence ?? 0) + 1;
+            auditEvent.OccurredAt = clock.UtcNow;
+            auditEvent.PreviousHash = head?.Hash ?? await ReadChainAnchorAsync(db, cancellationToken);
             auditEvent.Hash = ComputeHash(auditEvent);
             db.Set<AuditEvent>().Add(auditEvent);
             await db.SaveChangesAsync(cancellationToken);
@@ -90,6 +76,16 @@ public sealed class AuditService(IAppDbContextFactory dbFactory, ICurrentUser cu
             s_writeLock.Release();
         }
     }
+
+    /// <summary>
+    /// Reads the chain anchor (hash of the last pruned event) so that the first event written after retention removed
+    /// every older event still links to the pruned history.
+    /// </summary>
+    private static async Task<string?> ReadChainAnchorAsync(IAppDbContext db, CancellationToken cancellationToken) =>
+        await db.Set<SystemSetting>().AsNoTracking()
+            .Where(s => s.Key == ObservabilitySettingKeys.AuditChainAnchor)
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync(cancellationToken);
 
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 }

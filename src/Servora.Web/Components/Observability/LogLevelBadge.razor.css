@@ -1,0 +1,20 @@
+.lvl {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 20px;
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    background: var(--neutral-soft);
+    color: var(--text-muted);
+}
+
+.lvl-debug { background: var(--purple-soft); color: var(--purple); }
+.lvl-information { background: var(--info-soft); color: var(--info); }
+.lvl-warning { background: var(--warning-soft); color: var(--warning); }
+.lvl-error { background: var(--danger-soft); color: var(--danger); }
+.lvl-critical { background: var(--danger); color: #fff; box-shadow: 0 0 12px -2px rgba(244, 63, 94, .7); }

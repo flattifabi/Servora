@@ -1,0 +1,22 @@
+.chart-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: border-color var(--speed), box-shadow var(--speed);
+}
+
+.chart-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow); }
+
+.chart-card .card-body { flex: 1; }
+
+.chart-card-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    background: var(--gradient-soft);
+    color: var(--primary);
+    border: 1px solid var(--border);
+}

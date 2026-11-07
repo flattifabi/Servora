@@ -1,0 +1,34 @@
+@* Compact empty / unavailable state inside a chart card (no data, module not installed, restricted). *@
+<div class="analytics-state state-@Availability.ToString().ToLowerInvariant()" style="min-height:@(MinHeight)px">
+    <div class="state-icon"><Icon Name="@IconName" Size="22" /></div>
+    <div class="state-title">@Title</div>
+    @if (!string.IsNullOrEmpty(Message))
+    {
+        <div class="state-text">@Message</div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the availability state.</summary>
+    [Parameter] public AnalyticsAvailability Availability { get; set; } = AnalyticsAvailability.NoData;
+
+    /// <summary>Gets or sets the explanation.</summary>
+    [Parameter] public string? Message { get; set; }
+
+    /// <summary>Gets or sets the minimum height in pixels.</summary>
+    [Parameter] public int MinHeight { get; set; } = 200;
+
+    private string IconName => Availability switch
+    {
+        AnalyticsAvailability.ModuleMissing => "package",
+        AnalyticsAvailability.Restricted => "lock",
+        _ => "inbox",
+    };
+
+    private string Title => Availability switch
+    {
+        AnalyticsAvailability.ModuleMissing => "Module not installed",
+        AnalyticsAvailability.Restricted => "Restricted",
+        _ => "No data yet",
+    };
+}

@@ -1,0 +1,49 @@
+@* Circular percentage gauge with gradient stroke; the color follows success / warning / danger thresholds. *@
+@using System.Globalization
+<div class="gauge" style="width:@(Size)px;height:@(Size)px">
+    <svg viewBox="0 0 120 120" class="chart">
+        <defs>
+            <linearGradient id="@_id" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="@Color" stop-opacity="1" />
+                <stop offset="100%" stop-color="@Color" stop-opacity="0.55" />
+            </linearGradient>
+        </defs>
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--surface-3)" stroke-width="10" />
+        <circle cx="60" cy="60" r="50" fill="none" stroke="url(#@_id)" stroke-width="10" stroke-linecap="round"
+                stroke-dasharray="@F(Length) @F(Circumference)" transform="rotate(-90 60 60)" class="gauge-arc" />
+    </svg>
+    <div class="gauge-center">
+        <div class="gauge-value">@Value.ToString("0.#", CultureInfo.CurrentCulture)<span>%</span></div>
+        @if (!string.IsNullOrEmpty(Caption))
+        {
+            <div class="gauge-caption">@Caption</div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string _id = "g" + Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>Gets or sets the percentage (0..100).</summary>
+    [Parameter] public double Value { get; set; }
+
+    /// <summary>Gets or sets the caption under the value.</summary>
+    [Parameter] public string? Caption { get; set; }
+
+    /// <summary>Gets or sets the size in pixels.</summary>
+    [Parameter] public int Size { get; set; } = 168;
+
+    /// <summary>Gets or sets the value from which the gauge is green.</summary>
+    [Parameter] public double SuccessFrom { get; set; } = 95;
+
+    /// <summary>Gets or sets the value from which the gauge is amber (below: red).</summary>
+    [Parameter] public double WarningFrom { get; set; } = 85;
+
+    private static double Circumference => 2 * Math.PI * 50;
+
+    private double Length => Math.Clamp(Value, 0, 100) / 100 * Circumference;
+
+    private string Color => Value >= SuccessFrom ? "#22c55e" : Value >= WarningFrom ? "#f59e0b" : "#f43f5e";
+
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+}

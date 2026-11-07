@@ -1,0 +1,299 @@
+@page "/admin/health"
+@* System health: overall status, health checks, process resources, request metrics, background services and runtime facts. *@
+@attribute [RequirePermission(Permissions.Observability.ReadHealth)]
+@implements IDisposable
+@inject ISystemHealthService HealthService
+@inject ToastService Toasts
+
+<PageTitle>System Health · Servora</PageTitle>
+
+<PageHeader Title="System health" Icon="heart-pulse" Subtitle="Database, disk, event processing, background services, resources and request metrics — live.">
+    <Actions>
+        <Switch @bind-Value="_autoRefresh" Label="Auto-refresh" />
+        <div class="segmented">
+            @foreach (var window in s_windows)
+            {
+                <button class="@(window == _window ? "active" : null)" @onclick="() => SetWindowAsync(window)">@WindowLabel(window)</button>
+            }
+        </div>
+        <button class="btn btn-secondary" @onclick="LoadAsync" disabled="@_loading">
+            @if (_loading)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <Icon Name="refresh" Size="16" />
+            }
+            Refresh
+        </button>
+        <a class="btn btn-ghost" href="/health" target="_blank" rel="noopener" title="Health JSON endpoint (minimal for anonymous callers)"><Icon Name="braces" Size="16" /> /health</a>
+    </Actions>
+</PageHeader>
+
+@if (_report is null)
+{
+    <div class="card card-body mb-6"><Skeleton Lines="3" Height="20px" /></div>
+    <div class="grid grid-4"><div class="card card-body"><Skeleton Lines="3" /></div><div class="card card-body"><Skeleton Lines="3" /></div><div class="card card-body"><Skeleton Lines="3" /></div><div class="card card-body"><Skeleton Lines="3" /></div></div>
+}
+else
+{
+    var r = _report;
+    var p = r.Process;
+    <div class="status-hero status-@r.Status.ToLowerInvariant() mb-6">
+        <div class="status-orb"><Icon Name="@StatusIcon(r.Status)" Size="30" /></div>
+        <div class="flex-1" style="min-width:0">
+            <div class="eyebrow">Overall status</div>
+            <div class="status-title">@StatusText(r.Status)</div>
+            <div class="small muted">
+                @r.Checks.Count(c => c.Status == "Healthy") of @r.Checks.Count checks healthy · checked <RelativeTime Value="r.CheckedAt" /> in @r.DurationMs.ToString("0") ms
+            </div>
+        </div>
+        <div class="hero-facts">
+            <div><span>Version</span><b>@p.Version</b></div>
+            <div><span>Uptime</span><b>@ChartAdapters.FormatDuration(p.Uptime)</b></div>
+            <div><span>Database</span><b>@(p.DatabaseProvider ?? "not configured")</b></div>
+            <div><span>Environment</span><b>@p.Environment</b></div>
+        </div>
+    </div>
+
+    <div class="grid grid-4 mb-6">
+        <StatCard Label="CPU" Value="@($"{p.Current.CpuPercent:0.#} %")" Icon="cpu" Tone="@(p.Current.CpuPercent > 85 ? "danger" : p.Current.CpuPercent > 60 ? "warning" : "success")"
+                  Caption="@($"{p.ProcessorCount} logical cores")" Trend="@(r.ProcessHistory.Select(s => s.CpuPercent).ToList())" />
+        <StatCard Label="Memory" Value="@ChartAdapters.FormatBytes(p.Current.WorkingSetBytes)" Icon="database" Tone="info"
+                  Caption="@($"managed heap {ChartAdapters.FormatBytes(p.Current.ManagedBytes)}")" Trend="@(r.ProcessHistory.Select(s => (double)s.WorkingSetBytes).ToList())" />
+        <StatCard Label="Requests / min" Value="@r.Requests.RequestsPerMinute.ToString("0.#")" Icon="activity" Tone="accent"
+                  Caption="@($"{r.Requests.TotalRequests:N0} in {WindowLabel(_window)}")" Trend="@(r.Requests.Minutes.Select(m => (double)m.Count).ToList())" />
+        <StatCard Label="Latency p95" Value="@($"{r.Requests.P95Ms:0} ms")" Icon="gauge" Tone="@(r.Requests.ErrorRate > 1 ? "danger" : "primary")"
+                  Caption="@($"avg {r.Requests.AverageMs:0} ms · {r.Requests.ErrorRate:0.##} % 5xx")" Trend="@(r.Requests.Minutes.Select(m => m.P95Ms).ToList())" />
+    </div>
+
+    <div class="checks-grid mb-6">
+        @foreach (var check in r.Checks)
+        {
+            <div class="card check-card check-@check.Status.ToLowerInvariant()">
+                <div class="check-head">
+                    <div class="check-icon"><Icon Name="@CheckIcon(check.Name)" Size="18" /></div>
+                    <div class="flex-1" style="min-width:0">
+                        <div class="check-name">@CheckTitle(check.Name)</div>
+                        <div class="tiny faint">@check.DurationMs.ToString("0.#") ms</div>
+                    </div>
+                    <StatusPill Text="@check.Status" Tone="@StatusTone(check.Status)" />
+                </div>
+                <div class="check-desc">@check.Description</div>
+                @if (check.Data.Count > 0)
+                {
+                    <dl class="check-data">
+                        @foreach (var (key, value) in check.Data.Take(8))
+                        {
+                            <dt>@key</dt>
+                            <dd>@FormatData(key, value)</dd>
+                        }
+                    </dl>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="grid grid-2 mb-6">
+        <ChartCard Title="Throughput" Subtitle="@($"Requests per minute · {WindowLabel(_window)}")" Icon="activity">
+            <LineChart Labels="MinuteLabels" Height="220" ValueFormat="0"
+                       Series="@([new ChartSeries("Requests", r.Requests.Minutes.Select(m => (double)m.Count).ToList(), "#7c6cff"), new ChartSeries("4xx", r.Requests.Minutes.Select(m => (double)m.ClientErrors).ToList(), "#f59e0b"), new ChartSeries("5xx", r.Requests.Minutes.Select(m => (double)m.ServerErrors).ToList(), "#f43f5e")])" />
+        </ChartCard>
+        <ChartCard Title="Latency" Subtitle="Average and 95th percentile per minute (ms)" Icon="gauge">
+            <LineChart Labels="MinuteLabels" Height="220" ValueFormat="0"
+                       Series="@([new ChartSeries("Average", r.Requests.Minutes.Select(m => Math.Round(m.AverageMs, 1)).ToList(), "#22d3ee"), new ChartSeries("p95", r.Requests.Minutes.Select(m => m.P95Ms).ToList(), "#a855f7")])" />
+        </ChartCard>
+    </div>
+
+    <div class="grid grid-sidebar mb-6">
+        <div class="card">
+            <div class="card-header"><h3><Icon Name="network" Size="16" /> Busiest routes</h3><span class="small muted">since start</span></div>
+            @if (r.Requests.TopRoutes.Count == 0)
+            {
+                <EmptyState Icon="network" Title="No requests yet" />
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="table compact">
+                        <thead><tr><th>Route</th><th class="num">Requests</th><th class="num">5xx</th><th class="num">Avg</th><th class="num">Max</th></tr></thead>
+                        <tbody>
+                            @foreach (var route in r.Requests.TopRoutes)
+                            {
+                                <tr>
+                                    <td class="mono small">@route.Route</td>
+                                    <td class="num">@route.Count.ToString("N0")</td>
+                                    <td class="num @(route.Errors > 0 ? "text-danger" : null)">@route.Errors.ToString("N0")</td>
+                                    <td class="num">@route.AverageMs.ToString("0") ms</td>
+                                    <td class="num">@route.MaxMs.ToString("0") ms</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+        <div class="stack" style="gap:20px">
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="zap" Size="16" /> Background services</h3></div>
+                <div class="card-body stack" style="gap:10px">
+                    @if (r.Heartbeats.Count == 0)
+                    {
+                        <span class="small muted">No heartbeats registered yet.</span>
+                    }
+                    @foreach (var beat in r.Heartbeats)
+                    {
+                        var stale = beat.IsStale(r.CheckedAt);
+                        <div class="beat">
+                            <span class="beat-dot @(stale ? "stale" : null)"></span>
+                            <div class="flex-1" style="min-width:0">
+                                <div class="small" style="font-weight:600">@beat.Name</div>
+                                <div class="tiny faint">@(beat.Status ?? "ok") · last beat <RelativeTime Value="beat.LastBeat" /></div>
+                            </div>
+                            <StatusPill Text="@(stale ? "Stale" : "Alive")" Tone="@(stale ? "danger" : "success")" />
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3><Icon Name="server" Size="16" /> Runtime</h3></div>
+                <div class="card-body">
+                    <dl class="kv facts">
+                        <dt>Host</dt><dd>@p.MachineName</dd>
+                        <dt>Framework</dt><dd>@p.Framework</dd>
+                        <dt>OS</dt><dd>@p.OperatingSystem</dd>
+                        <dt>Started</dt><dd>@p.StartedAt.ToLocalTime().ToString("g")</dd>
+                        <dt>Threads</dt><dd>@p.Current.ThreadCount</dd>
+                        <dt>GC (0/1/2)</dt><dd>@p.Gen0Collections / @p.Gen1Collections / @p.Gen2Collections</dd>
+                        <dt>Data directory</dt><dd class="mono small">@p.DataDirectory</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly int[] s_windows = [60, 360, 1440];
+    private readonly CancellationTokenSource _cts = new();
+    private SystemHealthReport? _report;
+    private int _window = 60;
+    private bool _autoRefresh = true;
+    private bool _loading;
+
+    private IReadOnlyList<string> MinuteLabels => _report?.Requests.Minutes.Select(m => m.Minute.ToLocalTime().ToString("HH:mm")).ToList() ?? [];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _ = RefreshLoopAsync(_cts.Token);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    private static string WindowLabel(int minutes) => minutes switch { 60 => "1 h", 360 => "6 h", _ => "24 h" };
+
+    private static string StatusTone(string status) => status switch { "Healthy" => "success", "Degraded" => "warning", _ => "danger" };
+
+    private static string StatusIcon(string status) => status switch { "Healthy" => "check-circle", "Degraded" => "alert-triangle", _ => "alert-octagon" };
+
+    private static string StatusText(string status) => status switch
+    {
+        "Healthy" => "All systems operational",
+        "Degraded" => "Degraded performance",
+        _ => "Service disruption",
+    };
+
+    private static string CheckIcon(string name) => name switch
+    {
+        "database" => "database",
+        "disk" => "hard-drive",
+        "event-queue" => "layers",
+        "background-services" => "zap",
+        "process" => "cpu",
+        _ => "heart-pulse",
+    };
+
+    private static string CheckTitle(string name) => name switch
+    {
+        "database" => "Database",
+        "disk" => "Disk space",
+        "event-queue" => "Record event queue",
+        "background-services" => "Background services",
+        "process" => "Process",
+        _ => name,
+    };
+
+    private static string FormatData(string key, string value)
+    {
+        if (key.EndsWith("Bytes", StringComparison.Ordinal) && long.TryParse(value, out var bytes))
+        {
+            return ChartAdapters.FormatBytes(bytes);
+        }
+
+        if (key == "uptimeSeconds" && long.TryParse(value, out var seconds))
+        {
+            return ChartAdapters.FormatDuration(TimeSpan.FromSeconds(seconds));
+        }
+
+        return value;
+    }
+
+    private async Task SetWindowAsync(int minutes)
+    {
+        _window = minutes;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var result = await HealthService.GetReportAsync(TimeSpan.FromMinutes(_window));
+            if (result.Succeeded)
+            {
+                _report = result.Value;
+            }
+            else
+            {
+                Toasts.Error("Health unavailable", result.Error);
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RefreshLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_autoRefresh && !_loading)
+                {
+                    await LoadAsync();
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Page closed.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Circuit disposed.
+        }
+    }
+}

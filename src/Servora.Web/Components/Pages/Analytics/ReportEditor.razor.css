@@ -1,0 +1,61 @@
+.builder {
+    display: grid;
+    grid-template-columns: 400px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.builder-config { position: sticky; top: calc(var(--topbar-h) + 16px); max-height: calc(100vh - var(--topbar-h) - 32px); overflow: auto; padding-right: 2px; }
+
+.step {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--gradient);
+    box-shadow: 0 4px 12px -4px rgba(124, 108, 255, .6);
+}
+
+.chart-types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+
+.chart-type {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 6px;
+    border-radius: var(--r);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color var(--speed), color var(--speed), background var(--speed), transform var(--speed) var(--ease);
+}
+
+.chart-type:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); transform: translateY(-1px); }
+.chart-type.active { color: var(--primary); border-color: transparent; background: linear-gradient(var(--surface), var(--surface)) padding-box, var(--gradient) border-box; border: 1px solid transparent; box-shadow: var(--glow); }
+.chart-type:disabled { cursor: default; opacity: .7; }
+
+.preview-card { overflow: hidden; }
+.preview-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: var(--gradient);
+    opacity: .8;
+}
+
+.previewing { opacity: .55; transition: opacity var(--speed); }
+
+@media (max-width: 1280px) {
+    .builder { grid-template-columns: 1fr; }
+    .builder-config { position: static; max-height: none; }
+}
