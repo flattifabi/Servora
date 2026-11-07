@@ -1,0 +1,16 @@
+@* Colored pill with icon for a backup kind (Scheduled, Manual, Pre-migration, Pre-restore, Uploaded). *@
+<span class="pill pill-@BackupDisplay.KindTone(Kind) no-dot" title="@Tooltip">
+    <Icon Name="@BackupDisplay.KindIcon(Kind)" Size="12" /> @BackupDisplay.KindLabel(Kind)
+</span>
+
+@code {
+    /// <summary>Gets or sets the effective kind.</summary>
+    [Parameter, EditorRequired] public BackupKind Kind { get; set; }
+
+    /// <summary>Gets or sets the kind recorded in the archive (differs for uploaded archives).</summary>
+    [Parameter] public BackupKind? OriginalKind { get; set; }
+
+    private string? Tooltip => Kind == BackupKind.Uploaded && OriginalKind is { } original && original != BackupKind.Uploaded
+        ? $"Uploaded archive – originally a {BackupDisplay.KindLabel(original).ToLowerInvariant()} backup"
+        : null;
+}

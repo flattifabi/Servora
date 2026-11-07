@@ -1,0 +1,159 @@
+@* Restore confirmation: shows what will be restored and what happens next; the administrator must type RESTORE. *@
+<Modal Open="Open" OpenChanged="OpenChanged" Title="Restore backup" Subtitle="Roll the whole instance back to this backup" Icon="history" CloseOnBackdrop="false">
+    <ChildContent>
+        @if (Check is null)
+        {
+            <Skeleton Lines="5" />
+        }
+        else
+        {
+            var backup = Check.Backup;
+            <div class="restore-summary">
+                <div class="restore-icon"><Icon Name="@BackupDisplay.KindIcon(backup.Kind)" Size="20" /></div>
+                <div class="restore-facts">
+                    <div class="restore-title">@backup.CreatedAt.ToLocalTime().ToString("dddd, dd MMMM yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture)</div>
+                    <div class="small muted">
+                        <BackupKindPill Kind="backup.Kind" OriginalKind="backup.OriginalKind" />
+                        <span class="restore-sep">·</span> v@(backup.AppVersion)
+                        <span class="restore-sep">·</span> @backup.RowCount.ToString("N0") rows in @backup.TableCount tables
+                        <span class="restore-sep">·</span> @BackupDisplay.Size(backup.SizeBytes)
+                    </div>
+                    <div class="tiny faint mono truncate" title="@backup.Id">@backup.Id</div>
+                </div>
+            </div>
+
+            @if (!Check.CanRestore)
+            {
+                <div class="alert alert-danger mt-4">
+                    <Icon Name="alert-octagon" Size="16" />
+                    <div>
+                        <strong>This backup cannot be restored.</strong>
+                        @foreach (var problem in Check.Problems)
+                        {
+                            <div>@problem</div>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <ol class="restore-steps mt-4">
+                    <li><span class="step-badge">1</span> A <strong>pre-restore safety backup</strong> of the current state is created.</li>
+                    <li><span class="step-badge">2</span> Servora <strong>restarts</strong> and replaces all data, keys and attachments with the backup.</li>
+                    <li><span class="step-badge">3</span> The database is migrated to the current version and Servora starts again.</li>
+                </ol>
+
+                <div class="alert alert-warning mt-4">
+                    <Icon Name="alert-triangle" Size="16" />
+                    <span>
+                        Everything changed after @backup.CreatedAt.ToLocalTime().ToString("g") is lost (unless you restore the safety backup).
+                        All users are signed out and Servora is unavailable for a few minutes.
+                        @if (!Check.RestartsAutomatically)
+                        {
+                            <strong> Servora is not running as a Windows service: start it again yourself after it stopped.</strong>
+                        }
+                    </span>
+                </div>
+
+                @if (Check.RequiresPassword)
+                {
+                    <FormField Label="Archive password" Class="mt-4" Required="!Check.StoredPasswordWorks"
+                               Help="@(Check.StoredPasswordWorks ? "The configured backup password opens this archive. Enter another one only if it differs." : "This archive is encrypted with a different password than the configured one.")">
+                        <input type="password" class="input" autocomplete="off" maxlength="256" @bind="_password" @bind:event="oninput" />
+                    </FormField>
+                }
+
+                <FormField Label="@($"Type {BackupConstants.RestoreConfirmationText} to confirm")" Class="mt-4" Required="true">
+                    <input class="input mono restore-confirm" autocomplete="off" spellcheck="false" placeholder="@BackupConstants.RestoreConfirmationText" @bind="_confirmation" @bind:event="oninput" />
+                </FormField>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger mt-4"><Icon Name="alert-circle" Size="16" /> <span>@_error</span></div>
+            }
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="CloseAsync" disabled="@_busy">Cancel</button>
+        <button class="btn btn-danger" disabled="@(!CanConfirm)" @onclick="ConfirmAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+                <span>Creating safety backup…</span>
+            }
+            else
+            {
+                <Icon Name="history" Size="16" />
+                <span>Restore and restart</span>
+            }
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private string _confirmation = string.Empty;
+    private string? _password;
+    private string? _error;
+    private bool _busy;
+    private bool _wasOpen;
+
+    /// <summary>Gets or sets a value indicating whether the dialog is open.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Raised when the open state changes.</summary>
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Gets or sets the restore check of the selected backup (<see langword="null"/> while loading).</summary>
+    [Parameter] public BackupRestoreCheck? Check { get; set; }
+
+    /// <summary>Gets or sets the confirm handler (confirmation text, optional password); returns the service result.</summary>
+    [Parameter] public Func<string, string?, Task<Result>>? Confirm { get; set; }
+
+    private bool CanConfirm =>
+        !_busy && Check is { CanRestore: true } &&
+        string.Equals(_confirmation.Trim(), BackupConstants.RestoreConfirmationText, StringComparison.Ordinal) &&
+        (!Check.RequiresPassword || Check.StoredPasswordWorks || !string.IsNullOrEmpty(_password));
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (Open && !_wasOpen)
+        {
+            _confirmation = string.Empty;
+            _password = null;
+            _error = null;
+        }
+
+        _wasOpen = Open;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (!CanConfirm || Confirm is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await Confirm(_confirmation.Trim(), string.IsNullOrEmpty(_password) ? null : _password);
+            if (!result.Succeeded)
+            {
+                _error = result.Error;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        _password = null;
+        await OpenChanged.InvokeAsync(false);
+    }
+}

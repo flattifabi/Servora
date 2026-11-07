@@ -1,0 +1,81 @@
+@* Summary of the backup schedule, destination, encryption and retention with an edit action. *@
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h3><Icon Name="calendar-clock" Size="16" /> Schedule</h3>
+            <div class="card-subtitle">Stored in backup.json – survives restores</div>
+        </div>
+        @if (Settings is not null)
+        {
+            <StatusPill Text="@(Settings.Schedule.Enabled ? "Enabled" : "Disabled")" Tone="@(Settings.Schedule.Enabled ? "success" : "neutral")" />
+        }
+    </div>
+    <div class="card-body">
+        @if (Settings is null)
+        {
+            <Skeleton Lines="6" />
+        }
+        else
+        {
+            var schedule = Settings.Schedule;
+            var zone = schedule.ResolveTimeZone(TimeZoneInfo.Local);
+            <dl class="kv schedule-kv">
+                <dt>Runs</dt>
+                <dd>@(schedule.Enabled ? BackupDisplay.DescribeSchedule(schedule) : "Not scheduled")</dd>
+                <dt>Next run</dt>
+                <dd>
+                    @if (NextRunAt is { } next)
+                    {
+                        <div>@BackupDisplay.InZone(next, zone)</div>
+                        <div class="tiny faint">@zone.DisplayName</div>
+                    }
+                    else
+                    {
+                        <span class="faint">—</span>
+                    }
+                </dd>
+                <dt>Destination</dt>
+                <dd><span class="mono" title="@Settings.EffectiveDestination">@Settings.EffectiveDestination</span></dd>
+                <dt>Content</dt>
+                <dd>Database, key ring@(schedule.IncludeAttachments ? ", attachments" : string.Empty)@(schedule.IncludeInstanceSettings ? ", appsettings.json" : string.Empty)</dd>
+                <dt>Encryption</dt>
+                <dd>
+                    @if (schedule.EncryptionEnabled)
+                    {
+                        <span class="text-success"><Icon Name="lock" Size="12" /> AES-256-GCM</span>
+                    }
+                    else
+                    {
+                        <span class="muted"><Icon Name="unlock" Size="12" /> Off</span>
+                    }
+                </dd>
+                <dt>Retention</dt>
+                <dd>@BackupDisplay.DescribeRetention(schedule)</dd>
+                <dt>Safety nets</dt>
+                <dd>
+                    @(schedule.PreMigrationBackupEnabled ? "Backup before migrations" : "No backup before migrations")@(schedule.CatchUpMissedRuns ? ", catch-up after downtime" : string.Empty)
+                </dd>
+            </dl>
+        }
+    </div>
+    @if (CanManage && Settings is not null)
+    {
+        <div class="card-footer">
+            <button class="btn btn-secondary btn-block" @onclick="OnEdit"><Icon Name="sliders" Size="16" /> Edit schedule &amp; retention</button>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the settings (<see langword="null"/> while loading).</summary>
+    [Parameter] public BackupSettingsView? Settings { get; set; }
+
+    /// <summary>Gets or sets the next scheduled run.</summary>
+    [Parameter] public DateTimeOffset? NextRunAt { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the user may edit the schedule.</summary>
+    [Parameter] public bool CanManage { get; set; }
+
+    /// <summary>Raised when the user wants to edit the schedule.</summary>
+    [Parameter] public EventCallback OnEdit { get; set; }
+}

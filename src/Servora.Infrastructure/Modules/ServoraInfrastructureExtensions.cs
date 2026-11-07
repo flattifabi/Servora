@@ -21,6 +21,7 @@ public static class ServoraInfrastructureExtensions
         services.AddObservabilityModule();
         services.AddApiMcpAiModule();
         services.AddPortalModule();
+        services.AddBackupModule();
         return services;
     }
 }

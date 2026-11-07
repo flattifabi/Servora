@@ -1,0 +1,56 @@
+.schedule-toggle {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.weekday-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.weekday {
+    min-width: 52px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--speed), color var(--speed), border-color var(--speed), box-shadow var(--speed);
+}
+
+.weekday:hover {
+    border-color: var(--primary);
+    color: var(--text);
+}
+
+.weekday.selected {
+    background: var(--gradient);
+    border-color: transparent;
+    color: #fff;
+    box-shadow: var(--glow);
+}
+
+.next-runs {
+    display: grid;
+    gap: 6px;
+    padding: 12px 14px;
+    border-radius: var(--r);
+    background: var(--primary-soft);
+    border: 1px solid rgba(124, 108, 255, .25);
+}
+
+.next-run {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+}

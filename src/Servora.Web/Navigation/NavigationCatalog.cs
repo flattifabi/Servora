@@ -70,6 +70,7 @@ public static class NavigationCatalog
             new("Logs", "/admin/logs", "terminal", Permissions.Observability.ReadLogs, "logging debug"),
             new("Audit Log", "/admin/audit", "history", Permissions.Observability.ReadAudit, "audit trail security"),
             new("System Health", "/admin/health", "heart-pulse", Permissions.Observability.ReadHealth, "status metrics database"),
+            new("Backup & Restore", "/admin/backups", "hard-drive", Permissions.Backup.Read, "backup restore rollback snapshot schedule migration"),
             new("API Explorer", "/admin/api-docs", "code", Permissions.Api.Access, "openapi swagger rest docs"),
         ]),
     ];

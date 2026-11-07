@@ -20,6 +20,7 @@ public static class EndpointRegistration
         app.MapObservabilityEndpoints();
         app.MapApiMcpAiEndpoints();
         app.MapPortalEndpoints();
+        app.MapBackupEndpoints();
         return app;
     }
 }
