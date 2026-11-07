@@ -1,0 +1,228 @@
+@* Public conversation of one of the user's items: chat-style comments and system events (never work notes), a composer
+   and attachments. All reads and writes go through IPortalConversationService, which verifies ownership server-side. *@
+@using Servora.Application.Activity
+@inject IPortalConversationService Conversations
+@inject ToastService Toasts
+
+<div class="pconv card">
+    <div class="card-header">
+        <div class="flex items-center gap-2">
+            <Icon Name="message-circle" Size="18" />
+            <h3 style="margin:0;font-size:15px">Conversation</h3>
+            @if (_conversation is not null)
+            {
+                <span class="tag">@_conversation.Entries.Count(e => !e.IsSystem)</span>
+            }
+        </div>
+        <span class="small faint">Comments are visible to you and the support team.</span>
+    </div>
+
+    <div class="card-body">
+        @if (_conversation is null)
+        {
+            <Skeleton Lines="4" Height="40px" />
+        }
+        else
+        {
+            @if (_conversation.Entries.Count == 0)
+            {
+                <div class="pconv-empty">
+                    <Icon Name="message-square" Size="22" />
+                    <span>No messages yet. Add details or ask a question below.</span>
+                </div>
+            }
+            else
+            {
+                <div class="pconv-thread">
+                    @foreach (var entry in _conversation.Entries)
+                    {
+                        if (entry.IsSystem)
+                        {
+                            <div class="pconv-event" @key="entry.Id">
+                                <Icon Name="zap" Size="12" />
+                                <span>@entry.Text</span>
+                                <span class="faint">· <RelativeTime Value="entry.At" /></span>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="pconv-msg @(entry.IsMine ? "mine" : null)" @key="entry.Id">
+                                @if (!entry.IsMine)
+                                {
+                                    <Avatar Name="@entry.AuthorName" Size="sm" />
+                                }
+                                <div class="pconv-bubble">
+                                    <div class="pconv-meta">
+                                        <span class="author">@(entry.IsMine ? "You" : entry.AuthorName)</span>
+                                        <RelativeTime Value="entry.At" />
+                                    </div>
+                                    <div class="pconv-text">@entry.Text</div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+
+            @if (_conversation.CanPost)
+            {
+                <div class="pconv-composer">
+                    <textarea class="textarea" rows="3" maxlength="20000" placeholder="Write a message to the support team…" @bind="_text" @bind:event="oninput" disabled="@_posting"></textarea>
+                    <div class="pconv-composer-bar">
+                        <label class="btn btn-ghost btn-sm pconv-attach" title="Attach files (max. 25 MB each)">
+                            <InputFile OnChange="UploadAsync" multiple disabled="@_uploading" />
+                            @if (_uploading)
+                            {
+                                <span class="spinner"></span>
+                                <span>Uploading…</span>
+                            }
+                            else
+                            {
+                                <Icon Name="paperclip" Size="16" />
+                                <span>Attach</span>
+                            }
+                        </label>
+                        <button class="btn btn-primary btn-sm" disabled="@(string.IsNullOrWhiteSpace(_text) || _posting)" @onclick="PostAsync">
+                            @if (_posting)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="send" Size="14" />
+                            }
+                            Send
+                        </button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-info mt-4"><Icon Name="info" Size="16" /><span>This item is closed, so no new messages can be added.</span></div>
+            }
+
+            @if (_conversation.Attachments.Count > 0)
+            {
+                <div class="pconv-files">
+                    <div class="eyebrow mb-2">Attachments</div>
+                    @foreach (var file in _conversation.Attachments)
+                    {
+                        <a class="pconv-file" href="@file.DownloadUrl" @key="file.Id" download>
+                            <span class="pconv-file-icon"><Icon Name="file" Size="16" /></span>
+                            <span class="flex-1" style="min-width:0">
+                                <span class="truncate" style="display:block;font-weight:600">@file.FileName</span>
+                                <span class="tiny faint">@PortalFormat.FileSize(file.SizeBytes) · @file.UploadedBy · <RelativeTime Value="file.UploadedAt" /></span>
+                            </span>
+                            <Icon Name="download" Size="16" />
+                        </a>
+                    }
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private const int MaxFilesPerUpload = 5;
+    private PortalConversation? _conversation;
+    private string _text = string.Empty;
+    private bool _posting;
+    private bool _uploading;
+
+    /// <summary>Gets or sets the kind of item.</summary>
+    [Parameter, EditorRequired] public PortalTicketKind Kind { get; set; }
+
+    /// <summary>Gets or sets the record identifier.</summary>
+    [Parameter, EditorRequired] public Guid RecordId { get; set; }
+
+    /// <summary>Raised after a comment or file was added.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    /// <summary>Reloads the conversation (call after the item changed).</summary>
+    /// <returns>A task that completes when reloaded.</returns>
+    public async Task ReloadAsync()
+    {
+        var result = await Conversations.GetAsync(Kind, RecordId);
+        if (result.Succeeded)
+        {
+            _conversation = result.Value;
+        }
+        else
+        {
+            _conversation = new PortalConversation([], [], false);
+            Toasts.Error("The conversation could not be loaded", result.Error);
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task PostAsync()
+    {
+        _posting = true;
+        try
+        {
+            var result = await Conversations.AddCommentAsync(Kind, RecordId, _text);
+            if (result.Succeeded)
+            {
+                _text = string.Empty;
+                await ReloadAsync();
+                await OnChanged.InvokeAsync();
+            }
+            else
+            {
+                Toasts.Error("Your message could not be sent", result.Error);
+            }
+        }
+        finally
+        {
+            _posting = false;
+        }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        var uploaded = 0;
+        try
+        {
+            if (e.FileCount > MaxFilesPerUpload)
+            {
+                Toasts.Warning($"Only the first {MaxFilesPerUpload} files are uploaded.");
+            }
+
+            foreach (var file in e.GetMultipleFiles(MaxFilesPerUpload))
+            {
+                if (file.Size > IAttachmentService.MaxSizeBytes)
+                {
+                    Toasts.Error($"{file.Name} is too large", "Files can be at most 25 MB.");
+                    continue;
+                }
+
+                await using var stream = file.OpenReadStream(IAttachmentService.MaxSizeBytes);
+                var result = await Conversations.UploadAsync(Kind, RecordId, file.Name, file.ContentType, stream);
+                if (result.Succeeded)
+                {
+                    uploaded++;
+                }
+                else
+                {
+                    Toasts.Error($"Upload failed: {file.Name}", result.Error);
+                }
+            }
+        }
+        finally
+        {
+            _uploading = false;
+        }
+
+        if (uploaded > 0)
+        {
+            Toasts.Success(uploaded == 1 ? "File attached" : $"{uploaded} files attached");
+            await ReloadAsync();
+            await OnChanged.InvokeAsync();
+        }
+    }
+}

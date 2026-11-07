@@ -1,0 +1,85 @@
+.portal-chip-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: var(--r-full);
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--danger);
+}
+
+.pappr { overflow: hidden; }
+.pappr.pending { border-color: rgba(245, 158, 11, .35); }
+
+.pappr-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 18px;
+}
+
+.pappr-title {
+    margin-top: 6px;
+    font-weight: 650;
+    font-size: 15px;
+    overflow-wrap: anywhere;
+}
+
+.pappr-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 3px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+.pappr-reason {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-2);
+}
+
+.pappr-comment {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    font-size: 12.5px;
+    color: var(--text-2);
+}
+
+.pappr-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    flex-shrink: 0;
+}
+
+.pappr-details {
+    padding: 16px 18px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-2);
+    animation: fade-up .18s var(--ease);
+}
+
+.pappr-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+}
+
+@media (max-width: 900px) {
+    .pappr-main { flex-wrap: wrap; }
+    .pappr-actions { width: 100%; justify-content: flex-start; padding-left: 58px; }
+    .pappr-grid { grid-template-columns: 1fr; gap: 14px; }
+}

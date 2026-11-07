@@ -1,0 +1,47 @@
+@* Status timeline of a portal item: completed, current, upcoming and failed steps with dates (horizontal on wide screens,
+   vertical on phones). *@
+
+<ol class="ptimeline" aria-label="Progress">
+    @foreach (var step in Steps)
+    {
+        var css = step.State switch
+        {
+            PortalStepState.Completed => "done",
+            PortalStepState.Current => "current",
+            PortalStepState.Failed => "failed",
+            _ => "upcoming",
+        };
+        <li class="ptimeline-step @css" aria-current="@(step.State == PortalStepState.Current ? "step" : null)">
+            <span class="ptimeline-dot">
+                @switch (step.State)
+                {
+                    case PortalStepState.Completed:
+                        <Icon Name="check" Size="14" />
+                        break;
+                    case PortalStepState.Failed:
+                        <Icon Name="x" Size="14" />
+                        break;
+                    case PortalStepState.Current:
+                        <span class="ptimeline-pulse"></span>
+                        break;
+                }
+            </span>
+            <span class="ptimeline-body">
+                <span class="ptimeline-label">@step.Label</span>
+                @if (step.At is { } at)
+                {
+                    <span class="ptimeline-date"><RelativeTime Value="at" /></span>
+                }
+                @if (!string.IsNullOrEmpty(step.Description) && step.State is PortalStepState.Current or PortalStepState.Failed)
+                {
+                    <span class="ptimeline-desc">@step.Description</span>
+                }
+            </span>
+        </li>
+    }
+</ol>
+
+@code {
+    /// <summary>Gets or sets the steps in order.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<PortalProgressStep> Steps { get; set; } = [];
+}

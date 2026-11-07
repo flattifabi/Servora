@@ -1,0 +1,218 @@
+@page "/portal/catalog/{ItemId:guid}"
+@* Order form of a catalog item: renders the item's variables (CatalogVariableInput), validates inline and orders for the
+   current user through ICatalogOrderService (approval and fulfilment are started by the catalog module). *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@inject ICatalogOrderService Catalog
+@inject ToastService Toasts
+
+<PageTitle>@(_form?.Item.Name ?? "Order") · Servora</PageTitle>
+
+<div class="portal-container">
+    @if (_loading)
+    {
+        <div class="portal-page-head"><Skeleton Lines="2" Height="22px" /></div>
+        <div class="card card-body"><Skeleton Lines="6" /></div>
+    }
+    else if (_form is null)
+    {
+        <div class="portal-page-head"></div>
+        <div class="card">
+            <EmptyState Icon="package" Title="This item is not available" Text="@(_error ?? "The catalog item does not exist or can no longer be ordered.")">
+                <a class="btn btn-primary" href="/portal/catalog"><Icon Name="arrow-left" Size="16" /> Back to the catalog</a>
+            </EmptyState>
+        </div>
+    }
+    else if (_confirmation is not null)
+    {
+        <div class="portal-page-head"></div>
+        <div class="card porder-done">
+            <div class="porder-done-icon"><Icon Name="check" Size="34" /></div>
+            <h1>Thanks – your request is on its way</h1>
+            <p class="muted">
+                We created <b class="mono">@_confirmation.RequestNumber</b> for <b>@_form.Item.Name</b>.
+                @(_confirmation.ApprovalRequired ? "It now waits for approval; you will see the decision under My items." : "The fulfilment team has been notified.")
+            </p>
+            <div class="flex gap-2 justify-center flex-wrap mt-4">
+                <a class="btn btn-primary" href="/portal/requests/@_confirmation.RequestId"><Icon Name="activity" Size="16" /> Track my request</a>
+                <a class="btn btn-secondary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Order something else</a>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="portal-page-head">
+            <div class="portal-crumbs">
+                <a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" />
+                <a href="/portal/catalog">Catalog</a> <Icon Name="chevron-right" Size="12" />
+                @if (_form.Item.CategoryId is { } categoryId)
+                {
+                    <a href="/portal/catalog?category=@categoryId">@_form.Item.CategoryName</a> <Icon Name="chevron-right" Size="12" />
+                }
+                <span>@_form.Item.Name</span>
+            </div>
+            <div class="flex items-center gap-4 mt-3 porder-title">
+                <span class="portal-icon-tile lg"><Icon Name="@_form.Item.Icon" Size="26" /></span>
+                <div style="min-width:0">
+                    <h1 style="margin:0">@_form.Item.Name</h1>
+                    @if (!string.IsNullOrWhiteSpace(_form.Item.ShortDescription))
+                    {
+                        <p>@_form.Item.ShortDescription</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="portal-two-col">
+            <div class="card" style="min-width:0">
+                <div class="card-body">
+                    @if (!string.IsNullOrWhiteSpace(_form.Description))
+                    {
+                        <div class="porder-description">@_form.Description</div>
+                    }
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="clipboard-list" Size="16" /> Tell us the details</div>
+                        @if (_form.Variables.Count == 0)
+                        {
+                            <div class="small faint">No questions – this item can be ordered right away.</div>
+                        }
+                        else
+                        {
+                            <div class="form-grid">
+                                @foreach (var variable in _form.Variables)
+                                {
+                                    <CatalogVariableInput @key="variable.Name" Definition="variable" Value="@_values.GetValueOrDefault(variable.Name)"
+                                                          ValueChanged="v => SetValue(variable.Name, v)" Error="@_errors.GetValueOrDefault(variable.Name)"
+                                                          Disabled="_busy" Class="@(variable.Type == CatalogVariableType.MultilineText ? "span-all" : null)" />
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="package" Size="16" /> Quantity</div>
+                        <div class="porder-qty">
+                            <button class="btn btn-secondary btn-icon" type="button" aria-label="Decrease quantity" disabled="@(_quantity <= 1 || _busy)" @onclick="() => _quantity--"><Icon Name="minus" Size="16" /></button>
+                            <input class="input" type="number" min="1" max="100" step="1" aria-label="Quantity" @bind="_quantity" disabled="@_busy" />
+                            <button class="btn btn-secondary btn-icon" type="button" aria-label="Increase quantity" disabled="@(_quantity >= 100 || _busy)" @onclick="() => _quantity++"><Icon Name="plus" Size="16" /></button>
+                            <span class="small faint">Ordered for you</span>
+                        </div>
+                        @if (_quantityError is not null)
+                        {
+                            <div class="small text-danger mt-2">@_quantityError</div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="portal-sticky stack" style="gap:16px">
+                <div class="card card-body">
+                    <div class="eyebrow mb-3">Summary</div>
+                    <dl class="portal-facts">
+                        <dt>Price</dt><dd>@PortalFormat.Price(_form.Item.Price)</dd>
+                        <dt>Quantity</dt><dd>@Math.Max(1, _quantity)</dd>
+                        <dt>Total</dt><dd><b>@PortalFormat.Price(_form.Item.Price * Math.Max(1, _quantity))</b></dd>
+                        <dt>Delivery</dt><dd>@PortalFormat.Delivery(_form.Item.DeliveryDays)</dd>
+                        <dt>Approval</dt><dd>@(_form.Item.ApprovalRequired ? "Required" : "Not needed")</dd>
+                    </dl>
+                    <button class="btn btn-primary btn-lg btn-block mt-4" disabled="@_busy" @onclick="OrderAsync">
+                        @if (_busy)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="send" Size="16" />
+                        }
+                        Submit request
+                    </button>
+                </div>
+                <div class="card card-body">
+                    <div class="eyebrow mb-3">What happens next</div>
+                    <ol class="porder-steps">
+                        @if (_form.Item.ApprovalRequired)
+                        {
+                            <li><span><Icon Name="check-square" Size="14" /></span> Your approver is asked to approve the request.</li>
+                        }
+                        <li><span><Icon Name="users" Size="14" /></span> The fulfilment team prepares your order.</li>
+                        <li><span><Icon Name="bell" Size="14" /></span> Follow the progress and chat with the team under My items.</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private CatalogOrderForm? _form;
+    private OrderConfirmation? _confirmation;
+    private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyDictionary<string, string> _errors = new Dictionary<string, string>();
+    private string? _error;
+    private string? _quantityError;
+    private int _quantity = 1;
+    private bool _loading = true;
+    private bool _busy;
+
+    /// <summary>Gets or sets the catalog item identifier.</summary>
+    [Parameter] public Guid ItemId { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _confirmation = null;
+        var result = await Catalog.GetOrderFormAsync(ItemId);
+        _form = result.Succeeded ? result.Value : null;
+        _error = result.Succeeded ? null : result.Error;
+        _values.Clear();
+        foreach (var variable in _form?.Variables.Where(v => v.DefaultValue is not null) ?? [])
+        {
+            _values[variable.Name] = variable.DefaultValue;
+        }
+
+        _errors = new Dictionary<string, string>();
+        _quantity = 1;
+        _loading = false;
+    }
+
+    private void SetValue(string name, string? value)
+    {
+        _values[name] = value;
+        if (_errors.ContainsKey(name))
+        {
+            _errors = _errors.Where(e => e.Key != name).ToDictionary(e => e.Key, e => e.Value);
+        }
+    }
+
+    private async Task OrderAsync()
+    {
+        if (_form is null)
+        {
+            return;
+        }
+
+        // Inline pre-validation for a friendly form; the catalog service validates again (the UI is no security boundary).
+        _quantityError = _quantity is < 1 or > 100 ? "The quantity must be between 1 and 100." : null;
+        _errors = CatalogVariableValidator.Validate(_form.Variables, _values).Errors;
+        if (_quantityError is not null || _errors.Count > 0)
+        {
+            Toasts.Warning("Please complete the highlighted fields.");
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Catalog.OrderAsync(_form.Item.Id, new Dictionary<string, string?>(_values), null, _quantity);
+            if (Toasts.FromResult(result, result.Value is { } confirmation ? $"{confirmation.RequestNumber} submitted" : "Request submitted"))
+            {
+                _confirmation = result.Value;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

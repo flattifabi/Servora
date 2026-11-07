@@ -1,0 +1,78 @@
+.ptimeline {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+}
+
+.ptimeline-step {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding-right: 12px;
+}
+
+/* connector line to the next step */
+.ptimeline-step::before {
+    content: "";
+    position: absolute;
+    top: 13px;
+    left: 30px;
+    right: 4px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--border-strong);
+}
+
+.ptimeline-step:last-child::before { display: none; }
+.ptimeline-step.done::before { background: var(--gradient); }
+
+.ptimeline-dot {
+    position: relative;
+    z-index: 1;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    background: var(--surface-3);
+    border: 2px solid var(--border-strong);
+    color: #fff;
+}
+
+.ptimeline-step.done .ptimeline-dot { background: var(--gradient); border-color: transparent; box-shadow: 0 4px 14px -4px rgba(124, 108, 255, .7); }
+.ptimeline-step.current .ptimeline-dot { background: var(--surface); border-color: var(--primary); box-shadow: var(--ring); }
+.ptimeline-step.failed .ptimeline-dot { background: var(--danger); border-color: transparent; }
+
+.ptimeline-pulse {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: ptimeline-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ptimeline-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(.65); opacity: .6; }
+}
+
+.ptimeline-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ptimeline-label { font-weight: 650; font-size: 13.5px; color: var(--text); }
+.ptimeline-step.upcoming .ptimeline-label { color: var(--text-faint); font-weight: 550; }
+.ptimeline-step.failed .ptimeline-label { color: var(--danger); }
+.ptimeline-date { font-size: 12px; color: var(--text-muted); }
+.ptimeline-desc { font-size: 12.5px; color: var(--text-2); max-width: 240px; }
+
+@media (max-width: 720px) {
+    .ptimeline { grid-auto-flow: row; gap: 0; }
+    .ptimeline-step { flex-direction: row; padding: 0 0 18px; gap: 14px; }
+    .ptimeline-step::before { top: 30px; bottom: 2px; left: 13px; right: auto; width: 2px; height: auto; }
+    .ptimeline-step.done::before { background: linear-gradient(180deg, #7c6cff, #22d3ee); }
+    .ptimeline-desc { max-width: none; }
+}

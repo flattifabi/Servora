@@ -1,0 +1,265 @@
+@page "/portal/report"
+@* "Report an issue": a guided form that creates an incident with the current user as caller (IPortalTicketService),
+   suggests matching knowledge articles while typing and uploads screenshots after the incident was created. *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@implements IDisposable
+@using Servora.Application.Activity
+@inject IPortalTicketService Tickets
+@inject IPortalKnowledgeService Knowledge
+@inject IPortalConversationService Conversations
+@inject NavigationManager Navigation
+@inject ToastService Toasts
+
+<PageTitle>Report an issue · Servora</PageTitle>
+
+<div class="portal-container">
+    <div class="portal-page-head">
+        <div class="portal-crumbs"><a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" /> <span>Report an issue</span></div>
+        <h1>Report an issue</h1>
+        <p>Tell us what is not working. The service desk gets back to you – you can follow the progress and add details at any time.</p>
+    </div>
+
+    <div class="portal-two-col">
+        <div class="card" style="min-width:0">
+            <div class="card-body">
+                <div class="form-section">
+                    <div class="form-section-title"><span class="preport-step">1</span> What is the problem?</div>
+                    <FormField Label="Summary" Required="true" Error="@_summaryError" Help="A short headline, for example “Outlook does not start”.">
+                        <input class="input" maxlength="@PortalIssueInput.SummaryMaxLength" value="@_input.ShortDescription" placeholder="Describe the issue in a few words"
+                               @oninput="OnSummaryInputAsync" disabled="@_busy" />
+                    </FormField>
+
+                    @if (_suggestions.Count > 0)
+                    {
+                        <div class="preport-suggest">
+                            <div class="flex items-center gap-2 mb-2"><Icon Name="lightbulb" Size="16" /> <b class="small">These articles might solve it right away</b></div>
+                            @foreach (var article in _suggestions)
+                            {
+                                <a class="preport-suggest-item" href="@article.Route" target="_blank" rel="noopener" @key="article.Id">
+                                    <Icon Name="book-open" Size="14" />
+                                    <span class="truncate">@article.Title</span>
+                                    <Icon Name="external-link" Size="12" />
+                                </a>
+                            }
+                        </div>
+                    }
+
+                    <FormField Label="Details" Help="What happened, since when, error messages, what you already tried." Class="mt-4">
+                        <textarea class="textarea" rows="6" maxlength="@PortalIssueInput.DescriptionMaxLength" @bind="_input.Description" disabled="@_busy"
+                                  placeholder="The more details you give, the faster we can help."></textarea>
+                    </FormField>
+
+                    @if (_categories.Count > 0)
+                    {
+                        <FormField Label="Category" Help="Optional – helps us route your issue to the right team." Class="mt-4">
+                            <select class="select" @bind="_input.Category" disabled="@_busy">
+                                <option value="">I'm not sure</option>
+                                @foreach (var category in _categories)
+                                {
+                                    <option value="@category">@category</option>
+                                }
+                            </select>
+                        </FormField>
+                    }
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title"><span class="preport-step">2</span> How does it affect you?</div>
+                    <div class="preport-options">
+                        @foreach (var option in s_urgencies)
+                        {
+                            <button type="button" class="preport-option @(_input.Urgency == option.Value ? "selected" : null)" disabled="@_busy" @onclick="() => _input.Urgency = option.Value">
+                                <span class="preport-option-icon @option.Tone"><Icon Name="@option.Icon" Size="18" /></span>
+                                <span><b>@option.Title</b><span>@option.Text</span></span>
+                            </button>
+                        }
+                    </div>
+                    <div class="small muted mt-4 mb-2">Who is affected?</div>
+                    <div class="portal-chip-row">
+                        @foreach (var option in s_impacts)
+                        {
+                            <button type="button" class="portal-chip @(_input.Impact == option.Value ? "active" : null)" disabled="@_busy" @onclick="() => _input.Impact = option.Value">
+                                <Icon Name="@option.Icon" Size="14" /> @option.Title
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title"><span class="preport-step">3</span> Screenshots or files <span class="small faint" style="font-weight:400">(optional)</span></div>
+                    <label class="preport-drop">
+                        <InputFile OnChange="OnFilesSelected" multiple disabled="@_busy" />
+                        <Icon Name="upload" Size="22" />
+                        <span class="small"><b>Choose files</b> or drop them here · max. @MaxFiles files, 25 MB each</span>
+                    </label>
+                    @if (_files.Count > 0)
+                    {
+                        <div class="preport-files">
+                            @foreach (var file in _files)
+                            {
+                                <span class="tag" @key="file.Name"><Icon Name="paperclip" Size="12" /> @file.Name · @PortalFormat.FileSize(file.Size)
+                                    <button type="button" class="preport-remove" aria-label="Remove @file.Name" disabled="@_busy" @onclick="() => _files.Remove(file)"><Icon Name="x" Size="12" /></button>
+                                </span>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="card-footer">
+                <a class="btn btn-secondary" href="/portal">Cancel</a>
+                <button class="btn btn-primary" disabled="@_busy" @onclick="SubmitAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="send" Size="16" />
+                    }
+                    Submit issue
+                </button>
+            </div>
+        </div>
+
+        <div class="portal-sticky stack" style="gap:16px">
+            <div class="card card-body">
+                <div class="eyebrow mb-3">Good to know</div>
+                <ul class="preport-tips">
+                    <li><Icon Name="zap" Size="14" /> Is it urgent and affecting many people? Choose “I can't work” and “Many people”.</li>
+                    <li><Icon Name="message-circle" Size="14" /> The team may ask questions – watch the conversation of your issue.</li>
+                    <li><Icon Name="check-circle" Size="14" /> When it's fixed, confirm the solution or reopen the issue.</li>
+                </ul>
+            </div>
+            <div class="card card-body">
+                <div class="eyebrow mb-2">Need something new instead?</div>
+                <p class="small muted" style="margin:0 0 12px">Requests for hardware, software or access are faster through the catalog.</p>
+                <a class="btn btn-secondary btn-block" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Open the catalog</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const int MaxFiles = 5;
+
+    private static readonly PortalChoice<Urgency>[] s_urgencies =
+    [
+        new(Urgency.High, "I can't work", "The issue blocks my work completely.", "flame", "danger"),
+        new(Urgency.Medium, "It slows me down", "I can work, but with difficulties or a workaround.", "timer", "warning"),
+        new(Urgency.Low, "Minor inconvenience", "It's annoying, but not urgent.", "info", "info"),
+    ];
+
+    private static readonly PortalChoice<Impact>[] s_impacts =
+    [
+        new(Impact.Low, "Just me", null, "user", null),
+        new(Impact.Medium, "My team", null, "users", null),
+        new(Impact.High, "Many people", null, "building", null),
+    ];
+
+    private readonly PortalIssueInput _input = new();
+    private readonly List<IBrowserFile> _files = [];
+    private IReadOnlyList<string> _categories = [];
+    private IReadOnlyList<PortalArticleSummary> _suggestions = [];
+    private string? _summaryError;
+    private bool _busy;
+    private CancellationTokenSource? _debounce;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var categories = await Tickets.GetIssueCategoriesAsync();
+        _categories = categories.Value ?? [];
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+
+    private async Task OnSummaryInputAsync(ChangeEventArgs e)
+    {
+        _input.ShortDescription = e.Value?.ToString() ?? string.Empty;
+        _summaryError = null;
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        if (_input.ShortDescription.Trim().Length < 4)
+        {
+            _suggestions = [];
+            return;
+        }
+
+        try
+        {
+            await Task.Delay(400, token);
+            var result = await Knowledge.SearchAsync(_input.ShortDescription, 3, token);
+            if (!token.IsCancellationRequested)
+            {
+                _suggestions = result.Value ?? [];
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        foreach (var file in e.GetMultipleFiles(MaxFiles))
+        {
+            if (_files.Count >= MaxFiles)
+            {
+                Toasts.Warning($"At most {MaxFiles} files can be attached.");
+                break;
+            }
+
+            if (file.Size > IAttachmentService.MaxSizeBytes)
+            {
+                Toasts.Error($"{file.Name} is too large", "Files can be at most 25 MB.");
+                continue;
+            }
+
+            _files.Add(file);
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _summaryError = _input.Validate();
+        if (_summaryError is not null)
+        {
+            Toasts.Warning("Please check your input.", _summaryError);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Tickets.ReportIssueAsync(_input);
+            if (!Toasts.FromResult(result, result.Value is { } created ? $"{created.Number} submitted – thank you!" : "Issue submitted"))
+            {
+                return;
+            }
+
+            var ticket = result.Value!;
+            foreach (var file in _files)
+            {
+                await using var stream = file.OpenReadStream(IAttachmentService.MaxSizeBytes);
+                var upload = await Conversations.UploadAsync(PortalTicketKind.Incident, ticket.Id, file.Name, file.ContentType, stream);
+                if (!upload.Succeeded)
+                {
+                    Toasts.Error($"Upload failed: {file.Name}", upload.Error);
+                }
+            }
+
+            Navigation.NavigateTo(ticket.Route);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

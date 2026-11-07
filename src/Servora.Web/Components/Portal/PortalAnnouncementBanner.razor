@@ -1,0 +1,33 @@
+@* A portal announcement as a coloured banner (info, maintenance, outage, success). Text is always HTML-encoded; links
+   were validated by PortalLinkPolicy. *@
+
+<div class="pann pann-@Announcement.Kind.ToString().ToLowerInvariant()" role="@(Announcement.Kind == PortalAnnouncementKind.Outage ? "alert" : "status")">
+    <span class="pann-icon"><Icon Name="@IconName" Size="18" /></span>
+    <div class="pann-body">
+        <div class="pann-title">@Announcement.Title</div>
+        @if (!string.IsNullOrWhiteSpace(Announcement.Body))
+        {
+            <div class="pann-text">@Announcement.Body</div>
+        }
+    </div>
+    @if (Announcement.LinkUrl is not null)
+    {
+        var external = !Announcement.LinkUrl.StartsWith('/');
+        <a class="btn btn-secondary btn-sm pann-link" href="@Announcement.LinkUrl" target="@(external ? "_blank" : null)" rel="@(external ? "noopener noreferrer nofollow" : null)">
+            @(Announcement.LinkText ?? "Learn more") <Icon Name="@(external ? "external-link" : "arrow-right")" Size="14" />
+        </a>
+    }
+</div>
+
+@code {
+    /// <summary>Gets or sets the announcement.</summary>
+    [Parameter, EditorRequired] public PortalAnnouncementView Announcement { get; set; } = default!;
+
+    private string IconName => Announcement.Kind switch
+    {
+        PortalAnnouncementKind.Maintenance => "wrench",
+        PortalAnnouncementKind.Outage => "alert-octagon",
+        PortalAnnouncementKind.Success => "sparkles",
+        _ => "info",
+    };
+}

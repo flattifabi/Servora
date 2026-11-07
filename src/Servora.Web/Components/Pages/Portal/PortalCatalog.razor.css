@@ -1,0 +1,15 @@
+.pcatalog-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.pcatalog-search {
+    max-width: 520px;
+}
+
+.pcatalog-search .input {
+    height: 46px;
+    border-radius: var(--r);
+    font-size: 14.5px;
+}

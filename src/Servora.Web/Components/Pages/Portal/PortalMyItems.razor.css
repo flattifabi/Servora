@@ -1,0 +1,24 @@
+.pmy-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.pmy-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.pmy-search {
+    margin-left: auto;
+    width: 300px;
+    max-width: 100%;
+}
+
+@media (max-width: 720px) {
+    .pmy-search { width: 100%; margin-left: 0; }
+}

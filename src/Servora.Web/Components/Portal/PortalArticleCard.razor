@@ -1,0 +1,34 @@
+@* A published knowledge article as a compact card or list row (portal home, knowledge, search, related articles). *@
+
+<a class="part @(Compact ? "compact" : "card")" href="@Article.Route">
+    <span class="part-icon"><Icon Name="book-open" Size="16" /></span>
+    <span class="part-main">
+        <span class="part-title">@Article.Title</span>
+        @if (!Compact)
+        {
+            var text = Article.Snippet ?? Article.Summary;
+            @if (!string.IsNullOrWhiteSpace(text))
+            {
+                <span class="part-desc">@text</span>
+            }
+        }
+        <span class="part-meta">
+            <span>@(Article.CategoryName ?? Article.KnowledgeBaseName)</span>
+            <span>·</span>
+            <span><Icon Name="eye" Size="12" /> @Article.ViewCount</span>
+            @if (Article.HelpfulPercent is { } helpful)
+            {
+                <span>·</span>
+                <span><Icon Name="thumbs-up" Size="12" /> @helpful%</span>
+            }
+        </span>
+    </span>
+</a>
+
+@code {
+    /// <summary>Gets or sets the article.</summary>
+    [Parameter, EditorRequired] public PortalArticleSummary Article { get; set; } = default!;
+
+    /// <summary>Gets or sets a value indicating whether the compact row variant (no description) is rendered.</summary>
+    [Parameter] public bool Compact { get; set; }
+}

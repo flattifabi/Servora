@@ -1,0 +1,72 @@
+.pticket {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: var(--r);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    transition: border-color var(--speed), transform var(--speed), box-shadow var(--speed);
+}
+
+.pticket:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow);
+    transform: translateY(-1px);
+}
+
+.pticket.needs-action {
+    border-color: rgba(245, 158, 11, .4);
+    background: linear-gradient(90deg, var(--warning-soft), var(--surface) 40%);
+}
+
+.pticket-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+
+.pticket-icon.incident { color: var(--warning); background: var(--warning-soft); }
+.pticket-icon.request { color: var(--primary); background: var(--primary-soft); }
+
+.pticket-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+}
+
+.pticket-title {
+    font-weight: 650;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pticket-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+.pticket-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+    .pticket { flex-wrap: wrap; align-items: flex-start; }
+    .pticket-main { flex-basis: calc(100% - 60px); }
+    .pticket-status { width: 100%; justify-content: space-between; padding-left: 54px; }
+}

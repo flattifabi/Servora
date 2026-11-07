@@ -1,0 +1,169 @@
+@page "/portal"
+@* Portal home: hero search over knowledge and catalog, quick actions, announcements, the user's open items, popular
+   catalog items and popular articles. *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@inject IPortalHomeService Home
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject ToastService Toasts
+
+<PageTitle>Self-Service Portal · Servora</PageTitle>
+
+<section class="phero">
+    <div class="phero-bg" aria-hidden="true"><div class="phero-aurora"></div></div>
+    <div class="portal-container phero-inner">
+        <div class="eyebrow phero-eyebrow"><span class="live-dot"></span> Self-Service Portal</div>
+        <h1 class="phero-title">@PortalFormat.Greeting(Clock.UtcNow), @PortalFormat.FirstName(CurrentUser.DisplayName). <span class="gradient-text">How can we help?</span></h1>
+        <p class="phero-sub">Find answers, order what you need or tell us about a problem – we keep you posted every step of the way.</p>
+        <div class="phero-search">
+            <PortalSearchBox Large="true" />
+        </div>
+        <div class="phero-actions">
+            <a class="phero-action" href="/portal/report">
+                <span class="phero-action-icon warn"><Icon Name="alert-circle" Size="20" /></span>
+                <span><b>Report an issue</b><span>Something broken or not working?</span></span>
+            </a>
+            <a class="phero-action" href="/portal/catalog">
+                <span class="phero-action-icon"><Icon Name="shopping-cart" Size="20" /></span>
+                <span><b>Request something</b><span>Hardware, software and access</span></span>
+            </a>
+            <a class="phero-action" href="/portal/knowledge">
+                <span class="phero-action-icon accent"><Icon Name="book-open" Size="20" /></span>
+                <span><b>Browse knowledge</b><span>Guides and answers</span></span>
+            </a>
+            <a class="phero-action" href="/portal/approvals">
+                <span class="phero-action-icon success"><Icon Name="check-square" Size="20" /></span>
+                <span><b>Approvals</b><span>@(_data is { PendingApprovals: > 0 } ? $"{_data.PendingApprovals} waiting for you" : "Nothing waiting for you")</span></span>
+            </a>
+        </div>
+    </div>
+</section>
+
+<div class="portal-container">
+    @if (_data is null)
+    {
+        <div class="portal-section">
+            <div class="grid grid-3">
+                @for (var i = 0; i < 3; i++)
+                {
+                    <div class="card card-body"><Skeleton Lines="3" /></div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (_data.Announcements.Count > 0)
+        {
+            <div class="portal-section stack" style="gap:10px">
+                @foreach (var announcement in _data.Announcements)
+                {
+                    <PortalAnnouncementBanner @key="announcement.Id" Announcement="announcement" />
+                }
+            </div>
+        }
+
+        <div class="portal-section phome-stats">
+            <a class="phome-stat" href="/portal/my">
+                <span class="phome-stat-value">@_data.OpenRequests</span>
+                <span class="phome-stat-label"><Icon Name="shopping-cart" Size="14" /> Open requests</span>
+            </a>
+            <a class="phome-stat" href="/portal/my">
+                <span class="phome-stat-value">@_data.OpenIncidents</span>
+                <span class="phome-stat-label"><Icon Name="alert-circle" Size="14" /> Open issues</span>
+            </a>
+            <a class="phome-stat @(_data.AwaitingConfirmation > 0 ? "attention" : null)" href="/portal/my">
+                <span class="phome-stat-value">@_data.AwaitingConfirmation</span>
+                <span class="phome-stat-label"><Icon Name="check-circle" Size="14" /> Awaiting your confirmation</span>
+            </a>
+            <a class="phome-stat @(_data.PendingApprovals > 0 ? "attention" : null)" href="/portal/approvals">
+                <span class="phome-stat-value">@_data.PendingApprovals</span>
+                <span class="phome-stat-label"><Icon Name="check-square" Size="14" /> Approvals for you</span>
+            </a>
+        </div>
+
+        <div class="portal-section portal-two-col">
+            <div style="min-width:0">
+                <div class="portal-section-head">
+                    <h2>My open items</h2>
+                    <a href="/portal/my">View all <Icon Name="arrow-right" Size="14" /></a>
+                </div>
+                @if (_data.RecentItems.Count == 0)
+                {
+                    <div class="card">
+                        <EmptyState Icon="inbox" Title="You're all caught up" Text="You have no open requests or issues. Need something? Order it from the catalog or report an issue.">
+                            <div class="flex gap-2 justify-center flex-wrap">
+                                <a class="btn btn-primary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Browse the catalog</a>
+                                <a class="btn btn-secondary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+                            </div>
+                        </EmptyState>
+                    </div>
+                }
+                else
+                {
+                    <div class="stack" style="gap:10px">
+                        @foreach (var item in _data.RecentItems)
+                        {
+                            <PortalTicketRow @key="item.Id" Item="item" />
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="card" style="min-width:0">
+                <div class="card-header">
+                    <h3 style="margin:0;font-size:15px">Popular answers</h3>
+                    <a class="small" href="/portal/knowledge">All articles</a>
+                </div>
+                <div class="card-body" style="padding:8px 12px">
+                    @if (_data.PopularArticles.Count == 0)
+                    {
+                        <div class="small faint" style="padding:12px">No articles have been published yet.</div>
+                    }
+                    else
+                    {
+                        @foreach (var article in _data.PopularArticles)
+                        {
+                            <PortalArticleCard @key="article.Id" Article="article" Compact="true" />
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        @if (_data.PopularItems.Count > 0)
+        {
+            <div class="portal-section">
+                <div class="portal-section-head">
+                    <h2>Popular requests</h2>
+                    <a href="/portal/catalog">Browse the catalog <Icon Name="arrow-right" Size="14" /></a>
+                </div>
+                <div class="portal-card-grid">
+                    @foreach (var item in _data.PopularItems)
+                    {
+                        <PortalCatalogCard @key="item.Id" Item="item" />
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private PortalHomeData? _data;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Home.GetHomeAsync();
+        if (result.Succeeded)
+        {
+            _data = result.Value;
+        }
+        else
+        {
+            _data = new PortalHomeData();
+            Toasts.Error("The portal could not be loaded", result.Error);
+        }
+    }
+}

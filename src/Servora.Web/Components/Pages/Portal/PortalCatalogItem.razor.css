@@ -1,0 +1,75 @@
+.porder-title p { margin: 4px 0 0; }
+
+.porder-description {
+    margin-bottom: 22px;
+    padding: 14px 16px;
+    border-radius: var(--r);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: 13.5px;
+    white-space: pre-line;
+}
+
+.porder-qty {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.porder-qty .input {
+    width: 80px;
+    text-align: center;
+}
+
+.porder-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--text-2);
+}
+
+.porder-steps li { display: flex; gap: 10px; align-items: flex-start; }
+
+.porder-steps li > span {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.porder-done {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 44px 28px;
+    text-align: center;
+    animation: pop-in .25s var(--ease);
+}
+
+.porder-done h1 {
+    margin: 18px 0 8px;
+    font-family: var(--font-display);
+    font-size: clamp(22px, 3vw, 28px);
+    letter-spacing: -.02em;
+}
+
+.porder-done-icon {
+    width: 76px;
+    height: 76px;
+    margin: 0 auto;
+    border-radius: 24px;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background: linear-gradient(135deg, #22c55e, #22d3ee);
+    box-shadow: 0 14px 40px -10px rgba(34, 197, 94, .7);
+}
