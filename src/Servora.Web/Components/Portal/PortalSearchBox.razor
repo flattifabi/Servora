@@ -1,0 +1,173 @@
+@* Hero search of the portal: searches published knowledge, the service catalog and the user's own items as you type
+   (debounced, through IPortalHomeService) and opens the full result page on Enter. *@
+@implements IDisposable
+@inject IPortalHomeService Home
+@inject NavigationManager Navigation
+
+<div class="psearch @(Large ? "lg" : null)">
+    <div class="psearch-field">
+        <Icon Name="search" Size="@(Large ? 22 : 18)" />
+        <input class="psearch-input" type="search" placeholder="@Placeholder" value="@_query" aria-label="Search the portal"
+               autocomplete="off" maxlength="200" @oninput="OnInputAsync" @onkeydown="OnKeyDownAsync" @onfocus="() => _open = _results is not null" />
+        @if (_busy)
+        {
+            <span class="spinner"></span>
+        }
+        <button class="btn btn-primary psearch-go" type="button" @onclick="OpenResults" disabled="@string.IsNullOrWhiteSpace(_query)">
+            <span class="psearch-go-text">Search</span><Icon Name="arrow-right" Size="16" />
+        </button>
+    </div>
+
+    @if (_open && _results is not null)
+    {
+        <div class="click-catcher" @onclick="() => _open = false"></div>
+        <div class="psearch-menu" role="listbox">
+            @if (_results.IsEmpty)
+            {
+                <div class="psearch-empty">
+                    <Icon Name="search" Size="18" />
+                    <div>
+                        <div style="font-weight:600">No matches for “@_results.Query”</div>
+                        <div class="small faint">Try other words – or <a href="/portal/report">report an issue</a> and we will help.</div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @if (_results.Articles.Count > 0)
+                {
+                    <div class="psearch-group">Knowledge</div>
+                    @foreach (var article in _results.Articles)
+                    {
+                        <a class="psearch-item" href="@article.Route" @key="article.Id" @onclick="() => _open = false">
+                            <span class="psearch-icon"><Icon Name="book-open" Size="16" /></span>
+                            <span class="psearch-text">
+                                <span class="psearch-title">@article.Title</span>
+                                <span class="psearch-sub">@(article.Snippet ?? article.Summary)</span>
+                            </span>
+                        </a>
+                    }
+                }
+                @if (_results.CatalogItems.Count > 0)
+                {
+                    <div class="psearch-group">Order</div>
+                    @foreach (var item in _results.CatalogItems)
+                    {
+                        <a class="psearch-item" href="/portal/catalog/@item.Id" @key="item.Id" @onclick="() => _open = false">
+                            <span class="psearch-icon accent"><Icon Name="@item.Icon" Size="16" /></span>
+                            <span class="psearch-text">
+                                <span class="psearch-title">@item.Name</span>
+                                <span class="psearch-sub">@(item.ShortDescription ?? item.CategoryName)</span>
+                            </span>
+                            <span class="tag">@PortalFormat.Price(item.Price)</span>
+                        </a>
+                    }
+                }
+                @if (_results.MyItems.Count > 0)
+                {
+                    <div class="psearch-group">My items</div>
+                    @foreach (var ticket in _results.MyItems)
+                    {
+                        <a class="psearch-item" href="@ticket.Route" @key="ticket.Id" @onclick="() => _open = false">
+                            <span class="psearch-icon neutral"><Icon Name="@ticket.Icon" Size="16" /></span>
+                            <span class="psearch-text">
+                                <span class="psearch-title">@ticket.Title</span>
+                                <span class="psearch-sub mono">@ticket.Number</span>
+                            </span>
+                            <StatusPill Text="@ticket.Status.Label" Tone="@ticket.Status.Tone" />
+                        </a>
+                    }
+                }
+                <button type="button" class="psearch-all" @onclick="OpenResults">See all results for “@_results.Query” <Icon Name="arrow-right" Size="14" /></button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string? _query;
+    private PortalSearchResults? _results;
+    private bool _open;
+    private bool _busy;
+    private CancellationTokenSource? _debounce;
+
+    /// <summary>Gets or sets a value indicating whether the large hero variant is rendered.</summary>
+    [Parameter] public bool Large { get; set; }
+
+    /// <summary>Gets or sets the placeholder text.</summary>
+    [Parameter] public string Placeholder { get; set; } = "Search for answers, services or your tickets…";
+
+    /// <summary>Gets or sets the initial query.</summary>
+    [Parameter] public string? InitialQuery { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnInitialized() => _query = InitialQuery;
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+
+    private async Task OnInputAsync(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString();
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        if (string.IsNullOrWhiteSpace(_query) || _query.Trim().Length < 2)
+        {
+            _results = null;
+            _open = false;
+            return;
+        }
+
+        try
+        {
+            await Task.Delay(250, token);
+            _busy = true;
+            StateHasChanged();
+            var result = await Home.SearchAsync(_query, 4, token);
+            if (!token.IsCancellationRequested)
+            {
+                _results = result.Value;
+                _open = _results is not null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            OpenResults();
+        }
+        else if (e.Key == "Escape")
+        {
+            _open = false;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void OpenResults()
+    {
+        if (string.IsNullOrWhiteSpace(_query))
+        {
+            return;
+        }
+
+        _open = false;
+        Navigation.NavigateTo($"/portal/search?q={Uri.EscapeDataString(_query.Trim())}");
+    }
+}

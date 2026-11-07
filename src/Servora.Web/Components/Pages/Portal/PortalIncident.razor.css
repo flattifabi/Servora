@@ -1,0 +1,45 @@
+.pinc-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-2);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.pinc-resolved {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding: 18px 20px;
+    border-radius: var(--r-lg);
+    border: 1px solid rgba(34, 197, 94, .4);
+    background: linear-gradient(135deg, var(--success-soft), var(--surface) 70%);
+    animation: fade-up .25s var(--ease);
+}
+
+.pinc-resolved-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 15px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: var(--success);
+    background: var(--success-soft);
+}
+
+.pinc-resolved-title { font-weight: 700; font-size: 15px; }
+
+.pinc-resolved-notes {
+    margin-top: 4px;
+    color: var(--text-2);
+    font-size: 13.5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+    .pinc-resolved { flex-wrap: wrap; align-items: flex-start; }
+    .pinc-resolved-actions { width: 100%; }
+}

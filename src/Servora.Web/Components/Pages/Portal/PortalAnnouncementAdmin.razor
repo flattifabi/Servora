@@ -1,0 +1,260 @@
+@page "/portal/admin/announcements"
+@* Administration of portal announcements (portal.manage): KPIs, table with live state, drawer editor with live preview
+   and delete confirmation. Uses the application shell (MainLayout). *@
+@layout Servora.Web.Components.Layout.MainLayout
+@attribute [RequirePermission(Permissions.Portal.Manage)]
+@inject IPortalAnnouncementService Announcements
+@inject IClock Clock
+@inject ToastService Toasts
+
+<PageTitle>Portal announcements · Servora</PageTitle>
+
+<PageHeader Title="Portal announcements" Subtitle="Banners on the self-service portal home page – maintenance windows, outages and news." Icon="bell">
+    <Breadcrumbs><a href="/portal">Self-Service Portal</a> <Icon Name="chevron-right" Size="12" /> <span>Announcements</span></Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="/portal"><Icon Name="external-link" Size="16" /> Open portal</a>
+        <button class="btn btn-primary" @onclick="New"><Icon Name="plus" Size="16" /> New announcement</button>
+    </Actions>
+</PageHeader>
+
+<div class="grid grid-4 mb-6">
+    <StatCard Label="Live now" Value="@_all.Count(a => a.IsLive).ToString()" Icon="activity" Tone="success" />
+    <StatCard Label="Scheduled" Value="@_all.Count(a => a.IsActive && a.StartsAt > Clock.UtcNow).ToString()" Icon="calendar-clock" Tone="info" />
+    <StatCard Label="Outages live" Value="@_all.Count(a => a.IsLive && a.Kind == PortalAnnouncementKind.Outage).ToString()" Icon="alert-octagon" Tone="danger" />
+    <StatCard Label="Inactive or expired" Value="@_all.Count(a => !a.IsLive && !(a.IsActive && a.StartsAt > Clock.UtcNow)).ToString()" Icon="history" Tone="accent" />
+</div>
+
+<DataTable TItem="PortalAnnouncementView" Items="_page" TotalCount="_filtered.Count" PageNumber="_pageNumber" PageSize="PageSize" Loading="_loading"
+           OnPageChanged="p => { _pageNumber = p; Paginate(); }" OnSearch="Search" OnRowClick="Edit" SearchPlaceholder="Search announcements…"
+           EmptyIcon="bell" EmptyTitle="No announcements" EmptyText="Create an announcement to inform portal users about maintenance, outages or news.">
+    <Columns>
+        <DataColumn TItem="PortalAnnouncementView" Title="Title">
+            <Template>
+                <div class="cell-primary">@context.Title</div>
+                @if (!string.IsNullOrWhiteSpace(context.Body))
+                {
+                    <div class="tiny faint truncate" style="max-width:420px">@context.Body</div>
+                }
+            </Template>
+        </DataColumn>
+        <DataColumn TItem="PortalAnnouncementView" Title="Kind"><Template><StatusPill Text="@context.Kind.ToString()" Tone="@KindTone(context.Kind)" /></Template></DataColumn>
+        <DataColumn TItem="PortalAnnouncementView" Title="State"><Template><StatusPill Text="@StateText(context)" Tone="@StateTone(context)" /></Template></DataColumn>
+        <DataColumn TItem="PortalAnnouncementView" Title="Window">
+            <Template><span class="small">@PortalFormat.Date(context.StartsAt) – @(context.EndsAt is null ? "open end" : PortalFormat.Date(context.EndsAt))</span></Template>
+        </DataColumn>
+        <DataColumn TItem="PortalAnnouncementView" Title="Order" Value="a => a.Order" Align="right" />
+        <DataColumn TItem="PortalAnnouncementView" Title="Updated"><Template><RelativeTime Value="context.UpdatedAt" /></Template></DataColumn>
+    </Columns>
+</DataTable>
+
+<Drawer @bind-Open="_editorOpen" Title="@(_editingId is null ? "New announcement" : "Edit announcement")" Subtitle="Shown to every portal user while active and inside the display window." Size="lg">
+    <ChildContent>
+        <div class="stack">
+            <FormField Label="Title" Required="true">
+                <input class="input" maxlength="@PortalAnnouncement.TitleMaxLength" @bind="_input.Title" @bind:event="oninput" />
+            </FormField>
+            <FormField Label="Message" Help="Plain text; line breaks are kept.">
+                <textarea class="textarea" rows="4" maxlength="@PortalAnnouncement.BodyMaxLength" @bind="_input.Body" @bind:event="oninput"></textarea>
+            </FormField>
+            <div class="form-grid">
+                <FormField Label="Kind">
+                    <select class="select" @bind="_input.Kind">
+                        @foreach (var kind in Enum.GetValues<PortalAnnouncementKind>())
+                        {
+                            <option value="@kind">@kind</option>
+                        }
+                    </select>
+                </FormField>
+                <FormField Label="Order" Help="Lower first. Outages are always shown first.">
+                    <input class="input" type="number" min="0" max="9999" @bind="_input.Order" />
+                </FormField>
+                <FormField Label="Show from (UTC)" Required="true">
+                    <UtcDateTimeInput Value="_input.StartsAt" ValueChanged="v => _input.StartsAt = v ?? Clock.UtcNow" />
+                </FormField>
+                <FormField Label="Show until (UTC)" Help="Leave empty for an open end.">
+                    <UtcDateTimeInput Value="_input.EndsAt" ValueChanged="v => _input.EndsAt = v" />
+                </FormField>
+                <FormField Label="Link" Help="Optional: /portal/... path or https:// URL.">
+                    <input class="input" maxlength="@PortalAnnouncement.LinkMaxLength" @bind="_input.LinkUrl" @bind:event="oninput" placeholder="/portal/knowledge" />
+                </FormField>
+                <FormField Label="Link text">
+                    <input class="input" maxlength="@PortalAnnouncement.LinkTextMaxLength" @bind="_input.LinkText" @bind:event="oninput" placeholder="Learn more" />
+                </FormField>
+            </div>
+            <Switch @bind-Value="_input.IsActive" Label="Published" />
+            @if (_formError is not null)
+            {
+                <div class="alert alert-danger"><Icon Name="alert-triangle" Size="16" /><span>@_formError</span></div>
+            }
+            <div>
+                <div class="eyebrow mb-2">Preview</div>
+                <PortalAnnouncementBanner Announcement="Preview" />
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        @if (_editingId is not null)
+        {
+            <button class="btn btn-outline-danger" style="margin-right:auto" @onclick="() => _confirmDelete = true"><Icon Name="trash" Size="16" /> Delete</button>
+        }
+        <button class="btn btn-secondary" @onclick="() => _editorOpen = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <Icon Name="save" Size="16" />
+            }
+            Save
+        </button>
+    </Footer>
+</Drawer>
+
+<ConfirmDialog @bind-Open="_confirmDelete" Title="Delete announcement?" Message="The announcement disappears from the portal immediately. This cannot be undone." ConfirmText="Delete" Danger="true" OnConfirm="DeleteAsync" />
+
+@code {
+    private const int PageSize = 25;
+
+    private IReadOnlyList<PortalAnnouncementView> _all = [];
+    private List<PortalAnnouncementView> _filtered = [];
+    private IReadOnlyList<PortalAnnouncementView> _page = [];
+    private int _pageNumber = 1;
+    private string? _search;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _editorOpen;
+    private bool _confirmDelete;
+    private Guid? _editingId;
+    private PortalAnnouncementInput _input = new();
+    private string? _formError;
+
+    private PortalAnnouncementView Preview => new()
+    {
+        Title = string.IsNullOrWhiteSpace(_input.Title) ? "Your headline" : _input.Title,
+        Body = _input.Body,
+        Kind = _input.Kind,
+        LinkUrl = PortalLinkPolicy.IsAllowed(_input.LinkUrl?.Trim()) ? _input.LinkUrl!.Trim() : null,
+        LinkText = _input.LinkText,
+    };
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Announcements.ListAsync();
+        _all = result.Value ?? [];
+        _loading = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("The announcements could not be loaded", result.Error);
+        }
+
+        Filter();
+    }
+
+    private void Search(string term)
+    {
+        _search = term;
+        _pageNumber = 1;
+        Filter();
+    }
+
+    private void Filter()
+    {
+        _filtered = string.IsNullOrWhiteSpace(_search)
+            ? _all.ToList()
+            : _all.Where(a => a.Title.Contains(_search, StringComparison.OrdinalIgnoreCase) || (a.Body?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+        Paginate();
+    }
+
+    private void Paginate() => _page = _filtered.Skip((_pageNumber - 1) * PageSize).Take(PageSize).ToList();
+
+    private void New()
+    {
+        _editingId = null;
+        _input = new PortalAnnouncementInput { StartsAt = Clock.UtcNow, Kind = PortalAnnouncementKind.Info, IsActive = true };
+        _formError = null;
+        _editorOpen = true;
+    }
+
+    private void Edit(PortalAnnouncementView view)
+    {
+        _editingId = view.Id;
+        _input = new PortalAnnouncementInput
+        {
+            Title = view.Title,
+            Body = view.Body,
+            Kind = view.Kind,
+            LinkUrl = view.LinkUrl,
+            LinkText = view.LinkText,
+            StartsAt = view.StartsAt,
+            EndsAt = view.EndsAt,
+            IsActive = view.IsActive,
+            Order = view.Order,
+            Version = view.Version,
+        };
+        _formError = null;
+        _editorOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _formError = _input.Validate();
+        if (_formError is not null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Announcements.SaveAsync(_editingId, _input);
+            if (Toasts.FromResult(result, "Announcement saved"))
+            {
+                _editorOpen = false;
+                await LoadAsync();
+            }
+            else
+            {
+                _formError = result.Error;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_editingId is not { } id)
+        {
+            return;
+        }
+
+        var result = await Announcements.DeleteAsync(id);
+        if (Toasts.FromResult(result, "Announcement deleted"))
+        {
+            _editorOpen = false;
+            await LoadAsync();
+        }
+    }
+
+    private string StateText(PortalAnnouncementView a) =>
+        a.IsLive ? "Live" : !a.IsActive ? "Inactive" : a.StartsAt > Clock.UtcNow ? "Scheduled" : "Expired";
+
+    private string StateTone(PortalAnnouncementView a) =>
+        a.IsLive ? "success" : !a.IsActive ? "neutral" : a.StartsAt > Clock.UtcNow ? "info" : "warning";
+
+    private static string KindTone(PortalAnnouncementKind kind) => kind switch
+    {
+        PortalAnnouncementKind.Outage => "danger",
+        PortalAnnouncementKind.Maintenance => "warning",
+        PortalAnnouncementKind.Success => "success",
+        _ => "info",
+    };
+}

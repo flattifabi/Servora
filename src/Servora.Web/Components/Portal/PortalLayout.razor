@@ -1,0 +1,221 @@
+@* Consumer-grade shell of the self-service portal: glass header with navigation, approvals badge, report-an-issue CTA,
+   theme switch and user menu; responsive drawer navigation on phones; footer. *@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ICurrentUser CurrentUser
+@inject IPermissionService PermissionService
+@inject IApprovalInboxService ApprovalInbox
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<div class="portal-shell">
+    <header class="portal-header">
+        <div class="portal-header-inner">
+            <a class="portal-brand" href="/portal" aria-label="Self-Service Portal home">
+                <span class="portal-mark"><Icon Name="life-buoy" Size="18" /></span>
+                <span class="portal-brand-text">Servora <span class="portal-brand-sub">Self-Service</span></span>
+            </a>
+
+            <nav class="portal-nav @(_menuOpen ? "open" : null)" aria-label="Portal navigation">
+                @foreach (var link in s_links)
+                {
+                    <a class="portal-nav-link @(IsActive(link.Route) ? "active" : null)" href="@link.Route" @onclick="CloseMenu">
+                        <Icon Name="@link.Icon" Size="16" />
+                        <span>@link.Title</span>
+                        @if (link.Route == "/portal/approvals" && _pendingApprovals > 0)
+                        {
+                            <span class="portal-badge" title="Approvals waiting for you">@(_pendingApprovals > 99 ? "99+" : _pendingApprovals.ToString())</span>
+                        }
+                    </a>
+                }
+                <a class="portal-nav-link portal-nav-cta-mobile" href="/portal/report" @onclick="CloseMenu"><Icon Name="alert-circle" Size="16" /> <span>Report an issue</span></a>
+            </nav>
+
+            <div class="portal-actions">
+                <a class="btn btn-primary btn-sm portal-cta" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+                <button class="icon-btn" title="Toggle theme" @onclick="ToggleThemeAsync"><Icon Name="@(_theme == "light" ? "moon" : "sun")" /></button>
+                <div class="dropdown">
+                    <button class="icon-btn portal-avatar-btn" @onclick="() => _userOpen = !_userOpen" title="Account" aria-haspopup="menu" aria-expanded="@_userOpen">
+                        <Avatar Name="@CurrentUser.DisplayName" Size="sm" />
+                    </button>
+                    @if (_userOpen)
+                    {
+                        <div class="click-catcher" @onclick="() => _userOpen = false"></div>
+                        <div class="dropdown-menu" role="menu">
+                            <div class="flex items-center gap-3" style="padding:10px">
+                                <Avatar Name="@CurrentUser.DisplayName" Size="lg" />
+                                <div class="flex-1">
+                                    <div style="font-weight:650" class="truncate">@CurrentUser.DisplayName</div>
+                                    <div class="small faint truncate">@CurrentUser.Name</div>
+                                </div>
+                            </div>
+                            <div class="dropdown-divider"></div>
+                            <a class="dropdown-item" href="/portal/my" @onclick="() => _userOpen = false"><Icon Name="inbox" Size="16" /> My items</a>
+                            <a class="dropdown-item" href="/profile" @onclick="() => _userOpen = false"><Icon Name="user" Size="16" /> My profile</a>
+                            <a class="dropdown-item" href="/account/change-password" data-enhance-nav="false"><Icon Name="key" Size="16" /> Change password</a>
+                            @if (_canManage)
+                            {
+                                <a class="dropdown-item" href="/portal/admin/announcements" @onclick="() => _userOpen = false"><Icon Name="bell" Size="16" /> Manage announcements</a>
+                            }
+                            @if (_hasWorkspace)
+                            {
+                                <a class="dropdown-item" href="/" @onclick="() => _userOpen = false"><Icon Name="grid" Size="16" /> Open workspace</a>
+                            }
+                            <div class="dropdown-divider"></div>
+                            <button class="dropdown-item danger" @onclick="SignOut"><Icon Name="log-out" Size="16" /> Sign out</button>
+                        </div>
+                    }
+                </div>
+                <button class="icon-btn portal-menu-btn" title="Menu" aria-label="Toggle navigation" aria-expanded="@_menuOpen" @onclick="() => _menuOpen = !_menuOpen">
+                    <Icon Name="@(_menuOpen ? "x" : "menu")" />
+                </button>
+            </div>
+        </div>
+    </header>
+
+    @if (_menuOpen)
+    {
+        <div class="portal-menu-backdrop" @onclick="CloseMenu"></div>
+    }
+
+    <main class="portal-main">
+        <ErrorBoundary @ref="_errorBoundary">
+            <ChildContent>
+                @Body
+            </ChildContent>
+            <ErrorContent Context="exception">
+                <div class="card portal-container">
+                    <EmptyState Icon="alert-octagon" Title="Something went wrong" Text="An unexpected error occurred while loading this page. The error was logged – please try again.">
+                        <div class="flex gap-2 justify-center">
+                            <button class="btn btn-primary" @onclick="Recover"><Icon Name="refresh" Size="16" /> Try again</button>
+                            <a class="btn btn-secondary" href="/portal">Back to the portal</a>
+                        </div>
+                    </EmptyState>
+                </div>
+            </ErrorContent>
+        </ErrorBoundary>
+    </main>
+
+    <footer class="portal-footer">
+        <div class="portal-footer-inner">
+            <span class="faint small">Servora Self-Service · Help when you need it</span>
+            <div class="flex gap-4 small">
+                <a href="/portal/knowledge">Knowledge</a>
+                <a href="/portal/catalog">Catalog</a>
+                <a href="/portal/my">My items</a>
+            </div>
+        </div>
+    </footer>
+</div>
+<ToastHost />
+
+@code {
+    private static readonly PortalNavLink[] s_links =
+    [
+        new("Home", "/portal", "home"),
+        new("Catalog", "/portal/catalog", "shopping-cart"),
+        new("Knowledge", "/portal/knowledge", "book-open"),
+        new("My items", "/portal/my", "inbox"),
+        new("Approvals", "/portal/approvals", "check-square"),
+    ];
+
+    /// <summary>Permissions that indicate access to the fulfiller workspace (sidebar application).</summary>
+    private static readonly string[] s_workspacePermissions =
+    [
+        Permissions.Incidents.Read, Permissions.Problems.Read, Permissions.Changes.Read, Permissions.Requests.Read,
+        Permissions.Knowledge.Write, Permissions.Cmdb.Read, Permissions.Assets.Read, Permissions.Analytics.Read,
+    ];
+
+    private ErrorBoundary? _errorBoundary;
+    private bool _menuOpen;
+    private bool _userOpen;
+    private bool _canManage;
+    private bool _hasWorkspace;
+    private int _pendingApprovals;
+    private string _theme = "dark";
+
+    /// <summary>Gets or sets the cascading authentication state.</summary>
+    [CascadingParameter] private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        if (AuthenticationState is not null)
+        {
+            var state = await AuthenticationState;
+            if (state.User.HasClaim(Servora.Infrastructure.Security.ServoraClaimTypes.MustChangePassword, "true"))
+            {
+                Navigation.NavigateTo(MustChangePasswordMiddleware.ChangePasswordPath, forceLoad: true);
+                return;
+            }
+        }
+
+        if (CurrentUser.UserId is { } userId)
+        {
+            var granted = await PermissionService.GetUserPermissionsAsync(userId);
+            _canManage = PermissionMatcher.IsGranted(granted, Permissions.Portal.Manage);
+            _hasWorkspace = s_workspacePermissions.Any(p => PermissionMatcher.IsGranted(granted, p));
+        }
+
+        await RefreshApprovalsAsync();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _theme = await JS.InvokeAsync<string>("servora.getTheme");
+            await JS.InvokeVoidAsync("servora.hideSplash");
+            StateHasChanged();
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+
+    private bool IsActive(string route)
+    {
+        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
+        return route == "/portal"
+            ? path.Equals("/portal", StringComparison.OrdinalIgnoreCase) || path.Equals("/portal/", StringComparison.OrdinalIgnoreCase)
+            : path.StartsWith(route, StringComparison.OrdinalIgnoreCase)
+              || (route == "/portal/my" && (path.StartsWith("/portal/incidents", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/portal/requests", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task RefreshApprovalsAsync()
+    {
+        if (CurrentUser.UserId is null)
+        {
+            return;
+        }
+
+        var stats = await ApprovalInbox.GetStatsAsync();
+        _pendingApprovals = stats.Succeeded && stats.Value is not null ? stats.Value.Pending : 0;
+    }
+
+    private void CloseMenu() => _menuOpen = false;
+
+    private void Recover() => _errorBoundary?.Recover();
+
+    private async Task ToggleThemeAsync()
+    {
+        _theme = _theme == "light" ? "dark" : "light";
+        await JS.InvokeVoidAsync("servora.setTheme", _theme);
+    }
+
+    private void SignOut() => Navigation.NavigateTo("/logout", forceLoad: true);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _menuOpen = false;
+        _userOpen = false;
+        _errorBoundary?.Recover();
+        _ = InvokeAsync(async () =>
+        {
+            await RefreshApprovalsAsync();
+            StateHasChanged();
+        });
+    }
+}

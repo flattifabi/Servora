@@ -1,0 +1,29 @@
+@* One of the user's incidents or requests as a clickable list row (my items, home page, search). *@
+
+<a class="pticket @(Item.Status.NeedsAction ? "needs-action" : null)" href="@Item.Route">
+    <span class="pticket-icon @(Item.Kind == PortalTicketKind.Incident ? "incident" : "request")"><Icon Name="@Item.Icon" Size="18" /></span>
+    <span class="pticket-main">
+        <span class="pticket-title">@Item.Title</span>
+        <span class="pticket-meta">
+            <span class="mono">@Item.Number</span>
+            <span>·</span>
+            <span>@(Item.Kind == PortalTicketKind.Incident ? "Issue" : "Request")</span>
+            @if (Item.OnBehalfOfName is not null)
+            {
+                <span>·</span>
+                <span>for @Item.OnBehalfOfName</span>
+            }
+            <span>·</span>
+            <span>updated <RelativeTime Value="Item.UpdatedAt" /></span>
+        </span>
+    </span>
+    <span class="pticket-status">
+        <StatusPill Text="@Item.Status.Label" Tone="@Item.Status.Tone" />
+        <Icon Name="chevron-right" Size="16" Class="faint" />
+    </span>
+</a>
+
+@code {
+    /// <summary>Gets or sets the item.</summary>
+    [Parameter, EditorRequired] public PortalTicketSummary Item { get; set; } = default!;
+}

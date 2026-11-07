@@ -1,0 +1,151 @@
+@page "/portal/knowledge/{Id:guid}"
+@* Portal knowledge reader: XSS-safe rendered article (SafeMarkdown via MarkdownView), table of contents, helpful votes,
+   related articles and a hand-off to "Report an issue". Only published articles are reachable. *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@inject IPortalKnowledgeService Knowledge
+@inject ToastService Toasts
+
+<PageTitle>@(_article?.Summary.Title ?? "Article") · Servora</PageTitle>
+
+<div class="portal-container">
+    @if (_loading)
+    {
+        <div class="portal-page-head"><Skeleton Lines="2" Height="22px" /></div>
+        <div class="card card-body"><Skeleton Lines="10" /></div>
+    }
+    else if (_article is null)
+    {
+        <div class="portal-page-head"></div>
+        <div class="card">
+            <EmptyState Icon="book-open" Title="Article not available" Text="The article does not exist or is no longer published.">
+                <a class="btn btn-primary" href="/portal/knowledge"><Icon Name="arrow-left" Size="16" /> Back to the knowledge base</a>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        var summary = _article.Summary;
+        <div class="portal-page-head">
+            <div class="portal-crumbs">
+                <a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" />
+                <a href="/portal/knowledge">Knowledge</a> <Icon Name="chevron-right" Size="12" />
+                <span>@(summary.CategoryName ?? summary.KnowledgeBaseName)</span>
+            </div>
+            <h1>@summary.Title</h1>
+            @if (!string.IsNullOrWhiteSpace(summary.Summary))
+            {
+                <p>@summary.Summary</p>
+            }
+            <div class="pread-meta">
+                <span class="tag mono">@summary.Number</span>
+                <span><Icon Name="clock" Size="13" /> Updated <RelativeTime Value="_article.UpdatedAt" /></span>
+                <span><Icon Name="eye" Size="13" /> @summary.ViewCount views</span>
+                @if (summary.HelpfulPercent is { } helpful)
+                {
+                    <span><Icon Name="thumbs-up" Size="13" /> @helpful% found this helpful</span>
+                }
+            </div>
+        </div>
+
+        <div class="portal-two-col">
+            <div class="stack" style="min-width:0">
+                <article class="card pread-article">
+                    <MarkdownView SafeHtml="@_article.SafeHtml" />
+                </article>
+
+                <div class="card card-body pread-vote">
+                    <div>
+                        <div style="font-weight:650">Was this article helpful?</div>
+                        <div class="small faint">@(_article.MyVote is null ? "Your feedback helps us improve our answers." : "Thanks for your feedback! You can change your vote.")</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="btn @(_article.MyVote == true ? "btn-success" : "btn-secondary")" disabled="@_voting" @onclick="() => VoteAsync(true)"><Icon Name="thumbs-up" Size="16" /> Yes <span class="faint">@_article.HelpfulCount</span></button>
+                        <button class="btn @(_article.MyVote == false ? "btn-danger" : "btn-secondary")" disabled="@_voting" @onclick="() => VoteAsync(false)"><Icon Name="thumbs-down" Size="16" /> No <span class="faint">@_article.NotHelpfulCount</span></button>
+                    </div>
+                </div>
+
+                @if (_article.MyVote == false)
+                {
+                    <div class="alert alert-info"><Icon Name="life-buoy" Size="16" /><span>Sorry this did not help. <a href="/portal/report">Report an issue</a> and the service desk will look into it personally.</span></div>
+                }
+            </div>
+
+            <div class="portal-sticky stack" style="gap:16px">
+                @if (_article.Headings.Count > 1)
+                {
+                    <nav class="card card-body pread-toc" aria-label="Table of contents">
+                        <div class="eyebrow mb-2">On this page</div>
+                        @foreach (var heading in _article.Headings.Where(h => h.Level <= 3))
+                        {
+                            <a class="pread-toc-link level-@heading.Level" href="@($"/portal/knowledge/{Id}#{heading.Id}")">@heading.Text</a>
+                        }
+                    </nav>
+                }
+                @if (_article.Related.Count > 0)
+                {
+                    <div class="card">
+                        <div class="card-header"><h3 style="margin:0;font-size:14px">Related articles</h3></div>
+                        <div class="card-body" style="padding:8px 12px">
+                            @foreach (var related in _article.Related)
+                            {
+                                <PortalArticleCard @key="related.Id" Article="related" Compact="true" />
+                            }
+                        </div>
+                    </div>
+                }
+                <div class="card card-body pread-help">
+                    <span class="portal-icon-tile"><Icon Name="life-buoy" Size="20" /></span>
+                    <div>
+                        <div style="font-weight:650">Still need help?</div>
+                        <div class="small muted mb-3">Our service desk is there for you.</div>
+                        <a class="btn btn-primary btn-sm" href="/portal/report"><Icon Name="alert-circle" Size="14" /> Report an issue</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private PortalArticle? _article;
+    private bool _loading = true;
+    private bool _voting;
+
+    /// <summary>Gets or sets the article identifier.</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        var result = await Knowledge.GetArticleAsync(Id);
+        _article = result.Succeeded ? result.Value : null;
+        _loading = false;
+        if (_article is not null)
+        {
+            await Knowledge.RecordViewAsync(Id);
+        }
+    }
+
+    private async Task VoteAsync(bool helpful)
+    {
+        _voting = true;
+        try
+        {
+            var result = await Knowledge.VoteAsync(Id, helpful);
+            if (result.Succeeded)
+            {
+                var reloaded = await Knowledge.GetArticleAsync(Id);
+                _article = reloaded.Value ?? _article;
+            }
+            else
+            {
+                Toasts.Error("Your vote could not be saved", result.Error);
+            }
+        }
+        finally
+        {
+            _voting = false;
+        }
+    }
+}

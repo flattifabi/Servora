@@ -1,0 +1,232 @@
+@page "/portal/knowledge"
+@* Portal knowledge: search over published articles, category tiles, popular and newest articles, and the article list of
+   a category (?category=). Only published, valid articles are ever shown (IPortalKnowledgeService). *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@implements IDisposable
+@inject IPortalKnowledgeService Knowledge
+@inject NavigationManager Navigation
+@inject ToastService Toasts
+
+<PageTitle>Knowledge · Servora</PageTitle>
+
+<div class="portal-container">
+    <div class="portal-page-head pkb-head">
+        <div class="portal-crumbs"><a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" /> <span>Knowledge</span></div>
+        <h1>Find answers yourself</h1>
+        <p>@(_home is null ? "Guides, how-tos and solutions to common problems." : $"{_home.ArticleCount} published article{(_home.ArticleCount == 1 ? string.Empty : "s")} with guides, how-tos and solutions to common problems.")</p>
+        <div class="input-icon pkb-search">
+            <Icon Name="search" Size="18" />
+            <input class="input" type="search" placeholder="Search the knowledge base…" value="@_query" maxlength="200" @oninput="OnQueryInputAsync" aria-label="Search the knowledge base" />
+        </div>
+    </div>
+
+    @if (_home is null)
+    {
+        <div class="portal-card-grid">
+            @for (var i = 0; i < 6; i++)
+            {
+                <div class="card card-body"><Skeleton Lines="3" /></div>
+            }
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(_query) && _query.Trim().Length >= 2)
+    {
+        <div class="portal-section-head"><h2>Results for “@_query.Trim()”</h2></div>
+        @if (_searching)
+        {
+            <div class="loading-center"><span class="spinner lg"></span></div>
+        }
+        else if (_results.Count == 0)
+        {
+            <div class="card">
+                <EmptyState Icon="search" Title="No article found" Text="Try different words – or let the service desk help you personally.">
+                    <a class="btn btn-primary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+                </EmptyState>
+            </div>
+        }
+        else
+        {
+            <div class="stack" style="gap:10px">
+                @foreach (var article in _results)
+                {
+                    <PortalArticleCard @key="article.Id" Article="article" />
+                }
+            </div>
+        }
+    }
+    else if (CategoryId is { } categoryId)
+    {
+        var category = _home.Categories.FirstOrDefault(c => c.Id == categoryId);
+        <div class="portal-section-head">
+            <h2>@(category?.Name ?? "Category")</h2>
+            <a href="/portal/knowledge"><Icon Name="arrow-left" Size="14" /> All categories</a>
+        </div>
+        @if (category?.Description is { Length: > 0 } description)
+        {
+            <p class="muted small" style="margin-top:-6px">@description</p>
+        }
+        @if (_categoryArticles is null)
+        {
+            <div class="loading-center"><span class="spinner lg"></span></div>
+        }
+        else if (_categoryArticles.Count == 0)
+        {
+            <div class="card"><EmptyState Icon="book-open" Title="No articles yet" Text="This category has no published articles." /></div>
+        }
+        else
+        {
+            <div class="stack" style="gap:10px">
+                @foreach (var article in _categoryArticles)
+                {
+                    <PortalArticleCard @key="article.Id" Article="article" />
+                }
+            </div>
+        }
+    }
+    else
+    {
+        @if (_home.Categories.Count > 0)
+        {
+            <div class="portal-section-head"><h2>Browse by topic</h2></div>
+            <div class="portal-card-grid">
+                @foreach (var category in _home.Categories)
+                {
+                    <a class="card pkb-cat" href="/portal/knowledge?category=@category.Id" @key="category.Id">
+                        <span class="portal-icon-tile"><Icon Name="@category.Icon" Size="20" /></span>
+                        <span style="min-width:0">
+                            <span class="pkb-cat-name">@category.Name</span>
+                            <span class="pkb-cat-meta">@category.KnowledgeBaseName · @category.ArticleCount article@(category.ArticleCount == 1 ? string.Empty : "s")</span>
+                            @if (!string.IsNullOrWhiteSpace(category.Description))
+                            {
+                                <span class="pkb-cat-desc">@category.Description</span>
+                            }
+                        </span>
+                    </a>
+                }
+            </div>
+        }
+
+        @if (_home.ArticleCount == 0)
+        {
+            <div class="card"><EmptyState Icon="book-open" Title="No articles published yet" Text="The knowledge base is being prepared. In the meantime, the service desk is happy to help.">
+                <a class="btn btn-primary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+            </EmptyState></div>
+        }
+        else
+        {
+            <div class="portal-section grid grid-2">
+                <div class="card">
+                    <div class="card-header"><h3 style="margin:0;font-size:15px"><Icon Name="trending-up" Size="16" /> Most read</h3></div>
+                    <div class="card-body" style="padding:8px 12px">
+                        @foreach (var article in _home.Popular)
+                        {
+                            <PortalArticleCard @key="article.Id" Article="article" Compact="true" />
+                        }
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3 style="margin:0;font-size:15px"><Icon Name="sparkles" Size="16" /> Recently published</h3></div>
+                    <div class="card-body" style="padding:8px 12px">
+                        @foreach (var article in _home.Newest)
+                        {
+                            <PortalArticleCard @key="article.Id" Article="article" Compact="true" />
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private PortalKnowledgeHome? _home;
+    private IReadOnlyList<PortalArticleSummary> _results = [];
+    private IReadOnlyList<PortalArticleSummary>? _categoryArticles;
+    private Guid? _loadedCategory;
+    private string? _query;
+    private bool _searching;
+    private CancellationTokenSource? _debounce;
+
+    /// <summary>Gets or sets the selected category (query string <c>?category=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "category")] public Guid? CategoryId { get; set; }
+
+    /// <summary>Gets or sets the initial search (query string <c>?q=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Knowledge.GetHomeAsync();
+        _home = result.Value ?? new PortalKnowledgeHome();
+        if (!result.Succeeded)
+        {
+            Toasts.Error("The knowledge base could not be loaded", result.Error);
+        }
+
+        if (!string.IsNullOrWhiteSpace(Query))
+        {
+            _query = Query;
+            await SearchAsync(CancellationToken.None);
+        }
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CategoryId == _loadedCategory)
+        {
+            return;
+        }
+
+        _loadedCategory = CategoryId;
+        _categoryArticles = null;
+        if (CategoryId is { } categoryId)
+        {
+            _query = null;
+            var result = await Knowledge.ListByCategoryAsync(categoryId, 100);
+            _categoryArticles = result.Value ?? [];
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+
+    private async Task OnQueryInputAsync(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString();
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        try
+        {
+            await Task.Delay(300, token);
+            await SearchAsync(token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task SearchAsync(CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(_query) || _query.Trim().Length < 2)
+        {
+            _results = [];
+            return;
+        }
+
+        _searching = true;
+        StateHasChanged();
+        var result = await Knowledge.SearchAsync(_query, 30, token);
+        if (!token.IsCancellationRequested)
+        {
+            _results = result.Value ?? [];
+            _searching = false;
+        }
+    }
+}

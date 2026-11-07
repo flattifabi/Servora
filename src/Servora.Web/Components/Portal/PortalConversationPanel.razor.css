@@ -1,0 +1,141 @@
+.pconv-empty {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 18px;
+    border-radius: var(--r);
+    border: 1px dashed var(--border-strong);
+    color: var(--text-muted);
+    font-size: 13.5px;
+}
+
+.pconv-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.pconv-event {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 0 12px;
+}
+
+.pconv-msg {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    max-width: 82%;
+}
+
+.pconv-msg.mine {
+    margin-left: auto;
+    flex-direction: row-reverse;
+}
+
+.pconv-bubble {
+    min-width: 0;
+    padding: 10px 14px;
+    border-radius: 16px 16px 16px 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+
+.pconv-msg.mine .pconv-bubble {
+    border-radius: 16px 16px 4px 16px;
+    background: linear-gradient(135deg, rgba(124, 108, 255, .9), rgba(168, 85, 247, .85));
+    border-color: transparent;
+    color: #fff;
+}
+
+.pconv-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 3px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+}
+
+.pconv-msg.mine .pconv-meta { color: rgba(255, 255, 255, .78); }
+.pconv-meta .author { font-weight: 650; color: var(--text); }
+.pconv-msg.mine .pconv-meta .author { color: #fff; }
+
+.pconv-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.pconv-composer {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+.pconv-composer-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.pconv-attach {
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.pconv-attach ::deep input[type=file] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.pconv-files {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pconv-file {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--r);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-2);
+}
+
+.pconv-file:hover { border-color: var(--primary); color: var(--text); }
+
+.pconv-file-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    background: var(--primary-soft);
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+    .pconv-msg { max-width: 100%; }
+}
+
+.pconv .card-header { flex-wrap: wrap; }

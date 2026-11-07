@@ -1,0 +1,100 @@
+@page "/portal/search"
+@* Full results of the portal hero search: knowledge articles, catalog items and the user's own items. *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@inject IPortalHomeService Home
+@inject ToastService Toasts
+
+<PageTitle>Search · Servora</PageTitle>
+
+<div class="portal-container">
+    <div class="portal-page-head">
+        <div class="portal-crumbs"><a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" /> <span>Search</span></div>
+        <h1>@(string.IsNullOrWhiteSpace(Query) ? "Search" : $"Results for “{Query.Trim()}”")</h1>
+        <div style="max-width:760px;margin-top:16px">
+            <PortalSearchBox @key="Query" InitialQuery="@Query" />
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="loading-center"><span class="spinner lg"></span></div>
+    }
+    else if (_results is null || _results.IsEmpty)
+    {
+        <div class="card">
+            <EmptyState Icon="search" Title="@(string.IsNullOrWhiteSpace(Query) ? "What are you looking for?" : "No results")"
+                        Text="@(string.IsNullOrWhiteSpace(Query) ? "Search knowledge articles, catalog items and your own tickets." : "Try different words, browse the catalog – or let us help you personally.")">
+                <div class="flex gap-2 justify-center flex-wrap">
+                    <a class="btn btn-primary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+                    <a class="btn btn-secondary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Browse the catalog</a>
+                </div>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        @if (_results.Articles.Count > 0)
+        {
+            <div class="portal-section" style="margin-top:8px">
+                <div class="portal-section-head"><h2>Knowledge <span class="faint small">(@_results.Articles.Count)</span></h2><a href="/portal/knowledge?q=@Uri.EscapeDataString(Query ?? string.Empty)">Search in knowledge <Icon Name="arrow-right" Size="14" /></a></div>
+                <div class="stack" style="gap:10px">
+                    @foreach (var article in _results.Articles)
+                    {
+                        <PortalArticleCard @key="article.Id" Article="article" />
+                    }
+                </div>
+            </div>
+        }
+        @if (_results.CatalogItems.Count > 0)
+        {
+            <div class="portal-section">
+                <div class="portal-section-head"><h2>Order <span class="faint small">(@_results.CatalogItems.Count)</span></h2><a href="/portal/catalog">Browse the catalog <Icon Name="arrow-right" Size="14" /></a></div>
+                <div class="portal-card-grid">
+                    @foreach (var item in _results.CatalogItems)
+                    {
+                        <PortalCatalogCard @key="item.Id" Item="item" />
+                    }
+                </div>
+            </div>
+        }
+        @if (_results.MyItems.Count > 0)
+        {
+            <div class="portal-section">
+                <div class="portal-section-head"><h2>My items <span class="faint small">(@_results.MyItems.Count)</span></h2><a href="/portal/my">All my items <Icon Name="arrow-right" Size="14" /></a></div>
+                <div class="stack" style="gap:10px">
+                    @foreach (var ticket in _results.MyItems)
+                    {
+                        <PortalTicketRow @key="(ticket.Kind, ticket.Id)" Item="ticket" />
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private PortalSearchResults? _results;
+    private bool _loading;
+
+    /// <summary>Gets or sets the query (query string <c>?q=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Query))
+        {
+            _results = null;
+            return;
+        }
+
+        _loading = true;
+        var result = await Home.SearchAsync(Query, 12);
+        _results = result.Value;
+        _loading = false;
+        if (!result.Succeeded)
+        {
+            Toasts.Error("The search failed", result.Error);
+        }
+    }
+}

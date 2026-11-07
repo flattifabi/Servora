@@ -1,0 +1,188 @@
+@page "/portal/my"
+@* "My items": the current user's incidents and requests (IPortalTicketService – server-side restricted to own records)
+   with state tabs, kind filter, search and "load more" paging. *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@implements IDisposable
+@inject IPortalTicketService Tickets
+@inject ToastService Toasts
+
+<PageTitle>My items · Servora</PageTitle>
+
+<div class="portal-container">
+    <div class="portal-page-head pmy-head">
+        <div>
+            <div class="portal-crumbs"><a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" /> <span>My items</span></div>
+            <h1>My items</h1>
+            <p>Everything you requested or reported – and everything ordered for you.</p>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+            <a class="btn btn-secondary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> New request</a>
+            <a class="btn btn-primary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+        </div>
+    </div>
+
+    <div class="pmy-toolbar">
+        <div class="segmented" role="tablist">
+            @foreach (var (filter, label) in s_filters)
+            {
+                <button role="tab" aria-selected="@(_filter == filter)" class="@(_filter == filter ? "active" : null)" @onclick="() => SetFilterAsync(filter)">@label</button>
+            }
+        </div>
+        <div class="portal-chip-row">
+            <button class="portal-chip @(_kind is null ? "active" : null)" @onclick="() => SetKindAsync(null)">All</button>
+            <button class="portal-chip @(_kind == PortalTicketKind.Request ? "active" : null)" @onclick="() => SetKindAsync(PortalTicketKind.Request)"><Icon Name="shopping-cart" Size="14" /> Requests</button>
+            <button class="portal-chip @(_kind == PortalTicketKind.Incident ? "active" : null)" @onclick="() => SetKindAsync(PortalTicketKind.Incident)"><Icon Name="alert-circle" Size="14" /> Issues</button>
+        </div>
+        <div class="input-icon pmy-search">
+            <Icon Name="search" Size="16" />
+            <input class="input" type="search" placeholder="Search by number or title…" value="@_search" maxlength="100" @oninput="OnSearchInputAsync" aria-label="Search my items" />
+        </div>
+    </div>
+
+    <div class="portal-section" style="margin-top:18px">
+        @if (_items is null)
+        {
+            <div class="stack" style="gap:10px">
+                @for (var i = 0; i < 5; i++)
+                {
+                    <div class="card card-body"><Skeleton Lines="2" /></div>
+                }
+            </div>
+        }
+        else if (_items.Count == 0)
+        {
+            <div class="card">
+                <EmptyState Icon="inbox" Title="@(_filter == PortalTicketFilter.Open ? "No open items" : "Nothing found")"
+                            Text="@(string.IsNullOrWhiteSpace(_search) ? "When you order something or report an issue, it shows up here." : $"No item matches “{_search}”.")">
+                    <div class="flex gap-2 justify-center flex-wrap">
+                        <a class="btn btn-primary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Browse the catalog</a>
+                        <a class="btn btn-secondary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+                    </div>
+                </EmptyState>
+            </div>
+        }
+        else
+        {
+            <div class="small faint mb-3">@_total item@(_total == 1 ? string.Empty : "s")</div>
+            <div class="stack" style="gap:10px">
+                @foreach (var item in _items)
+                {
+                    <PortalTicketRow @key="(item.Kind, item.Id)" Item="item" />
+                }
+            </div>
+            @if (_items.Count < _total)
+            {
+                <div class="flex justify-center mt-6">
+                    <button class="btn btn-secondary" disabled="@_loadingMore" @onclick="LoadMoreAsync">
+                        @if (_loadingMore)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        Show more
+                    </button>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private const int PageSize = 20;
+
+    private static readonly (PortalTicketFilter Filter, string Label)[] s_filters =
+    [
+        (PortalTicketFilter.Open, "Open"),
+        (PortalTicketFilter.Closed, "Closed"),
+        (PortalTicketFilter.All, "All"),
+    ];
+
+    private List<PortalTicketSummary>? _items;
+    private PortalTicketFilter _filter = PortalTicketFilter.Open;
+    private PortalTicketKind? _kind;
+    private string? _search;
+    private int _page = 1;
+    private int _total;
+    private bool _loadingMore;
+    private CancellationTokenSource? _debounce;
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _page = 1;
+        var result = await Tickets.ListAsync(new PortalTicketQuery(_filter, _kind, _search, 1, PageSize));
+        if (!result.Succeeded || result.Value is null)
+        {
+            _items = [];
+            _total = 0;
+            Toasts.Error("Your items could not be loaded", result.Error);
+            return;
+        }
+
+        _items = result.Value.Items.ToList();
+        _total = result.Value.TotalCount;
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        _loadingMore = true;
+        try
+        {
+            var result = await Tickets.ListAsync(new PortalTicketQuery(_filter, _kind, _search, _page + 1, PageSize));
+            if (result.Succeeded && result.Value is not null && _items is not null)
+            {
+                _page++;
+                _items.AddRange(result.Value.Items.Where(n => !_items.Any(i => i.Kind == n.Kind && i.Id == n.Id)));
+                _total = result.Value.TotalCount;
+            }
+            else
+            {
+                Toasts.Error("More items could not be loaded", result.Error);
+            }
+        }
+        finally
+        {
+            _loadingMore = false;
+        }
+    }
+
+    private async Task SetFilterAsync(PortalTicketFilter filter)
+    {
+        _filter = filter;
+        _items = null;
+        await ReloadAsync();
+    }
+
+    private async Task SetKindAsync(PortalTicketKind? kind)
+    {
+        _kind = kind;
+        _items = null;
+        await ReloadAsync();
+    }
+
+    private async Task OnSearchInputAsync(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString();
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(300, _debounce.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await ReloadAsync();
+    }
+}

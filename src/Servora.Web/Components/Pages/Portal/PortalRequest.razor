@@ -1,0 +1,203 @@
+@page "/portal/requests/{Id:guid}"
+@* One of the user's service requests: status timeline, requested items with answers, approval and delivery progress,
+   public conversation and cancellation. Ownership is enforced by IPortalTicketService. *@
+@attribute [RequirePermission(Permissions.Portal.Access)]
+@inject IPortalTicketService Tickets
+@inject ToastService Toasts
+
+<PageTitle>@(_detail?.Number ?? "Request") · Servora</PageTitle>
+
+<div class="portal-container">
+    @if (_loading)
+    {
+        <div class="portal-page-head"><Skeleton Lines="2" Height="22px" /></div>
+        <div class="card card-body"><Skeleton Lines="5" /></div>
+    }
+    else if (_detail is null)
+    {
+        <div class="portal-page-head"></div>
+        <div class="card">
+            <EmptyState Icon="search" Title="Request not found" Text="This request does not exist or does not belong to you.">
+                <a class="btn btn-primary" href="/portal/my"><Icon Name="inbox" Size="16" /> Go to my items</a>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="portal-page-head preq-head">
+            <div style="min-width:0">
+                <div class="portal-crumbs">
+                    <a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" />
+                    <a href="/portal/my">My items</a> <Icon Name="chevron-right" Size="12" />
+                    <span class="mono">@_detail.Number</span>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap mt-3">
+                    <span class="tag mono">@_detail.Number</span>
+                    <StatusPill Text="@_detail.Status.Label" Tone="@_detail.Status.Tone" />
+                </div>
+                <h1>@_detail.Title</h1>
+                <p>Ordered <RelativeTime Value="_detail.OpenedAt" />@(_detail.RequestedForName is not null ? $" for {_detail.RequestedForName}" : string.Empty)</p>
+            </div>
+            @if (_detail.CanCancel)
+            {
+                <button class="btn btn-outline-danger" disabled="@_busy" @onclick="() => _cancelOpen = true"><Icon Name="x-circle" Size="16" /> Cancel request</button>
+            }
+        </div>
+
+        <div class="card card-body mb-6">
+            <PortalStatusTimeline Steps="_detail.Steps" />
+        </div>
+
+        <div class="portal-two-col">
+            <div class="stack" style="min-width:0">
+                @foreach (var item in _detail.Items)
+                {
+                    <div class="card" @key="item.Id">
+                        <div class="card-header preq-item-head">
+                            <div class="flex items-center gap-3" style="min-width:0">
+                                <span class="portal-icon-tile"><Icon Name="@item.Icon" Size="20" /></span>
+                                <div style="min-width:0">
+                                    <div class="preq-item-name">@item.Name @(item.Quantity > 1 ? $"× {item.Quantity}" : string.Empty)</div>
+                                    <div class="tiny faint mono">@item.Number · @PortalFormat.Price(item.UnitPrice * item.Quantity)</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                @if (item.ApprovalLabel is not null)
+                                {
+                                    <span class="tag"><Icon Name="check-square" Size="12" /> @item.ApprovalLabel</span>
+                                }
+                                <StatusPill Text="@item.Status.Label" Tone="@item.Status.Tone" />
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            @if (item.TaskCount > 0)
+                            {
+                                var percent = (int)Math.Round(item.TasksDone * 100.0 / item.TaskCount);
+                                <div class="flex items-center justify-between small mb-2">
+                                    <span class="muted">Delivery progress</span>
+                                    <span><b>@item.TasksDone</b> of @item.TaskCount step@(item.TaskCount == 1 ? string.Empty : "s") done</span>
+                                </div>
+                                <div class="progress @(percent == 100 ? "success" : null) mb-4"><span style="width:@(percent)%"></span></div>
+                            }
+                            @if (item.Answers.Count == 0)
+                            {
+                                <div class="small faint">No additional details.</div>
+                            }
+                            else
+                            {
+                                <dl class="preq-answers">
+                                    @foreach (var answer in item.Answers)
+                                    {
+                                        <dt>@answer.Label</dt>
+                                        <dd>@(string.IsNullOrWhiteSpace(answer.Value) ? "—" : answer.Value)</dd>
+                                    }
+                                </dl>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <PortalConversationPanel @ref="_conversation" Kind="PortalTicketKind.Request" RecordId="_detail.Id" OnChanged="LoadAsync" />
+            </div>
+
+            <div class="portal-sticky stack" style="gap:16px">
+                <div class="card card-body">
+                    <div class="eyebrow mb-3">Details</div>
+                    <dl class="portal-facts">
+                        <dt>Reference</dt><dd class="mono">@_detail.Number</dd>
+                        <dt>Requested for</dt><dd>@(_detail.RequestedForName ?? "—")</dd>
+                        <dt>Ordered by</dt><dd>@(_detail.OpenedByName ?? "—")</dd>
+                        <dt>Ordered</dt><dd>@PortalFormat.Date(_detail.OpenedAt)</dd>
+                        @if (_detail.ClosedAt is not null)
+                        {
+                            <dt>Closed</dt><dd>@PortalFormat.Date(_detail.ClosedAt)</dd>
+                        }
+                        else if (_detail.DueAt is not null)
+                        {
+                            <dt>Expected by</dt><dd>@PortalFormat.Date(_detail.DueAt)</dd>
+                        }
+                        <dt>Total</dt><dd><b>@PortalFormat.Price(_detail.TotalPrice)</b></dd>
+                    </dl>
+                </div>
+                <div class="card card-body">
+                    <div class="eyebrow mb-2">Questions?</div>
+                    <p class="small muted" style="margin:0">Send a message in the conversation – the fulfilment team will answer there.</p>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<Modal @bind-Open="_cancelOpen" Title="Cancel this request?" Subtitle="Pending approvals are withdrawn and open fulfilment steps are stopped. This cannot be undone." Icon="x-circle">
+    <ChildContent>
+        <FormField Label="Reason" Required="true" Error="@_cancelError">
+            <textarea class="textarea" rows="3" maxlength="1000" @bind="_cancelReason" @bind:event="oninput" placeholder="For example: no longer needed."></textarea>
+        </FormField>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" @onclick="() => _cancelOpen = false">Keep request</button>
+        <button class="btn btn-danger" disabled="@_busy" @onclick="CancelAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span>
+            }
+            Cancel request
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private PortalRequestDetail? _detail;
+    private PortalConversationPanel? _conversation;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _cancelOpen;
+    private string _cancelReason = string.Empty;
+    private string? _cancelError;
+
+    /// <summary>Gets or sets the request identifier.</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        var result = await Tickets.GetRequestAsync(Id);
+        _detail = result.Succeeded ? result.Value : null;
+    }
+
+    private async Task CancelAsync()
+    {
+        _cancelError = string.IsNullOrWhiteSpace(_cancelReason) ? "Please give a reason." : null;
+        if (_cancelError is not null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Tickets.CancelRequestAsync(Id, _cancelReason);
+            if (Toasts.FromResult(result, "The request was cancelled"))
+            {
+                _cancelOpen = false;
+                _cancelReason = string.Empty;
+                await LoadAsync();
+                if (_conversation is not null)
+                {
+                    await _conversation.ReloadAsync();
+                }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

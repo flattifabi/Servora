@@ -1,0 +1,27 @@
+@* An orderable catalog item as a card (portal home, catalog, search). *@
+
+<a class="pcat card" href="/portal/catalog/@Item.Id">
+    <div class="flex items-center gap-3">
+        <span class="portal-icon-tile pcat-tile"><Icon Name="@Item.Icon" Size="22" /></span>
+        <div style="min-width:0">
+            <div class="pcat-name">@Item.Name</div>
+            <div class="tiny faint">@(Item.CategoryName ?? "Service catalog")</div>
+        </div>
+    </div>
+    <p class="pcat-desc">@(Item.ShortDescription ?? "Order this item from the service catalog.")</p>
+    <div class="pcat-foot">
+        <span class="pcat-price">@PortalFormat.Price(Item.Price)</span>
+        <span class="flex items-center gap-2">
+            <span class="tag"><Icon Name="clock" Size="12" /> @PortalFormat.Delivery(Item.DeliveryDays)</span>
+            @if (Item.ApprovalRequired)
+            {
+                <span class="tag" title="Requires approval"><Icon Name="check-square" Size="12" /> Approval</span>
+            }
+        </span>
+    </div>
+</a>
+
+@code {
+    /// <summary>Gets or sets the catalog item.</summary>
+    [Parameter, EditorRequired] public CatalogItemCard Item { get; set; } = default!;
+}
