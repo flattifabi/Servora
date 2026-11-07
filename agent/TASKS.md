@@ -18,6 +18,11 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 - Runs as a **Windows Service**; ship an **installer for GitHub releases** that installs or updates the service.
 - Analytics; logging in UI and backend with a **debug switch**; REST interface; **MCP server**; **API key management** in the UI.
 - No additional runtime downloads, **no licensed NuGet packages**; all documentation in English Markdown.
+- **Database migrations are applied automatically** at startup (no manual step after install/update), guarded by an
+  automatic pre-migration backup and automatic restore if a migration fails.
+- **Built-in, configurable backup**: scheduled backups (e.g. weekly on a chosen day and time), retention, manual
+  backups, download/upload, and **restore / roll back** to any backup from the UI (and command line for disaster
+  recovery).
 
 ## Overview
 
@@ -37,6 +42,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
+| T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | 🔨 In Progress |
 
 Dependency graph:
 
@@ -50,7 +56,8 @@ T-01 ─┬─► T-02 ─┐
       ├─► T-08 ───────────┤
       ├─► T-09 ───────────┤
       ├─► T-10 ───────────┤
-      └─► T-12 ───────────┘
+      ├─► T-12 ───────────┤
+      └─► T-15 ───────────┘
 ```
 
 Cross-module calls go through kernel contracts with placeholders (ORCHESTRATION.md §5), so T-02…T-10 and T-12 run
@@ -483,9 +490,65 @@ Merge all branches, resolve conflicts, process "Requests to orchestrator" (nav e
 wire cross-module UI (branding into layout, notification bell, custom fields section in typed forms), generate
 `InitialCreate` migrations for SQLite, SQL Server and PostgreSQL, run full build/tests, smoke test every page.
 
+**Migrations are mandatory (product owner):** generate `InitialCreate` in `Servora.Persistence.Sqlite`,
+`.SqlServer` and `.PostgreSql`; switch every environment from `EnsureCreated` to migrations; add a unit test per
+provider that fails when the model has pending changes (`HasPendingModelChanges`) and one that applies all migrations
+to an empty SQLite database; verify update path: install old build → create data → update → migrations applied
+automatically with pre-migration backup (T-15). Document "adding a migration" in `docs/development/`.
+
 ## T-14 Security & Architecture Review ⏳
 
 Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings; record residual risks.
+
+## T-15 Backup & Restore, automatic migrations hardening 🔨
+
+**Owned paths:** `*/Backup/**` (Domain/Application/Infrastructure/Web pages `Components/Pages/Admin/Backup/**` and
+`Components/Backup/**`), `BackupModule.cs`, `BackupEndpoints.cs`, `BackupWebModule.cs`, `Permissions.Backup.cs`,
+`tests/Servora.Tests.Unit/Backup/**`, `docs/modules/backup.md`, `docs/operations/backup-restore.md`.
+**Kernel files granted to this task (orchestrator approval):** `Persistence/DatabaseInitializer.cs`,
+`Modules/ServoraInfrastructureExtensions.cs`, `Endpoints/EndpointRegistration.cs`, `Program.cs` (CLI commands +
+web module hook only), `NavigationCatalog.cs` (one admin entry), `docs/operations/upgrade.md`.
+Raw SQL is allowed **only** inside `Servora.Infrastructure/Backup/**` for the generic dump/restore (identifiers
+quoted via `ISqlGenerationHelper`, all values as parameters) – see ADR-015.
+
+**Scope**
+1. **Backup archive** (`.svbak`, zip): `manifest.json` (format version, app version, provider, last applied
+   migration, created at/by, kind `Scheduled|Manual|PreMigration|PreRestore|Uploaded`, table list with columns,
+   primary keys and foreign keys, row counts, SHA-256 per entry) + database payload + data-dir files
+   (`keys/`, `attachments/` (optional), branding/uploads). Never `database.json` connection secrets in clear text;
+   never the instance `appsettings.json` unless configured.
+2. **Provider-neutral logical dump** of every table of the EF relational model (SQLite, SQL Server, PostgreSQL),
+   streamed (no full table in memory), typed value encoding (null, string, integer, real, decimal, bool, bytes,
+   guid, date/time types). Optional AES-256-GCM encryption of the archive with a password (PBKDF2-SHA256,
+   `System.Security.Cryptography`, password stored in `ISecretStore`).
+3. **Restore / roll back**: only into the same provider; refused when the backup's migration is newer than the
+   app's. Always creates a `PreRestore` safety backup first. Executed at startup (restore request file in the data
+   dir → app restarts → restore runs before migrations): migrate to the backup's migration (or wipe when no
+   migrations exist yet), delete all rows, insert in FK order (nullable FKs in a second pass – works without
+   superuser rights), then normal startup migrates to the latest version. Restores `keys/` and attachments.
+   UI shows a restoring screen until `/health` answers again.
+4. **Schedule** (stored in `<data dir>/backup.json`, survives restores): enabled, frequency daily/weekly/monthly,
+   weekdays / day of month, time of day, time zone, destination folder (default `<data dir>/backups/instance`,
+   UNC allowed), include attachments, encryption on/off, retention (keep last N scheduled, max age days, keep last
+   N pre-migration), catch-up of a missed run after downtime. Hosted service with testable next-run calculation
+   (`TimeProvider`), one backup/restore at a time, failures logged + audited + visible in the UI.
+5. **Automatic migrations hardening** (`DatabaseInitializer`): pending migrations on an existing database ⇒
+   `PreMigration` backup first (configurable, default on); migration failure ⇒ automatic restore of that backup and
+   non-zero exit (installer health check then rolls back the binaries, so binaries and schema stay consistent);
+   clear log messages; legacy `EnsureCreated` database detection with an actionable error.
+6. **UI** `/admin/backups` (premium design system): KPIs (last successful backup, next run, count, total size),
+   schedule editor, backup list (kind, date, version, migration, size, status) with download, verify (hashes),
+   restore (confirm by typing `RESTORE`), delete, "Back up now", upload of a backup file (size limit), database
+   schema card (current migration, applied / pending migrations).
+7. **Command line** for disaster recovery when the UI does not start: `Servora.Web backup list|create|restore <file>`
+   (and documented `--data-dir`).
+8. **Permissions** `backup.read`, `backup.manage`, `backup.restore` (admin role only by default); audit every action.
+
+**Acceptance criteria:** SQLite round trip test (seed data → backup → change data → restore → data equal incl.
+nullable self-references); migrate-down/up restore path tested with a fake two-migration model or documented if not
+feasible; schedule calculation unit tests (weekly at 02:00 local, DST change, missed run catch-up); retention tests;
+archive tamper detection test; encryption round trip; `docs/operations/backup-restore.md` and `upgrade.md` updated;
+build green, tests pass.
 
 ---
 
@@ -496,3 +559,4 @@ Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings
 | 2026-11-07 | Board created; T-01 completed by orchestrator; T-02…T-10, T-12 dispatched in parallel. |
 | 2026-11-07 | T-12 validated and merged (✅). |
 | 2026-11-07 | T-04 validated and merged (✅); kernel UI fixes + 2 contract extensions. |
+| 2026-11-07 | Product owner: automatic migrations + built-in backup/restore made binding; T-15 added and dispatched; interrupted T-02, T-03, T-05…T-10 resumed. |

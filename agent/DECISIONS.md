@@ -87,3 +87,14 @@ folders.
 disposable). In T-13 the orchestrator generates `InitialCreate` migrations per provider; from then on
 `DatabaseInitializer` applies migrations automatically.
 **Why:** Avoids conflicting migration snapshots from parallel branches.
+
+## ADR-015 – Built-in logical backup and restore-at-startup
+**Decision:** Servora backs itself up into a provider-neutral archive (`.svbak`: manifest + per-table logical dump +
+key ring + attachments) on a configurable schedule and before every migration. A restore is requested in the UI or CLI,
+then executed at the next startup before migrations: migrate to the backup's migration, replace all rows, migrate
+forward. Schedule and backup catalog live in the data directory, not in the database, so they survive a restore. The
+generic dump/restore is the only place allowed to issue (parameterised, identifier-quoted) raw SQL.
+**Why:** Product owner wants scheduled backups and roll back from the UI on SQLite, SQL Server and PostgreSQL without
+external tools (`pg_dump`, `sqlcmd`) or downloads; restoring at startup avoids live connections and stale caches, and
+makes failed upgrades self-healing together with the installer's binary rollback.
+
