@@ -22,17 +22,17 @@
 .pann-text { font-size: 13px; color: var(--text-muted); white-space: pre-line; overflow-wrap: anywhere; margin-top: 2px; }
 .pann-link { flex-shrink: 0; }
 
-.pann-info { border-color: rgba(59, 130, 246, .3); background: linear-gradient(90deg, var(--info-soft), var(--surface) 55%); }
-.pann-info .pann-icon { color: var(--info); background: var(--info-soft); }
+/* Informational announcements follow the configured brand colour; maintenance and outage keep their warning colours. */
+.pann-info,
+.pann-success { border-color: color-mix(in srgb, var(--primary) 30%, transparent); background: linear-gradient(90deg, var(--primary-soft), var(--surface) 55%); }
+.pann-info .pann-icon,
+.pann-success .pann-icon { color: var(--primary); background: var(--primary-soft); }
 
 .pann-maintenance { border-color: rgba(245, 158, 11, .35); background: linear-gradient(90deg, var(--warning-soft), var(--surface) 55%); }
 .pann-maintenance .pann-icon { color: var(--warning); background: var(--warning-soft); }
 
 .pann-outage { border-color: rgba(244, 63, 94, .45); background: linear-gradient(90deg, var(--danger-soft), var(--surface) 60%); }
 .pann-outage .pann-icon { color: var(--danger); background: var(--danger-soft); }
-
-.pann-success { border-color: rgba(34, 197, 94, .3); background: linear-gradient(90deg, var(--success-soft), var(--surface) 55%); }
-.pann-success .pann-icon { color: var(--success); background: var(--success-soft); }
 
 @media (max-width: 720px) {
     .pann { flex-wrap: wrap; align-items: flex-start; }

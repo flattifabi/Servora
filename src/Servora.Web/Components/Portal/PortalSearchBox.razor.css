@@ -1,4 +1,6 @@
-.psearch { position: relative; width: 100%; }
+/* Own stacking context: the field and its menu stay above the page content but scroll underneath the sticky portal
+   header (z-index 60). The higher z-indexes below only order the field and menu against the click catcher. */
+.psearch { position: relative; z-index: 10; width: 100%; }
 
 .psearch-field {
     position: relative;
