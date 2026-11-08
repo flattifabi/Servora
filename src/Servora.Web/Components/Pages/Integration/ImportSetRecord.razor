@@ -8,7 +8,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 
-<PageTitle>@(IsNew ? "New import set" : _model?.Name ?? "Import set") · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New import set" : _model?.Name ?? "Import set") · @Brand.ProductName</PageTitle>
 
 @if (_notFound)
 {

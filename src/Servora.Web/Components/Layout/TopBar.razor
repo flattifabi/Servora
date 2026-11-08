@@ -1,5 +1,6 @@
 @* Sticky top bar: breadcrumb context, global search, quick create, theme switch and user menu. *@
 @using Servora.Web.Navigation
+@using Servora.Web.Components.Platform
 @implements IDisposable
 @inject ICurrentUser CurrentUser
 @inject IPermissionService PermissionService
@@ -53,7 +54,9 @@
             <Icon Name="@(_theme == "light" ? "moon" : "sun")" />
         </button>
 
-        <a class="icon-btn" href="/approvals" title="My approvals"><Icon Name="bell" /></a>
+        <a class="icon-btn" href="/approvals" title="My approvals"><Icon Name="check-square" /></a>
+
+        <NotificationBell />
 
         <div class="dropdown">
             <button class="icon-btn" style="width:auto;padding:0 4px" @onclick="() => _userOpen = !_userOpen" title="Account">

@@ -5,13 +5,21 @@
 @using Servora.Application.Identity.Windows
 @inject IWindowsSignInService WindowsSignIn
 @inject ILogger<Login> Logger
+@inject ISystemSettingsService Settings
+@using Servora.Application.Configuration
 
-<PageTitle>Sign in · Servora</PageTitle>
+<PageTitle>Sign in · @Brand.ProductName</PageTitle>
 
 <div class="auth-card">
     <div class="eyebrow mb-2">Welcome back</div>
-    <h2>Sign in to Servora</h2>
-    <p class="lead">Use your company account or a local Servora account.</p>
+    <h2>Sign in to @Brand.ProductName</h2>
+    <p class="lead">Use your company account or a local @Brand.ProductName account.</p>
+
+    @if (!string.IsNullOrWhiteSpace(_banner))
+    {
+        @* Plain text only (rendered encoded, line breaks preserved). *@
+        <div class="alert alert-info mb-4" role="note"><Icon Name="info" Size="18" /><div style="white-space:pre-wrap">@_banner</div></div>
+    }
 
     @if (!string.IsNullOrEmpty(Error))
     {
@@ -64,6 +72,7 @@
 
 @code {
     private bool _windowsEnabled;
+    private string? _banner;
 
     /// <summary>Gets or sets the error message passed back by the login endpoint.</summary>
     [SupplyParameterFromQuery] public string? Error { get; set; }
@@ -91,6 +100,17 @@
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Could not determine whether Windows sign-in is enabled.");
+        }
+
+        try
+        {
+            // Optional legal / usage notice configured under System settings › General.
+            var banner = await Settings.GetStringAsync(SystemSettingKeys.LoginBanner);
+            _banner = string.IsNullOrWhiteSpace(banner) ? null : banner.Trim();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load the sign-in notice.");
         }
     }
 }

@@ -5,12 +5,14 @@
 @using Servora.Domain.Activity
 @using Servora.Domain.Itsm
 @using Servora.Web.Components.Itsm
+@using Servora.Application.Portal
 @inject IMyWorkService MyWork
 @inject ICurrentUser CurrentUser
+@inject IPermissionService PermissionService
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>My Work · Servora</PageTitle>
+<PageTitle>My Work · @Brand.ProductName</PageTitle>
 
 <div class="card highlight mb-6" style="overflow:hidden">
     <div class="card-body" style="padding:26px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;background:radial-gradient(600px 220px at 100% 0%, rgba(124,108,255,.16), transparent 70%), radial-gradient(500px 200px at 0% 100%, rgba(34,211,238,.08), transparent 70%)">
@@ -232,6 +234,13 @@ else
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
+        // Self-service users (portal.access without any fulfiller queue) land in the portal instead of an empty workspace.
+        if (CurrentUser.UserId is { } userId && PortalLandingPolicy.ShouldLandInPortal(await PermissionService.GetUserPermissionsAsync(userId)))
+        {
+            Nav.NavigateTo(PortalLandingPolicy.PortalRoute, replace: true);
+            return;
+        }
+
         var result = await MyWork.GetAsync();
         if (result.Succeeded)
         {

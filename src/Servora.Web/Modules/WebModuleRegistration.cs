@@ -18,6 +18,7 @@ public static class WebModuleRegistration
         builder.AddObservabilityWeb();
         builder.AddApiMcpAiWeb();
         builder.AddPortalWeb();
+        builder.AddBackupWeb();
         return builder;
     }
 }

@@ -6,7 +6,7 @@
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>@(IsNew ? "New catalog item" : _model.Name) · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New catalog item" : _model.Name) · @Brand.ProductName</PageTitle>
 
 @if (_loading)
 {

@@ -5,9 +5,8 @@
 @layout AuthLayout
 @inject SetupSession Session
 @inject NavigationManager Navigation
-@inject IJSRuntime JS
 
-<PageTitle>Set up · Servora</PageTitle>
+<PageTitle>Set up · @Brand.ProductName</PageTitle>
 
 <div class="setup-card">
     <div class="setup-top">
@@ -456,23 +455,6 @@
         _timeZones = TimeZoneInfo.GetSystemTimeZones();
         _organization.TimeZone = TimeZoneInfo.Local.Id;
         _connection.IntegratedSecurity = OperatingSystem.IsWindows();
-    }
-
-    /// <inheritdoc />
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            // AuthLayout (unlike MainLayout) does not remove the interactive splash screen.
-            try
-            {
-                await JS.InvokeVoidAsync("servora.hideSplash");
-            }
-            catch (JSDisconnectedException)
-            {
-                // The circuit closed before the first render completed.
-            }
-        }
     }
 
     private static bool IsHexColor(string? value) =>

@@ -35,7 +35,7 @@ internal sealed class ItsmTestHost : IAppDbContextFactory, IAsyncDisposable
         var lookup = new DirectoryLookupService(this);
         Incidents = new IncidentService(this, User, new NumberSequenceService(this), lookup, new EmptySlaService(), Clock);
         Problems = new ProblemService(this, User, new NumberSequenceService(this), lookup, Clock);
-        MyWork = new MyWorkService(this, User, lookup, Clock);
+        MyWork = new MyWorkService(this, User, lookup, Clock, new UnavailableApprovalService());
     }
 
     /// <summary>Gets the current user fake.</summary>

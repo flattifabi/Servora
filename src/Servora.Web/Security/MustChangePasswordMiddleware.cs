@@ -1,10 +1,11 @@
 using Servora.Infrastructure.Security;
+using Servora.Web.Api;
 
 namespace Servora.Web.Security;
 
 /// <summary>
 /// Forces users flagged with <c>MustChangePassword</c> (for example the bootstrap <c>admin</c>) to the password change page
-/// before any other page can be used. API calls receive HTTP 403.
+/// before any other page can be used. API calls (<c>/api</c>, <c>/mcp</c>, <c>/openapi</c>) receive an HTTP 403 problem response.
 /// </summary>
 /// <param name="next">The next middleware.</param>
 public sealed class MustChangePasswordMiddleware(RequestDelegate next)
@@ -24,10 +25,13 @@ public sealed class MustChangePasswordMiddleware(RequestDelegate next)
             var path = context.Request.Path.Value ?? "/";
             if (!s_allowedPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
             {
-                if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase))
+                if (ApiProblemWriter.IsApiRequest(context))
                 {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    return Task.CompletedTask;
+                    return ApiProblemWriter.WriteAsync(
+                        context,
+                        StatusCodes.Status403Forbidden,
+                        "Password change required",
+                        "The account must change its password before the API can be used. Sign in to the web UI and change the password.");
                 }
 
                 context.Response.Redirect(ChangePasswordPath);

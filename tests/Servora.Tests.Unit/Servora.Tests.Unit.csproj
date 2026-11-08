@@ -16,6 +16,7 @@
     <ProjectReference Include="..\..\src\Servora.Infrastructure\Servora.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Servora.Persistence.Sqlite\Servora.Persistence.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\Servora.Installer\Servora.Installer.csproj" />
+    <ProjectReference Include="..\..\src\Servora.Web\Servora.Web.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

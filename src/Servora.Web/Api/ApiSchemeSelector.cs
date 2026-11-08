@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Servora.Web.Security;
 
 namespace Servora.Web.Api;
 
@@ -30,7 +31,8 @@ public static class ApiSchemeSelector
         }
 
         // Browser calls (API Explorer "try it") carry the auth cookie; other callers get an API key challenge.
-        return context.Request.Cookies.ContainsKey(ApiKeyAuthenticationDefaults.AuthCookieName)
+        var cookieName = context.RequestServices?.GetService<InstanceCookieNames>()?.Authentication ?? ApiKeyAuthenticationDefaults.AuthCookieName;
+        return context.Request.Cookies.ContainsKey(cookieName)
             ? CookieAuthenticationDefaults.AuthenticationScheme
             : ApiKeyAuthenticationDefaults.Scheme;
     }

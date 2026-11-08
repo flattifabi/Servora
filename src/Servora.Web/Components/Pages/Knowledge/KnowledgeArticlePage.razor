@@ -7,8 +7,7 @@
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>@(_article?.Title ?? "Article") · Knowledge · Servora</PageTitle>
-<ModuleStyles />
+<PageTitle>@(_article?.Title ?? "Article") · Knowledge · @Brand.ProductName</PageTitle>
 
 @if (_notFound)
 {

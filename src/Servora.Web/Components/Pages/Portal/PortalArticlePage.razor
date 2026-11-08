@@ -5,7 +5,7 @@
 @inject IPortalKnowledgeService Knowledge
 @inject ToastService Toasts
 
-<PageTitle>@(_article?.Summary.Title ?? "Article") · Servora</PageTitle>
+<PageTitle>@(_article?.Summary.Title ?? "Article") · @Brand.ProductName</PageTitle>
 
 <div class="portal-container">
     @if (_loading)

@@ -8,7 +8,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 
-<PageTitle>@(_table?.PluralLabel ?? Name) · Servora</PageTitle>
+<PageTitle>@(_table?.PluralLabel ?? Name) · @Brand.ProductName</PageTitle>
 
 @if (_table is null)
 {

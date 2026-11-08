@@ -5,7 +5,7 @@
 @inject IPortalTicketService Tickets
 @inject ToastService Toasts
 
-<PageTitle>@(_detail?.Number ?? "Issue") · Servora</PageTitle>
+<PageTitle>@(_detail?.Number ?? "Issue") · @Brand.ProductName</PageTitle>
 
 <div class="portal-container">
     @if (_loading)

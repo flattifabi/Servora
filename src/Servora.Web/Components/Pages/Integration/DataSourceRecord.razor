@@ -7,7 +7,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 
-<PageTitle>@(IsNew ? "New data source" : _model?.Name ?? "Data source") · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New data source" : _model?.Name ?? "Data source") · @Brand.ProductName</PageTitle>
 
 @if (_notFound)
 {

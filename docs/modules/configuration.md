@@ -73,6 +73,11 @@ defaults while unconfigured). The logo upload accepts PNG, JPEG, GIF and WebP up
 `<data dir>/branding/logo.bin`, served from `/branding/logo` with `Content-Security-Policy: sandbox`, an ETag and
 a one-day cache lifetime.
 
+**Where branding is shown (T-13):** sidebar and sign-in hero (logo, product name, company name), portal header and
+footer, every page title (`<page> · <product name>` via the `BrandingState` snapshot, refreshed by the layouts, the
+branding panel and at startup) and the accent color (`--primary`, only a validated `#rrggbb` different from the
+default). The optional **sign-in notice** (`general.login_banner`) is shown as plain, encoded text on the sign-in page.
+
 ## E-mail
 
 - **Settings** (`IEmailConfigurationService`): delivery on/off, host, port, security (`StartTls` or `None`; implicit

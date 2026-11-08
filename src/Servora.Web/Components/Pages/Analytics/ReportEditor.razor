@@ -8,7 +8,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 
-<PageTitle>@(_report?.Name ?? "New report") · Reports · Servora</PageTitle>
+<PageTitle>@(_report?.Name ?? "New report") · Reports · @Brand.ProductName</PageTitle>
 
 <PageHeader Title="@(_report?.Name ?? "New report")" Icon="@ChartAdapters.IconOf(_chartType)">
     <Breadcrumbs>

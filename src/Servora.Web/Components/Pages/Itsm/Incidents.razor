@@ -6,7 +6,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 
-<PageTitle>Incidents Â· Servora</PageTitle>
+<PageTitle>Incidents · @Brand.ProductName</PageTitle>
 
 <PageHeader Title="Incidents" Subtitle="Restore normal service operation as quickly as possible." Icon="alert-triangle">
     <Actions>
@@ -85,7 +85,7 @@
         <DataColumn TItem="IncidentListItem" Title="Short description" SortKey="ShortDescription">
             <Template>
                 <span class="cell-primary truncate" style="display:block;max-width:min(380px, 23vw)" title="@context.ShortDescription">@context.ShortDescription</span>
-                <span class="cell-sub">@(context.Category ?? "Uncategorized")@(context.CallerName is null ? null : $" Â· {context.CallerName}") Â· opened <RelativeTime Value="context.OpenedAt" /></span>
+                <span class="cell-sub">@(context.Category ?? "Uncategorized")@(context.CallerName is null ? null : $" · {context.CallerName}") · opened <RelativeTime Value="context.OpenedAt" /></span>
             </Template>
         </DataColumn>
         <DataColumn TItem="IncidentListItem" Title="Caller" Width="70px">

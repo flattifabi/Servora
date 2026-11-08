@@ -14,6 +14,15 @@ public static class BuiltInRoles
     /// <summary>Standard employee (self-service).</summary>
     public const string User = "user";
 
+    /// <summary>Owner role of API keys and MCP clients (grants the API and MCP channels, no data access).</summary>
+    public const string Integration = "integration_user";
+
+    /// <summary>Configuration administrator (settings, branding, platform studio, portal announcements).</summary>
+    public const string ConfigAdmin = "config_admin";
+
+    /// <summary>Security administrator (identity, directory, secrets and API keys).</summary>
+    public const string SecurityAdmin = "security_admin";
+
     /// <summary>Gets all built-in role definitions.</summary>
     public static IReadOnlyList<BuiltInRoleDefinition> All { get; } =
     [
@@ -26,6 +35,7 @@ public static class BuiltInRoles
             Permissions.Requests.Read, Permissions.Requests.Write, Permissions.Approvals.Read,
             Permissions.Knowledge.Read, Permissions.Knowledge.Write, Permissions.Cmdb.Read, Permissions.Assets.Read,
             Permissions.Analytics.Read, Permissions.Platform.ReadRecords, Permissions.Ai.UseAssistant, Permissions.Identity.ReadUsers,
+            Permissions.Api.Access,
         ]),
         new(User, "Employee", "Self-service user: portal, own requests and incidents, knowledge base.",
             [Permissions.Portal.Access, Permissions.Knowledge.Read, Permissions.Ai.UseAssistant]),
@@ -39,17 +49,24 @@ public static class BuiltInRoles
             [Permissions.Cmdb.Read, Permissions.Cmdb.Write, Permissions.Cmdb.Manage]),
         new("asset_manager", "Asset Manager", "Maintains hardware and software assets.",
             [Permissions.Assets.Read, Permissions.Assets.Write, Permissions.Assets.Manage, Permissions.Cmdb.Read]),
-        new("config_admin", "Configuration Administrator", "Manages system properties, branding, e-mail and the platform studio.",
+        new(ConfigAdmin, "Configuration Administrator", "Manages system properties, branding, e-mail, the platform studio and portal announcements.",
         [
             Permissions.Configuration.ManageSettings, Permissions.Platform.ManageTables, Permissions.Platform.ManageBusinessRules,
             Permissions.Platform.ManageSla, Permissions.Platform.ManageNotifications, Permissions.Platform.ReadRecords,
+            Permissions.Portal.Manage,
         ]),
-        new("security_admin", "Security Administrator", "Manages users, groups, roles, directory integration, secrets and API keys.",
+        new(SecurityAdmin, "Security Administrator", "Manages users, groups, roles, directory integration, secrets and API keys.",
         [
             Permissions.Identity.ReadUsers, Permissions.Identity.ManageUsers, Permissions.Identity.ManageGroups, Permissions.Identity.ManageRoles,
             Permissions.Identity.ManageDirectory, Permissions.Identity.ManageAuthPolicies, Permissions.Configuration.ManageSecrets,
             Permissions.Api.ManageApiKeys, Permissions.Observability.ReadAudit,
+
+            // A key creator can only grant scopes it holds itself; without these no usable key could be issued.
+            Permissions.Api.Access, Permissions.Mcp.Access,
         ]),
+        new(Integration, "API & MCP Integration",
+            "Lets the user's API keys call the REST API and connect MCP clients (for example Claude Desktop). Grants the channels only: data access still comes from the user's other roles.",
+            [Permissions.Api.Access, Permissions.Mcp.Access]),
         new("automation_admin", "Automation Administrator", "Builds and runs flows and schedules.",
             [Permissions.Automation.Read, Permissions.Automation.Manage, Permissions.Automation.Execute, Permissions.Integration.ReadDataSources]),
         new("datasource_admin", "Data Source Administrator", "Manages REST data sources and imports.",

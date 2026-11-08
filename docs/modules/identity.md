@@ -52,6 +52,22 @@ sessions and Blazor circuits are revalidated immediately (`IUserSessionInvalidat
   `admin` account (ADR-006).
 * Demo users are seeded with 32-character random passwords that are never shown, plus *must change password*.
 
+## Built-in roles and default grants (T-13)
+
+`IdentitySeeder` creates the built-in roles (`BuiltInRoles`). Default permissions are granted **once per role and
+permission** and recorded in the system setting `identity.role_defaults.<role>`: a default introduced by a newer version
+reaches existing installations at the next start, a default removed by an administrator stays removed (only the `admin`
+role always gets `*` back). Installations from before T-13 (no marker) receive all missing defaults once.
+
+Channel permissions (least privilege – data access always still requires the data permissions):
+
+| Permission | Granted by default to | Rationale |
+|------------|-----------------------|-----------|
+| `api.access` | `itil`, `security_admin`, `integration_user` | Fulfillers may use the API Explorer / REST API with their own rights; key creators can only grant scopes they hold. Employees (`user`) do not get it. |
+| `mcp.access` | `security_admin`, `integration_user` | MCP clients can act with write tools, so it is opt-in: assign the role **API & MCP Integration** (`integration_user`) to the owners of MCP keys. |
+| `ai.assistant.use` | `itil`, `user` | Unchanged; the assistant runs with the user's own permissions and asks for confirmation. |
+| `portal.manage` | `config_admin` | Portal announcements are instance content managed with the other configuration. |
+
 ## LDAP / Active Directory
 
 * **Transport**: LDAPS (default, port 636), StartTLS or None (UI warning). A failed StartTLS never falls back to plain

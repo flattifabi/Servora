@@ -27,6 +27,10 @@ hides the splash, enforces the forced password change like `MainLayout`, shows a
 call to action, theme switch, user menu ("Open workspace" only for users with fulfiller permissions) and collapses the
 navigation into a drawer below 1080 px. Pages are verified down to 375 px without horizontal scrolling.
 
+**Landing page (T-13):** users who hold `portal.access` but none of `incident.read`, `problem.read`, `change.read`,
+`request.read` (for example the built-in `user` role) are redirected from `/` (My Work) to `/portal`
+(`PortalLandingPolicy`). Fulfillers and administrators stay on My Work.
+
 ## Application services (`Servora.Application.Portal`)
 
 | Contract | Highlights |
