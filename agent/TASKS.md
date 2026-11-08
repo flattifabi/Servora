@@ -40,7 +40,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | ✅ Done |
 | T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ✅ Done |
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
-| T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | 🔨 In Progress |
+| T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ✅ Done |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
 | T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | ✅ Done |
 
@@ -520,7 +520,7 @@ config (T-13); keep `/health` anonymous while unconfigured (T-03/T-09 – alread
 
 ---
 
-## T-13 Integration 🔨 (Orchestrator)
+## T-13 Integration ✅ (Orchestrator)
 
 **Split (2026-11-08):** T-13a *Migrations* (`src/Servora.Persistence.*`, `DatabaseInitializer.cs`, migration tests, `docs/development/migrations.md`) and T-13b *Cross-module integration* (Web/layout/navigation/auth/seeders, no EF model changes) run in parallel worktrees; the orchestrator merges both and verifies migrations against the merged model.
 
@@ -563,6 +563,35 @@ automatically with pre-migration backup (T-15). Document "adding a migration" in
   `WebModuleRegistration`.
 - Kernel: instance-specific auth/antiforgery cookie names, or a friendly redirect on antiforgery failure, so several
   localhost instances do not clash (T-05).
+
+**Result (validated by orchestrator; merges `c7b0396` T-13a, `22e769a` T-13b, follow-up `721e3ff`):**
+- *Migrations (T-13a):* `InitialCreate` per provider (71 tables, designer files + snapshot kept); `EnsureCreated` removed
+  from startup, the migration runner and the setup wizard (setup now refuses databases with tables but no migration
+  history). Tests: pending model changes per provider, apply-all on empty SQLite with schema-vs-model check, startup
+  path, legacy DB refusal, setup into empty / foreign DB. `docs/development/migrations.md` added.
+- *Integration (T-13b):* navigation entries, branding in layouts/titles, login banner, saved theme after sign-in,
+  notification bell, My Work approvals count, custom fields + SLA cards in typed forms, `ModuleStyles` removed,
+  default role grants (once per role/permission, new `integration_user` role), strict `PermissionCatalog.IsKnown`,
+  portal landing redirect, JSON problem responses (401/403/404) for `/api`, `/mcp`, `/openapi`, instance-specific
+  cookie names, `AddBackupWeb()` in `WebModuleRegistration`.
+
+**Evidence:** merged main build 0 errors / 0 warnings, 1390 tests passed. Smoke on fresh SQLite: schema created by
+`20261108021317_InitialCreate`, `/health` 200, `/api/v1/me` and unauthenticated JSON POST → 401
+`application/problem+json`, `/incidents` → 302 login, antiforgery cookie `servora.af.<hash>`. T-13a evidence: SQL Server
+(LocalDB) migrate + `/health` + CLI backup/verify/restore round trip with 0 differences in 71 tables; SQLite update path
+with a real second migration (pre-migration backup, data intact) and a failing migration (auto-restore, non-zero exit,
+data intact). T-13b evidence: branding, banner, theme, bell, custom field save, portal redirect, API errors verified in
+the running app.
+
+**Open follow-ups:**
+- PostgreSQL not verified against a real server (none installed, Docker Desktop not running): one migrate + backup
+  round trip still required.
+- Knowledge services accepting `portal.access` not done (would widen visibility; portal keeps its own filtered search).
+- Custom field values are saved in a second write; with `create` but without `write` permission they fail (toast).
+- Field index race warning between record service and `RecordFieldIndexHandler` (self-repairing) – T-14.
+- Record-level authorization for attachments – T-14.
+- Existing development databases created with `EnsureCreated` no longer start (delete or baseline, see `upgrade.md`).
+- Every user signs in once after the upgrade (new cookie names).
 
 ## T-14 Security & Architecture Review ⏳
 
@@ -639,3 +668,4 @@ build green, tests pass.
 | 2026-11-07 | T-15 validated (incl. orchestrator end-to-end backup/restore on the full schema) and merged (✅). |
 | 2026-11-07 | T-11 validated and merged (✅). All implementation tasks done; next: T-13 integration. |
 | 2026-11-08 | T-13 started: T-13a migrations and T-13b cross-module integration in parallel. |
+| 2026-11-08 | T-13 validated and merged (✅); PostgreSQL real-server verification open. |
