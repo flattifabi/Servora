@@ -28,4 +28,25 @@ public sealed record PortalHomeData
 
     /// <summary>Gets the live announcements.</summary>
     public IReadOnlyList<PortalAnnouncementView> Announcements { get; init; } = [];
+
+    /// <summary>Gets the active catalog categories that contain orderable items (with real item counts).</summary>
+    public IReadOnlyList<CatalogCategoryModel> Categories { get; init; } = [];
+
+    /// <summary>Gets the number of orderable catalog items.</summary>
+    public int TotalServices { get; init; }
+
+    /// <summary>
+    /// Gets the items of the "frequently used" section: the featured items (in their configured order) or, when none are
+    /// featured, the most ordered items.
+    /// </summary>
+    public IReadOnlyList<CatalogItemCard> SpotlightItems { get; init; } = [];
+
+    /// <summary>Gets the most ordered catalog item of the last 90 days (<see langword="null"/> when nothing was ordered).</summary>
+    public Guid? MostOrderedItemId { get; init; }
+
+    /// <summary>Gets the user's most recently updated items regardless of their state (home table).</summary>
+    public IReadOnlyList<PortalTicketSummary> LatestItems { get; init; } = [];
+
+    /// <summary>Gets the identifiers of the user's favourite catalog items.</summary>
+    public IReadOnlyList<Guid> FavoriteIds { get; init; } = [];
 }

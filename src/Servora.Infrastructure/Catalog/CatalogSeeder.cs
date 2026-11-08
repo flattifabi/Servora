@@ -1,21 +1,31 @@
 using Microsoft.EntityFrameworkCore;
+using Servora.Application.Catalog;
 using Servora.Application.Common;
 using Servora.Domain.Approvals;
 using Servora.Domain.Catalog;
+using Servora.Domain.Configuration;
 using Servora.Domain.Identity;
 using Servora.Infrastructure.Changes;
 
 namespace Servora.Infrastructure.Catalog;
 
 /// <summary>
-/// Seeds the service catalog: six categories and eight catalog items with variables (new laptop, software
-/// installation, access request, VPN access, mobile phone, password reset, new employee onboarding, shared mailbox).
-/// Idempotent: categories and items are matched by name and only created when missing.
+/// Seeds the service catalog. The base set (categories and the original demo items with variables) is matched by name
+/// and only created when missing. The portal showcase (business laptop with sections and price impacts,
+/// Microsoft 365, the hardware / software / access / support range and the portal presentation of VPN access) is added
+/// once, guarded by the system setting <see cref="ShowcaseMarkerKey"/>, so deleted showcase items are not recreated.
+/// Existing data is never overwritten: presentation fields are only filled while they are still empty.
 /// </summary>
 public sealed class CatalogSeeder : IDataSeeder
 {
     /// <summary>Name of the demo approval group used by catalog items that require approval.</summary>
     public const string ApproverGroupName = "IT Approvers";
+
+    /// <summary>The system setting that records that the portal showcase catalog was seeded.</summary>
+    public const string ShowcaseMarkerKey = "catalog.showcase.seeded";
+
+    /// <summary>Name of the category that contains access and permission services.</summary>
+    public const string AccessCategoryName = "Access & permissions";
 
     /// <inheritdoc />
     public int Order => 120;
@@ -30,38 +40,21 @@ public sealed class CatalogSeeder : IDataSeeder
         var messaging = await ServiceManagementSeedHelper.EnsureGroupAsync(db, "Messaging & Collaboration", GroupType.Assignment, "E-mail, chat and collaboration platforms.", cancellationToken);
         var approvers = await ServiceManagementSeedHelper.EnsureGroupAsync(db, ApproverGroupName, GroupType.Approval, "Approves catalog requests that need management consent.", cancellationToken);
 
-        var hardware = await EnsureCategoryAsync(db, "Hardware", "Laptops, phones and peripherals.", "laptop", 10, cancellationToken);
-        var software = await EnsureCategoryAsync(db, "Software", "Installations and licenses.", "package", 20, cancellationToken);
-        var access = await EnsureCategoryAsync(db, "Access & Security", "Accounts, permissions and passwords.", "key", 30, cancellationToken);
-        var connectivity = await EnsureCategoryAsync(db, "Network & Connectivity", "VPN, Wi-Fi and remote access.", "globe", 40, cancellationToken);
-        var communication = await EnsureCategoryAsync(db, "Communication", "Mailboxes, distribution lists and collaboration.", "mail", 50, cancellationToken);
-        var onboarding = await EnsureCategoryAsync(db, "People & Onboarding", "Joiners, movers and leavers.", "user-plus", 60, cancellationToken);
+        var hardware = await EnsureCategoryAsync(db, "Hardware", "For your workplace", "laptop", 10, [], cancellationToken);
+        var software = await EnsureCategoryAsync(db, "Software", "The right tools for you", "grid", 20, [], cancellationToken);
+        var access = await EnsureCategoryAsync(db, AccessCategoryName, "Securely connected", "key", 30, ["Access & Security"], cancellationToken);
+        var support = await EnsureCategoryAsync(db, "IT support", "We are here to help", "life-buoy", 40, [], cancellationToken);
+        var communication = await EnsureCategoryAsync(db, "Communication", "Mailboxes, distribution lists and collaboration.", "mail", 50, [], cancellationToken);
+        var onboarding = await EnsureCategoryAsync(db, "People & Onboarding", "Joiners, movers and leavers.", "user-plus", 60, [], cancellationToken);
 
-        var existing = await db.Set<CatalogItem>().Select(i => i.Name).ToListAsync(cancellationToken);
-
-        Add(db, existing, new CatalogItem
-        {
-            Name = "New laptop", Icon = "laptop", CategoryId = hardware, Price = 1450m, DeliveryDays = 5, Order = 10,
-            ShortDescription = "Request a new or replacement business laptop.",
-            Description = "Standard laptops are delivered pre-configured with the corporate image, encryption and all standard applications.",
-            FulfillmentGroupId = desktop, FulfillmentTasks = "Prepare and image the laptop\nDeliver the laptop and collect the old device",
-            ApprovalRequired = true, ApprovalGroupId = approvers, ManagerApproval = true,
-        },
-        [
-            Choice("model", "Model", true, "Standard 14\" business laptop\nPerformance 16\" developer laptop\nUltralight 13\" travel laptop", "Standard 14\" business laptop"),
-            Choice("operating_system", "Operating system", true, "Windows 11\nUbuntu 24.04 LTS", "Windows 11"),
-            Var("replacement", "Is this a replacement for an existing device?", CatalogVariableType.Boolean),
-            Var("old_asset_tag", "Asset tag of the old device", CatalogVariableType.Text, help: "Printed on the label below the device, for example AST0001234."),
-            Var("business_justification", "Business justification", CatalogVariableType.MultilineText, mandatory: true),
-            Var("needed_by", "Needed by", CatalogVariableType.Date),
-        ]);
+        var existing = await db.Set<CatalogItem>().Select(i => i.Name).Take(5000).ToListAsync(cancellationToken);
 
         Add(db, existing, new CatalogItem
         {
-            Name = "Software installation", Icon = "package", CategoryId = software, Price = 0m, DeliveryDays = 2, Order = 10,
+            Name = "Software installation", Icon = "package", CategoryId = software, Price = 0m, DeliveryDays = 2, Order = 30,
             ShortDescription = "Install licensed or open source software on your device.",
             Description = "Only software from the approved software list can be installed. Licenses are purchased by IT when required.",
-            FulfillmentGroupId = desktop,
+            FulfillmentGroupId = desktop, Code = "SW-010", DeliveryText = "2 working days",
         },
         [
             Var("software_name", "Software", CatalogVariableType.Text, mandatory: true),
@@ -73,10 +66,10 @@ public sealed class CatalogSeeder : IDataSeeder
 
         Add(db, existing, new CatalogItem
         {
-            Name = "Access request", Icon = "shield-check", CategoryId = access, Price = 0m, DeliveryDays = 1, Order = 10,
+            Name = "Access request", Icon = "shield-check", CategoryId = access, Price = 0m, DeliveryDays = 1, Order = 20,
             ShortDescription = "Request access to a business application.",
             Description = "Access is granted according to the principle of least privilege. Your manager and the IT approvers are asked for consent.",
-            FulfillmentGroupId = identity, ApprovalRequired = true, ApprovalGroupId = approvers, ManagerApproval = true,
+            FulfillmentGroupId = identity, ApprovalRequired = true, ApprovalGroupId = approvers, ManagerApproval = true, Code = "AC-002",
         },
         [
             Choice("application", "Application", true, "SAP ERP\nSalesforce CRM\nJira\nConfluence\nPower BI\nOther", null),
@@ -88,8 +81,8 @@ public sealed class CatalogSeeder : IDataSeeder
 
         Add(db, existing, new CatalogItem
         {
-            Name = "VPN access", Icon = "globe", CategoryId = connectivity, Price = 0m, DeliveryDays = 1, Order = 10,
-            ShortDescription = "Secure remote access to the corporate network.",
+            Name = "VPN access", Icon = "shield-check", CategoryId = access, Price = 0m, DeliveryDays = 0, Order = 10,
+            ShortDescription = "Securely access internal applications – from your home office or on the go.",
             Description = "VPN access requires multi-factor authentication. Contractor profiles expire automatically.",
             FulfillmentGroupId = network,
         },
@@ -102,10 +95,10 @@ public sealed class CatalogSeeder : IDataSeeder
 
         Add(db, existing, new CatalogItem
         {
-            Name = "Mobile phone", Icon = "phone", CategoryId = hardware, Price = 650m, DeliveryDays = 4, Order = 20,
+            Name = "Mobile phone", Icon = "phone", CategoryId = hardware, Price = 650m, DeliveryDays = 4, Order = 30,
             ShortDescription = "Company smartphone with a business data plan.",
             Description = "Phones are enrolled in mobile device management and delivered ready to use.",
-            FulfillmentGroupId = desktop, ApprovalRequired = true, ApprovalGroupId = approvers,
+            FulfillmentGroupId = desktop, ApprovalRequired = true, ApprovalGroupId = approvers, Code = "HW-020",
         },
         [
             Choice("model", "Model", true, "iPhone 16\nSamsung Galaxy S25\nGoogle Pixel 9", null),
@@ -117,10 +110,10 @@ public sealed class CatalogSeeder : IDataSeeder
 
         Add(db, existing, new CatalogItem
         {
-            Name = "Password reset", Icon = "unlock", CategoryId = access, Price = 0m, DeliveryDays = 0, Order = 20,
+            Name = "Password reset", Icon = "unlock", CategoryId = support, Price = 0m, DeliveryDays = 0, Order = 10,
             ShortDescription = "Reset a password or unlock an account.",
             Description = "The service desk verifies the identity of the account owner before resetting a password.",
-            FulfillmentGroupId = serviceDesk,
+            FulfillmentGroupId = serviceDesk, DeliveryText = "Usually within 1 hour", Code = "SUP-001",
         },
         [
             Choice("account", "Account", true, "Windows / Active Directory\nSAP\nVPN token\nOther", "Windows / Active Directory"),
@@ -165,6 +158,134 @@ public sealed class CatalogSeeder : IDataSeeder
         ]);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        if (await db.Set<SystemSetting>().AnyAsync(s => s.Key == ShowcaseMarkerKey, cancellationToken))
+        {
+            return;
+        }
+
+        var groups = new SeedGroups(serviceDesk, desktop, identity, network, messaging, approvers);
+        AddBusinessLaptop(db, existing, hardware, groups);
+        AddMicrosoft365(db, existing, software, groups);
+        await PresentVpnAccessAsync(db, cancellationToken);
+        AddRange(db, existing, hardware, desktop, CatalogShowcase.Hardware);
+        AddRange(db, existing, software, desktop, CatalogShowcase.Software);
+        AddRange(db, existing, access, identity, CatalogShowcase.Access);
+        AddRange(db, existing, support, serviceDesk, CatalogShowcase.Support);
+
+        db.Set<SystemSetting>().Add(new SystemSetting
+        {
+            Key = ShowcaseMarkerKey,
+            Value = "true",
+            Category = "Portal",
+            ValueType = "bool",
+            Description = "The portal showcase catalog was seeded (deleted showcase items are not recreated).",
+        });
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void AddBusinessLaptop(IAppDbContext db, List<string> existing, Guid hardware, SeedGroups groups)
+    {
+        var item = new CatalogItem
+        {
+            Name = "Business laptop", Icon = "laptop", CategoryId = hardware, Order = 10,
+            Subtitle = "Lenovo ThinkPad T14 Gen 5",
+            ShortDescription = "Your reliable companion. Powerful, mobile and set up for you from day one.",
+            Description = "Powerful in the office, flexible on the go. The 14-inch laptop comes with all standard applications and is ready to use right away. Configure it to suit you.",
+            BadgeText = "Our standard for you", Code = "HW-001",
+            Price = 39m, BillingType = CatalogBillingType.Monthly, TermMonths = 36, OneTimePrice = 0m,
+            DeliveryDays = 5, DeliveryText = "3–5 working days",
+            Highlights = "package | 3–5 working days\nshield-check | IT support included\nwand | Ready to go, fully set up",
+            DetailsMarkdown = "### Equipment\n\n- 14\" WUXGA IPS display (1920 × 1200), anti-glare\n- Intel Core Ultra 5 processor\n- 16 GB RAM (upgrade to 32 GB available)\n- 512 GB NVMe SSD, encrypted\n- Wi-Fi 7, Bluetooth 5.3, USB-C / Thunderbolt 4, HDMI\n- Backlit keyboard, fingerprint reader, IR camera\n\n### Included software\n\nWindows 11 Enterprise, Microsoft 365 apps, Teams, the company VPN client and endpoint protection.",
+            DeliveryMarkdown = "### Delivery\n\nThe laptop is delivered **3–5 working days after approval** to the location you enter – fully set up with your account and standard applications.\n\n### Support\n\n- IT support is included for the whole term of **36 months**\n- Defective devices are replaced within one working day\n- Return your old device to the service desk; your data is wiped securely",
+            IsFeatured = true, FeaturedOrder = 10,
+            FulfillmentGroupId = groups.Desktop, FulfillmentTasks = "Prepare and image the laptop\nDeliver the laptop and collect the old device",
+            ApprovalRequired = true, ApprovalGroupId = groups.Approvers, ManagerApproval = true,
+        };
+        if (existing.Contains(item.Name))
+        {
+            return;
+        }
+
+        var who = new CatalogSection { CatalogItemId = item.Id, Title = "Who is the laptop for?", Order = 10 };
+        var device = new CatalogSection { CatalogItemId = item.Id, Title = "Device & accessories", Description = "14\" WUXGA display · Intel Core Ultra 5 · 36-month term", Order = 20 };
+        var delivery = new CatalogSection { CatalogItemId = item.Id, Title = "Delivery & demand", Order = 30 };
+        db.Set<CatalogSection>().AddRange(who, device, delivery);
+        Add(db, existing, item,
+        [
+            In(who, Choice(CatalogPriceCalculator.CostCenterVariable, "Cost centre", true, "MKT-2040 · Marketing\nFIN-1010 · Finance\nHR-3050 · Human Resources\nIT-4000 · IT\nOPS-6010 · Operations\nSAL-5020 · Sales", null, help: "Assigned to your area automatically.")),
+            In(device, Choice("memory", "Memory", true, "16 GB RAM | 0 | Included in the base price\n32 GB RAM | +8.00 | For demanding workloads", "16 GB RAM")),
+            In(device, Choice("storage", "Storage", true, "512 GB SSD\n1 TB SSD | +4.00", "512 GB SSD")),
+            In(device, Choice("operating_system", "Operating system", true, "Windows 11 Enterprise\nUbuntu 24.04 LTS", "Windows 11 Enterprise")),
+            In(device, Priced(Var("docking_station", "USB-C docking station", CatalogVariableType.Boolean, help: "One cable for monitor, network and power."), 5m)),
+            In(delivery, Var("delivery_location", "Delivery location", CatalogVariableType.Text, mandatory: true, maxLength: 200, help: "Building, floor and room, for example Berlin office · 3rd floor, room 3.12.")),
+            In(delivery, Var("desired_date", "Desired delivery date", CatalogVariableType.Date)),
+            In(delivery, Var("business_justification", "Business justification", CatalogVariableType.MultilineText, mandatory: true, maxLength: 500, help: "Helps your manager approve the request quickly.")),
+            In(delivery, Var("return_old_device", "I will return my previous device after receiving the new laptop.", CatalogVariableType.Boolean, mandatory: true)),
+        ]);
+    }
+
+    private static void AddMicrosoft365(IAppDbContext db, List<string> existing, Guid software, SeedGroups groups) =>
+        Add(db, existing, new CatalogItem
+        {
+            Name = "Microsoft 365", Icon = "grid", CategoryId = software, Order = 10,
+            Subtitle = "Microsoft 365 E3", Teaser = "Better together.", TeaserText = "Your digital toolkit",
+            ShortDescription = "Word, Excel, Teams and more. Everything for productive collaboration.",
+            Description = "Microsoft 365 gives you the Office apps on up to five devices, a 100 GB mailbox, 1 TB OneDrive storage and Teams for chat, meetings and calls.",
+            Code = "SW-001", Price = 22m, BillingType = CatalogBillingType.Monthly, TermMonths = 12,
+            DeliveryDays = 1, DeliveryText = "1 working day",
+            Highlights = "clock | 1 working day\ncloud | 1 TB OneDrive storage\nshield-check | Managed and secured by IT",
+            DetailsMarkdown = "### What is included\n\n- Word, Excel, PowerPoint, Outlook and OneNote\n- Teams for chat, meetings and calls\n- 100 GB mailbox and 1 TB OneDrive\n- Installation on up to five devices",
+            DeliveryMarkdown = "Your license is assigned **within one working day**. You receive an e-mail as soon as you can sign in.",
+            IsFeatured = true, FeaturedOrder = 20, FulfillmentGroupId = groups.Messaging,
+        },
+        [
+            Choice("plan", "License", true, "Microsoft 365 E3 | 0 | Office apps, Teams, mailbox and OneDrive\nMicrosoft 365 E5 | +16.00 | Adds advanced security, Power BI Pro and phone system", "Microsoft 365 E3"),
+            Choice(CatalogPriceCalculator.CostCenterVariable, "Cost centre", true, "MKT-2040 · Marketing\nFIN-1010 · Finance\nHR-3050 · Human Resources\nIT-4000 · IT\nOPS-6010 · Operations\nSAL-5020 · Sales", null),
+            Var("notes", "Notes for IT", CatalogVariableType.MultilineText, maxLength: 500),
+        ]);
+
+    private static async Task PresentVpnAccessAsync(IAppDbContext db, CancellationToken cancellationToken)
+    {
+        // Fill only presentation fields that did not exist before (never overwrite administrator changes).
+        var vpn = await db.Set<CatalogItem>().FirstOrDefaultAsync(i => i.Name == "VPN access", cancellationToken);
+        if (vpn is null || vpn.Teaser is not null || vpn.Subtitle is not null || vpn.IsFeatured)
+        {
+            return;
+        }
+
+        vpn.Teaser = "Always connected.";
+        vpn.TeaserText = "Secure. Simple. From anywhere.";
+        vpn.DeliveryText = "Available immediately";
+        vpn.Code ??= "AC-001";
+        vpn.Highlights ??= "zap | Available immediately\nlock | Multi-factor protected\nglobe | Works from anywhere";
+        vpn.IsFeatured = true;
+        vpn.FeaturedOrder = 30;
+    }
+
+    private static void AddRange(IAppDbContext db, List<string> existing, Guid categoryId, Guid fulfillmentGroupId, IReadOnlyList<CatalogShowcaseItem> items)
+    {
+        foreach (var definition in items)
+        {
+            Add(db, existing, new CatalogItem
+            {
+                Name = definition.Name,
+                Icon = definition.Icon,
+                CategoryId = categoryId,
+                Subtitle = definition.Subtitle,
+                ShortDescription = definition.ShortDescription,
+                Description = definition.ShortDescription,
+                Price = definition.Price,
+                BillingType = definition.Monthly ? CatalogBillingType.Monthly : CatalogBillingType.OneTime,
+                TermMonths = definition.Monthly ? definition.TermMonths : null,
+                DeliveryDays = definition.DeliveryDays,
+                DeliveryText = definition.DeliveryText,
+                Code = definition.Code,
+                Order = definition.Order,
+                FulfillmentGroupId = fulfillmentGroupId,
+            },
+            [Var("notes", "Notes for IT", CatalogVariableType.MultilineText, maxLength: 500)]);
+        }
     }
 
     private static void Add(IAppDbContext db, List<string> existing, CatalogItem item, IReadOnlyList<CatalogVariable> variables)
@@ -197,7 +318,7 @@ public sealed class CatalogSeeder : IDataSeeder
         DefaultValue = defaultValue,
     };
 
-    private static CatalogVariable Choice(string name, string label, bool mandatory, string options, string? defaultValue) => new()
+    private static CatalogVariable Choice(string name, string label, bool mandatory, string options, string? defaultValue, string? help = null) => new()
     {
         Name = name,
         Label = label,
@@ -205,14 +326,29 @@ public sealed class CatalogSeeder : IDataSeeder
         Mandatory = mandatory,
         Options = options,
         DefaultValue = defaultValue,
+        HelpText = help,
     };
 
-    private static async Task<Guid> EnsureCategoryAsync(IAppDbContext db, string name, string description, string icon, int order, CancellationToken cancellationToken)
+    private static CatalogVariable In(CatalogSection section, CatalogVariable variable)
     {
-        var id = await db.Set<CatalogCategory>().Where(c => c.Name == name).Select(c => (Guid?)c.Id).FirstOrDefaultAsync(cancellationToken);
-        if (id is { } existing)
+        variable.SectionId = section.Id;
+        return variable;
+    }
+
+    private static CatalogVariable Priced(CatalogVariable variable, decimal priceDelta)
+    {
+        variable.PriceDelta = priceDelta;
+        return variable;
+    }
+
+    private static async Task<Guid> EnsureCategoryAsync(IAppDbContext db, string name, string description, string icon, int order, IReadOnlyList<string> aliases, CancellationToken cancellationToken)
+    {
+        var names = aliases.Prepend(name).ToList();
+        var matches = await db.Set<CatalogCategory>().Where(c => names.Contains(c.Name)).Select(c => new { c.Id, c.Name }).ToListAsync(cancellationToken);
+        var match = matches.FirstOrDefault(c => c.Name == name) ?? matches.FirstOrDefault();
+        if (match is not null)
         {
-            return existing;
+            return match.Id;
         }
 
         var category = new CatalogCategory { Name = name, Description = description, Icon = icon, Order = order };

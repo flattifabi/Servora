@@ -1,0 +1,58 @@
+@* "My requests" card of the portal home page: the user's latest requests and issues with number, created date and a
+   status pill. *@
+<section class="preq pcard" aria-labelledby="preq-title">
+    <div class="preq-head">
+        <div class="preq-title">
+            <h2 id="preq-title">@Title</h2>
+            <span class="pchip-count">@OpenCount open</span>
+        </div>
+        <a class="psection-link" href="/portal/my">All requests <Icon Name="arrow-right" Size="14" /></a>
+    </div>
+    @if (Items.Count == 0)
+    {
+        <div class="preq-empty">
+            <span class="picon-tile"><Icon Name="inbox" Size="18" /></span>
+            <div>
+                <b>Nothing here yet</b>
+                <span>Your requests and reported issues will appear here.</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="preq-table" role="table">
+            <div class="preq-row preq-header" role="row">
+                <span role="columnheader" class="preq-col-main">Request</span>
+                <span role="columnheader" class="preq-col-date">Created</span>
+                <span role="columnheader" class="preq-col-status">Status</span>
+                <span class="preq-col-go" aria-hidden="true"></span>
+            </div>
+            @foreach (var item in Items)
+            {
+                <a class="preq-row" role="row" href="@item.Route" @key="item.Id">
+                    <span role="cell" class="preq-col-main">
+                        <span class="picon-tile sm"><PortalGlyph Name="@item.Icon" Size="16" /></span>
+                        <span class="preq-text">
+                            <span class="preq-name">@item.Title</span>
+                            <span class="preq-number">@item.Number</span>
+                        </span>
+                    </span>
+                    <span role="cell" class="preq-col-date">@PortalFormat.Date(item.OpenedAt)</span>
+                    <span role="cell" class="preq-col-status"><span class="ppill @PortalFormat.Tone(item.Status.Tone)">@item.Status.Label</span></span>
+                    <span class="preq-col-go" aria-hidden="true"><Icon Name="chevron-right" Size="16" /></span>
+                </a>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    /// <summary>Gets or sets the card title.</summary>
+    [Parameter] public string Title { get; set; } = "My requests";
+
+    /// <summary>Gets or sets the items to show.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<PortalTicketSummary> Items { get; set; } = [];
+
+    /// <summary>Gets or sets the number of open items.</summary>
+    [Parameter] public int OpenCount { get; set; }
+}

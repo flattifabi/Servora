@@ -1268,6 +1268,31 @@ namespace Servora.Persistence.PostgreSql.Migrations
                     b.ToTable("sc_category", (string)null);
                 });
 
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogFavorite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CatalogItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogItemId");
+
+                    b.HasIndex("UserId", "CatalogItemId")
+                        .IsUnique();
+
+                    b.ToTable("sc_favorite", (string)null);
+                });
+
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1283,8 +1308,19 @@ namespace Servora.Persistence.PostgreSql.Migrations
                     b.Property<bool>("ApprovalRequired")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("BadgeText")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<int>("BillingType")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1296,9 +1332,24 @@ namespace Servora.Persistence.PostgreSql.Migrations
                     b.Property<int>("DeliveryDays")
                         .HasColumnType("integer");
 
+                    b.Property<string>("DeliveryMarkdown")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<string>("DeliveryText")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(8000)
                         .HasColumnType("character varying(8000)");
+
+                    b.Property<string>("DetailsMarkdown")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<int>("FeaturedOrder")
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("FulfillmentGroupId")
                         .HasColumnType("uuid");
@@ -1307,12 +1358,22 @@ namespace Servora.Persistence.PostgreSql.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("Highlights")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<string>("Icon")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<Guid?>("ImageId")
+                        .HasColumnType("uuid");
+
                     b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsFeatured")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("ManagerApproval")
@@ -1322,6 +1383,10 @@ namespace Servora.Persistence.PostgreSql.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("OneTimePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<int>("Order")
                         .HasColumnType("integer");
@@ -1333,6 +1398,21 @@ namespace Servora.Persistence.PostgreSql.Migrations
                     b.Property<string>("ShortDescription")
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Subtitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Teaser")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("TeaserText")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<int?>("TermMonths")
+                        .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1351,9 +1431,57 @@ namespace Servora.Persistence.PostgreSql.Migrations
 
                     b.HasIndex("IsActive");
 
+                    b.HasIndex("IsFeatured");
+
                     b.HasIndex("Name");
 
                     b.ToTable("sc_cat_item", (string)null);
+                });
+
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogSection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CatalogItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogItemId", "Order");
+
+                    b.ToTable("sc_item_section", (string)null);
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogTask", b =>
@@ -1533,6 +1661,13 @@ namespace Servora.Persistence.PostgreSql.Migrations
                     b.Property<int>("Order")
                         .HasColumnType("integer");
 
+                    b.Property<decimal?>("PriceDelta")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("SectionId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Type")
                         .HasColumnType("integer");
 
@@ -1548,6 +1683,8 @@ namespace Servora.Persistence.PostgreSql.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SectionId");
 
                     b.HasIndex("CatalogItemId", "Name")
                         .IsUnique();
@@ -1687,6 +1824,9 @@ namespace Servora.Persistence.PostgreSql.Migrations
                     b.Property<Guid?>("AssignmentGroupId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("BillingType")
+                        .HasColumnType("integer");
+
                     b.Property<Guid>("CatalogItemId")
                         .HasColumnType("uuid");
 
@@ -1725,6 +1865,10 @@ namespace Servora.Persistence.PostgreSql.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<decimal>("OneTimePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<DateTimeOffset>("OpenedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1754,6 +1898,9 @@ namespace Servora.Persistence.PostgreSql.Migrations
                     b.Property<string>("Tags")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("TermMonths")
+                        .HasColumnType("integer");
 
                     b.Property<decimal>("UnitPrice")
                         .HasPrecision(18, 2)
@@ -5005,12 +5152,36 @@ namespace Servora.Persistence.PostgreSql.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogFavorite", b =>
+                {
+                    b.HasOne("Servora.Domain.Catalog.CatalogItem", null)
+                        .WithMany()
+                        .HasForeignKey("CatalogItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Servora.Domain.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogItem", b =>
                 {
                     b.HasOne("Servora.Domain.Catalog.CatalogCategory", null)
                         .WithMany()
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogSection", b =>
+                {
+                    b.HasOne("Servora.Domain.Catalog.CatalogItem", null)
+                        .WithMany()
+                        .HasForeignKey("CatalogItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogTask", b =>
@@ -5029,6 +5200,10 @@ namespace Servora.Persistence.PostgreSql.Migrations
                         .HasForeignKey("CatalogItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Servora.Domain.Catalog.CatalogSection", null)
+                        .WithMany()
+                        .HasForeignKey("SectionId");
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.RequestItem", b =>

@@ -5,19 +5,20 @@
 @implements IDisposable
 @inject IPortalTicketService Tickets
 @inject ToastService Toasts
+@inject IPortalSettingsService PortalSettings
 
-<PageTitle>My items · @Brand.ProductName</PageTitle>
+<PageTitle>My requests · @Brand.ProductName</PageTitle>
 
 <div class="portal-container">
     <div class="portal-page-head pmy-head">
         <div>
-            <div class="portal-crumbs"><a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" /> <span>My items</span></div>
-            <h1>My items</h1>
+            <div class="portal-crumbs"><a href="/portal">Service portal</a> <Icon Name="chevron-right" Size="12" /> <span>My requests</span></div>
+            <h1>My requests</h1>
             <p>Everything you requested or reported – and everything ordered for you.</p>
         </div>
         <div class="flex gap-2 flex-wrap">
-            <a class="btn btn-secondary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> New request</a>
-            <a class="btn btn-primary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+            <a class="pbtn pbtn-outline" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> New request</a>
+            <a class="pbtn pbtn-primary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
         </div>
     </div>
 
@@ -55,8 +56,8 @@
                 <EmptyState Icon="inbox" Title="@(_filter == PortalTicketFilter.Open ? "No open items" : "Nothing found")"
                             Text="@(string.IsNullOrWhiteSpace(_search) ? "When you order something or report an issue, it shows up here." : $"No item matches “{_search}”.")">
                     <div class="flex gap-2 justify-center flex-wrap">
-                        <a class="btn btn-primary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Browse the catalog</a>
-                        <a class="btn btn-secondary" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
+                        <a class="pbtn pbtn-primary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Browse the catalog</a>
+                        <a class="pbtn pbtn-outline" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
                     </div>
                 </EmptyState>
             </div>
@@ -67,13 +68,13 @@
             <div class="stack" style="gap:10px">
                 @foreach (var item in _items)
                 {
-                    <PortalTicketRow @key="(item.Kind, item.Id)" Item="item" />
+                    <PortalTicketRow @key="(item.Kind, item.Id)" Item="item" Currency="@_currency" />
                 }
             </div>
             @if (_items.Count < _total)
             {
                 <div class="flex justify-center mt-6">
-                    <button class="btn btn-secondary" disabled="@_loadingMore" @onclick="LoadMoreAsync">
+                    <button class="pbtn pbtn-outline" disabled="@_loadingMore" @onclick="LoadMoreAsync">
                         @if (_loadingMore)
                         {
                             <span class="spinner"></span>
@@ -87,6 +88,7 @@
 </div>
 
 @code {
+    private string? _currency;
     private const int PageSize = 20;
 
     private static readonly (PortalTicketFilter Filter, string Label)[] s_filters =
@@ -106,7 +108,11 @@
     private CancellationTokenSource? _debounce;
 
     /// <inheritdoc />
-    protected override Task OnInitializedAsync() => ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _currency = (await PortalSettings.GetAsync()).Value?.Currency;
+        await ReloadAsync();
+    }
 
     /// <inheritdoc />
     public void Dispose()

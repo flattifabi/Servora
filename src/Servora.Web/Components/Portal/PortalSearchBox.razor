@@ -59,7 +59,7 @@
                                 <span class="psearch-title">@item.Name</span>
                                 <span class="psearch-sub">@(item.ShortDescription ?? item.CategoryName)</span>
                             </span>
-                            <span class="tag">@PortalFormat.Price(item.Price)</span>
+                            <span class="psearch-price">@PortalFormat.PriceLabel(item, Currency)</span>
                         </a>
                     }
                 }
@@ -96,6 +96,9 @@
 
     /// <summary>Gets or sets the placeholder text.</summary>
     [Parameter] public string Placeholder { get; set; } = "Search for answers, services or your tickets…";
+
+    /// <summary>Gets or sets the currency code used for prices.</summary>
+    [Parameter] public string? Currency { get; set; }
 
     /// <summary>Gets or sets the initial query.</summary>
     [Parameter] public string? InitialQuery { get; set; }

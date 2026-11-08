@@ -1,73 +1,136 @@
-@* Consumer-grade shell of the self-service portal: glass header with navigation, approvals badge, report-an-issue CTA,
-   theme switch and user menu; responsive drawer navigation on phones; footer. *@
+@* Shell of the self-service portal: brand-ink top bar (logo, product name, "Service portal", tabs with badges, bell,
+   user menu), responsive drawer navigation on phones and a footer with tagline, live service status and the
+   configurable links. Colours derive from the configured brand colour. *@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject ICurrentUser CurrentUser
 @inject IPermissionService PermissionService
 @inject IApprovalInboxService ApprovalInbox
+@inject IPortalHomeService Home
+@inject IPortalSettingsService PortalSettings
+@inject IPortalAnnouncementService Announcements
+@inject Servora.Application.Configuration.IBrandingService BrandingService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject Servora.Web.Services.BrandingState Brand
 
 <div class="portal-shell">
-    <header class="portal-header">
-        <div class="portal-header-inner">
-            <a class="portal-brand" href="/portal" aria-label="Self-Service Portal home">
-                <span class="portal-mark"><Icon Name="life-buoy" Size="18" /></span>
-                <span class="portal-brand-text">@Brand.ProductName <span class="portal-brand-sub">Self-Service</span></span>
+    <header class="pl-header">
+        <div class="pl-header-inner">
+            <a class="pl-brand" href="/portal" aria-label="@Brand.ProductName service portal home">
+                <span class="pl-logo">
+                    @if (Brand.Current.LogoUrl is { } logo)
+                    {
+                        <img src="@logo" alt="" />
+                    }
+                    else
+                    {
+                        <Icon Name="box" Size="18" />
+                    }
+                </span>
+                <span class="pl-brand-name">@Brand.ProductName</span>
+                <span class="pl-brand-divider" aria-hidden="true"></span>
+                <span class="pl-brand-sub">Service portal</span>
             </a>
 
-            <nav class="portal-nav @(_menuOpen ? "open" : null)" aria-label="Portal navigation">
-                @foreach (var link in s_links)
+            <nav class="pl-nav @(_menuOpen ? "open" : null)" aria-label="Portal navigation">
+                <a class="pl-tab @(IsCatalogActive ? "active" : null)" href="/portal/catalog" @onclick="CloseMenu">Service catalog</a>
+                <a class="pl-tab @(IsActive("/portal/my") ? "active" : null)" href="/portal/my" @onclick="CloseMenu">
+                    My requests
+                    @if (_openItems > 0)
+                    {
+                        <span class="pl-count" title="Open requests and issues">@(_openItems > 99 ? "99+" : _openItems.ToString())</span>
+                    }
+                </a>
+                <a class="pl-tab @(IsActive("/portal/knowledge") ? "active" : null)" href="/portal/knowledge" @onclick="CloseMenu">Knowledge base</a>
+                @if (_pendingApprovals > 0 || IsActive("/portal/approvals"))
                 {
-                    <a class="portal-nav-link @(IsActive(link.Route) ? "active" : null)" href="@link.Route" @onclick="CloseMenu">
-                        <Icon Name="@link.Icon" Size="16" />
-                        <span>@link.Title</span>
-                        @if (link.Route == "/portal/approvals" && _pendingApprovals > 0)
+                    <a class="pl-tab @(IsActive("/portal/approvals") ? "active" : null)" href="/portal/approvals" @onclick="CloseMenu">
+                        Approvals
+                        @if (_pendingApprovals > 0)
                         {
-                            <span class="portal-badge" title="Approvals waiting for you">@(_pendingApprovals > 99 ? "99+" : _pendingApprovals.ToString())</span>
+                            <span class="pl-count attention" title="Approvals waiting for you">@(_pendingApprovals > 99 ? "99+" : _pendingApprovals.ToString())</span>
                         }
                     </a>
                 }
-                <a class="portal-nav-link portal-nav-cta-mobile" href="/portal/report" @onclick="CloseMenu"><Icon Name="alert-circle" Size="16" /> <span>Report an issue</span></a>
+                <a class="pl-tab pl-tab-mobile" href="/portal/report" @onclick="CloseMenu">Report an issue</a>
             </nav>
 
-            <div class="portal-actions">
-                <a class="btn btn-primary btn-sm portal-cta" href="/portal/report"><Icon Name="alert-circle" Size="16" /> Report an issue</a>
-                <button class="icon-btn" title="Toggle theme" @onclick="ToggleThemeAsync"><Icon Name="@(_theme == "light" ? "moon" : "sun")" /></button>
-                <div class="dropdown">
-                    <button class="icon-btn portal-avatar-btn" @onclick="() => _userOpen = !_userOpen" title="Account" aria-haspopup="menu" aria-expanded="@_userOpen">
-                        <Avatar Name="@CurrentUser.DisplayName" Size="sm" />
+            <div class="pl-actions">
+                <div class="pl-dropdown">
+                    <button class="pl-icon-btn" title="Notifications" aria-haspopup="menu" aria-expanded="@_bellOpen" @onclick="ToggleBell">
+                        <Icon Name="bell" Size="18" />
+                        @if (NotificationCount > 0)
+                        {
+                            <span class="pl-dot" aria-label="@NotificationCount notifications"></span>
+                        }
+                    </button>
+                    @if (_bellOpen)
+                    {
+                        <div class="click-catcher" @onclick="() => _bellOpen = false"></div>
+                        <div class="pl-menu pl-menu-wide" role="menu">
+                            <div class="pl-menu-head">Notifications</div>
+                            @if (NotificationCount == 0)
+                            {
+                                <div class="pl-menu-empty"><Icon Name="check-circle" Size="16" /> You are all caught up.</div>
+                            }
+                            @if (_pendingApprovals > 0)
+                            {
+                                <a class="pl-menu-item" href="/portal/approvals" @onclick="() => _bellOpen = false">
+                                    <span class="pl-menu-icon warning"><Icon Name="check-square" Size="15" /></span>
+                                    <span><b>@_pendingApprovals approval@(_pendingApprovals == 1 ? string.Empty : "s") waiting</b><small>Your decision is needed</small></span>
+                                </a>
+                            }
+                            @foreach (var announcement in _announcements.Take(4))
+                            {
+                                <a class="pl-menu-item" href="/portal" @key="announcement.Id" @onclick="() => _bellOpen = false">
+                                    <span class="pl-menu-icon @ToneOf(announcement.Kind)"><Icon Name="info" Size="15" /></span>
+                                    <span><b>@announcement.Title</b><small>@announcement.Kind</small></span>
+                                </a>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <span class="pl-actions-divider" aria-hidden="true"></span>
+
+                <div class="pl-dropdown">
+                    <button class="pl-user" @onclick="ToggleUser" title="Account" aria-haspopup="menu" aria-expanded="@_userOpen">
+                        <span class="pl-avatar">@PortalFormat.Initials(CurrentUser.DisplayName)</span>
+                        <span class="pl-user-name">@CurrentUser.DisplayName</span>
+                        <Icon Name="chevron-down" Size="14" Class="pl-user-chevron" />
                     </button>
                     @if (_userOpen)
                     {
                         <div class="click-catcher" @onclick="() => _userOpen = false"></div>
-                        <div class="dropdown-menu" role="menu">
-                            <div class="flex items-center gap-3" style="padding:10px">
-                                <Avatar Name="@CurrentUser.DisplayName" Size="lg" />
-                                <div class="flex-1">
-                                    <div style="font-weight:650" class="truncate">@CurrentUser.DisplayName</div>
-                                    <div class="small faint truncate">@CurrentUser.Name</div>
-                                </div>
+                        <div class="pl-menu" role="menu">
+                            <div class="pl-menu-user">
+                                <span class="pl-avatar lg">@PortalFormat.Initials(CurrentUser.DisplayName)</span>
+                                <span class="pl-menu-user-text"><b>@CurrentUser.DisplayName</b><small>@CurrentUser.Name</small></span>
                             </div>
-                            <div class="dropdown-divider"></div>
-                            <a class="dropdown-item" href="/portal/my" @onclick="() => _userOpen = false"><Icon Name="inbox" Size="16" /> My items</a>
-                            <a class="dropdown-item" href="/profile" @onclick="() => _userOpen = false"><Icon Name="user" Size="16" /> My profile</a>
-                            <a class="dropdown-item" href="/account/change-password" data-enhance-nav="false"><Icon Name="key" Size="16" /> Change password</a>
+                            <a class="pl-menu-item" href="/portal/my" @onclick="() => _userOpen = false"><Icon Name="inbox" Size="15" /> My requests</a>
+                            <a class="pl-menu-item" href="/portal/report" @onclick="() => _userOpen = false"><Icon Name="alert-circle" Size="15" /> Report an issue</a>
+                            <a class="pl-menu-item" href="/portal/approvals" @onclick="() => _userOpen = false"><Icon Name="check-square" Size="15" /> Approvals</a>
+                            <a class="pl-menu-item" href="/profile" @onclick="() => _userOpen = false"><Icon Name="user" Size="15" /> My profile</a>
+                            <a class="pl-menu-item" href="/account/change-password" data-enhance-nav="false"><Icon Name="key" Size="15" /> Change password</a>
+                            <button class="pl-menu-item" @onclick="ToggleThemeAsync"><Icon Name="@(_theme == "dark" ? "sun" : "moon")" Size="15" /> @(_theme == "dark" ? "Light theme" : "Dark theme")</button>
                             @if (_canManage)
                             {
-                                <a class="dropdown-item" href="/portal/admin/announcements" @onclick="() => _userOpen = false"><Icon Name="bell" Size="16" /> Manage announcements</a>
+                                <div class="pl-menu-divider"></div>
+                                <a class="pl-menu-item" href="/portal/admin/settings" @onclick="() => _userOpen = false"><Icon Name="sliders" Size="15" /> Portal settings</a>
+                                <a class="pl-menu-item" href="/portal/admin/announcements" @onclick="() => _userOpen = false"><Icon Name="bell" Size="15" /> Manage announcements</a>
                             }
                             @if (_hasWorkspace)
                             {
-                                <a class="dropdown-item" href="/" @onclick="() => _userOpen = false"><Icon Name="grid" Size="16" /> Open workspace</a>
+                                <a class="pl-menu-item" href="/" @onclick="() => _userOpen = false"><Icon Name="grid" Size="15" /> Open workspace</a>
                             }
-                            <div class="dropdown-divider"></div>
-                            <button class="dropdown-item danger" @onclick="SignOut"><Icon Name="log-out" Size="16" /> Sign out</button>
+                            <div class="pl-menu-divider"></div>
+                            <button class="pl-menu-item danger" @onclick="SignOut"><Icon Name="log-out" Size="15" /> Sign out</button>
                         </div>
                     }
                 </div>
-                <button class="icon-btn portal-menu-btn" title="Menu" aria-label="Toggle navigation" aria-expanded="@_menuOpen" @onclick="() => _menuOpen = !_menuOpen">
+
+                <button class="pl-icon-btn pl-menu-btn" title="Menu" aria-label="Toggle navigation" aria-expanded="@_menuOpen" @onclick="() => _menuOpen = !_menuOpen">
                     <Icon Name="@(_menuOpen ? "x" : "menu")" />
                 </button>
             </div>
@@ -76,7 +139,7 @@
 
     @if (_menuOpen)
     {
-        <div class="portal-menu-backdrop" @onclick="CloseMenu"></div>
+        <div class="pl-backdrop" @onclick="CloseMenu"></div>
     }
 
     <main class="portal-main">
@@ -85,25 +148,43 @@
                 @Body
             </ChildContent>
             <ErrorContent Context="exception">
-                <div class="card portal-container">
-                    <EmptyState Icon="alert-octagon" Title="Something went wrong" Text="An unexpected error occurred while loading this page. The error was logged – please try again.">
-                        <div class="flex gap-2 justify-center">
-                            <button class="btn btn-primary" @onclick="Recover"><Icon Name="refresh" Size="16" /> Try again</button>
-                            <a class="btn btn-secondary" href="/portal">Back to the portal</a>
-                        </div>
-                    </EmptyState>
+                <div class="portal-container" style="padding-top:40px">
+                    <div class="pcard">
+                        <EmptyState Icon="alert-octagon" Title="Something went wrong" Text="An unexpected error occurred while loading this page. The error was logged – please try again.">
+                            <div class="flex gap-2 justify-center">
+                                <button class="pbtn pbtn-primary" @onclick="Recover"><Icon Name="refresh" Size="16" /> Try again</button>
+                                <a class="pbtn pbtn-outline" href="/portal">Back to the portal</a>
+                            </div>
+                        </EmptyState>
+                    </div>
                 </div>
             </ErrorContent>
         </ErrorBoundary>
     </main>
 
-    <footer class="portal-footer">
-        <div class="portal-footer-inner">
-            <span class="faint small">@Brand.ProductName Self-Service · Help when you need it</span>
-            <div class="flex gap-4 small">
-                <a href="/portal/knowledge">Knowledge</a>
-                <a href="/portal/catalog">Catalog</a>
-                <a href="/portal/my">My items</a>
+    <footer class="pl-footer">
+        <div class="pl-footer-inner">
+            <div class="pl-footer-brand">
+                <span class="pl-footer-name">@Brand.ProductName</span>
+                @if (!string.IsNullOrWhiteSpace(_settings?.FooterTagline))
+                {
+                    <span class="pl-footer-tagline">@_settings.FooterTagline</span>
+                }
+            </div>
+            <div class="pl-footer-links">
+                <span class="pl-status @_status.Tone"><span class="pl-status-dot"></span>@_status.Text</span>
+                @if (PortalSettingsModel.SafeLink(_settings?.ContactUrl) is { } contact)
+                {
+                    <a href="@contact">Contact</a>
+                }
+                @if (PortalSettingsModel.SafeLink(_settings?.PrivacyUrl) is { } privacy)
+                {
+                    <a href="@privacy" rel="noopener">Privacy</a>
+                }
+                @if (PortalSettingsModel.SafeLink(_settings?.AccessibilityUrl) is { } accessibility)
+                {
+                    <a href="@accessibility" rel="noopener">Accessibility</a>
+                }
             </div>
         </div>
     </footer>
@@ -111,15 +192,6 @@
 <ToastHost />
 
 @code {
-    private static readonly PortalNavLink[] s_links =
-    [
-        new("Home", "/portal", "home"),
-        new("Catalog", "/portal/catalog", "shopping-cart"),
-        new("Knowledge", "/portal/knowledge", "book-open"),
-        new("My items", "/portal/my", "inbox"),
-        new("Approvals", "/portal/approvals", "check-square"),
-    ];
-
     /// <summary>Permissions that indicate access to the fulfiller workspace (sidebar application).</summary>
     private static readonly string[] s_workspacePermissions =
     [
@@ -128,15 +200,34 @@
     ];
 
     private ErrorBoundary? _errorBoundary;
+    private PortalSettingsModel? _settings;
+    private IReadOnlyList<PortalAnnouncementView> _announcements = [];
+    private (string Text, string Tone) _status = ("All systems operational", "success");
     private bool _menuOpen;
     private bool _userOpen;
+    private bool _bellOpen;
     private bool _canManage;
     private bool _hasWorkspace;
     private int _pendingApprovals;
-    private string _theme = "dark";
+    private int _openItems;
+    private string _theme = "light";
 
     /// <summary>Gets or sets the cascading authentication state.</summary>
     [CascadingParameter] private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    private int NotificationCount => _pendingApprovals + _announcements.Count;
+
+    private bool IsCatalogActive
+    {
+        get
+        {
+            var path = CurrentPath;
+            return path is "/portal" or "/portal/" || path.StartsWith("/portal/catalog", StringComparison.OrdinalIgnoreCase)
+                   || path.StartsWith("/portal/search", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private string CurrentPath => "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
@@ -152,6 +243,7 @@
             }
         }
 
+        await Brand.RefreshAsync(BrandingService);
         if (CurrentUser.UserId is { } userId)
         {
             var granted = await PermissionService.GetUserPermissionsAsync(userId);
@@ -159,7 +251,14 @@
             _hasWorkspace = s_workspacePermissions.Any(p => PermissionMatcher.IsGranted(granted, p));
         }
 
-        await RefreshApprovalsAsync();
+        _settings = (await PortalSettings.GetAsync()).Value;
+        _announcements = (await Announcements.GetLiveAsync()).Value ?? [];
+        _status = _announcements.Any(a => a.Kind == PortalAnnouncementKind.Outage)
+            ? ("Service disruption", "danger")
+            : _announcements.Any(a => a.Kind == PortalAnnouncementKind.Maintenance)
+                ? ("Maintenance in progress", "warning")
+                : ("All systems operational", "success");
+        await RefreshCountsAsync();
     }
 
     /// <inheritdoc />
@@ -176,16 +275,22 @@
     /// <inheritdoc />
     public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
 
+    private static string ToneOf(PortalAnnouncementKind kind) => kind switch
+    {
+        PortalAnnouncementKind.Outage => "danger",
+        PortalAnnouncementKind.Maintenance => "warning",
+        PortalAnnouncementKind.Success => "success",
+        _ => "info",
+    };
+
     private bool IsActive(string route)
     {
-        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
-        return route == "/portal"
-            ? path.Equals("/portal", StringComparison.OrdinalIgnoreCase) || path.Equals("/portal/", StringComparison.OrdinalIgnoreCase)
-            : path.StartsWith(route, StringComparison.OrdinalIgnoreCase)
-              || (route == "/portal/my" && (path.StartsWith("/portal/incidents", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/portal/requests", StringComparison.OrdinalIgnoreCase)));
+        var path = CurrentPath;
+        return path.StartsWith(route, StringComparison.OrdinalIgnoreCase)
+               || (route == "/portal/my" && (path.StartsWith("/portal/incidents", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/portal/requests", StringComparison.OrdinalIgnoreCase)));
     }
 
-    private async Task RefreshApprovalsAsync()
+    private async Task RefreshCountsAsync()
     {
         if (CurrentUser.UserId is null)
         {
@@ -194,6 +299,19 @@
 
         var stats = await ApprovalInbox.GetStatsAsync();
         _pendingApprovals = stats.Succeeded && stats.Value is not null ? stats.Value.Pending : 0;
+        _openItems = (await Home.CountOpenItemsAsync()).Value;
+    }
+
+    private void ToggleBell()
+    {
+        _bellOpen = !_bellOpen;
+        _userOpen = false;
+    }
+
+    private void ToggleUser()
+    {
+        _userOpen = !_userOpen;
+        _bellOpen = false;
     }
 
     private void CloseMenu() => _menuOpen = false;
@@ -202,7 +320,8 @@
 
     private async Task ToggleThemeAsync()
     {
-        _theme = _theme == "light" ? "dark" : "light";
+        _theme = _theme == "dark" ? "light" : "dark";
+        _userOpen = false;
         await JS.InvokeVoidAsync("servora.setTheme", _theme);
     }
 
@@ -212,10 +331,11 @@
     {
         _menuOpen = false;
         _userOpen = false;
+        _bellOpen = false;
         _errorBoundary?.Recover();
         _ = InvokeAsync(async () =>
         {
-            await RefreshApprovalsAsync();
+            await RefreshCountsAsync();
             StateHasChanged();
         });
     }

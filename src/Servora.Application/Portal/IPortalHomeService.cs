@@ -10,6 +10,11 @@ public interface IPortalHomeService
     /// <returns>The data.</returns>
     Task<Result<PortalHomeData>> GetHomeAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Counts the current user's open requests and incidents (navigation badge).</summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of open items.</returns>
+    Task<Result<int>> CountOpenItemsAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Searches published knowledge, orderable catalog items and the user's own items.</summary>
     /// <param name="query">The free-text query.</param>
     /// <param name="take">The maximum number of results per section (1..20).</param>

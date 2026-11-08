@@ -1,0 +1,75 @@
+@* Catalog item card in the reference style: image or icon panel with teaser, badge, favourite heart, category eyebrow,
+   title, description, delivery line, price and the configure / request action. *@
+<article class="pspot @(Compact ? "compact" : null)">
+    <a class="pspot-media @(Item.ImageUrl is null ? "panel" : "image")" href="@Route" tabindex="-1" aria-hidden="true">
+        @if (Item.ImageUrl is { } image)
+        {
+            <img src="@image" alt="" loading="lazy" />
+        }
+        else
+        {
+            <span class="pspot-panel-icon"><PortalGlyph Name="@Item.Icon" Size="@(Compact ? 24 : 30)" StrokeWidth="1.6" /></span>
+            @if ((Item.Teaser ?? Item.Subtitle) is { Length: > 0 } headline)
+            {
+                <span class="pspot-panel-text">
+                    <span class="pspot-teaser">@headline</span>
+                    @if (Item.Teaser is not null && !string.IsNullOrWhiteSpace(Item.TeaserText))
+                    {
+                        <span class="pspot-teaser-sub">@Item.TeaserText</span>
+                    }
+                </span>
+            }
+        }
+    </a>
+    @if (Badge is { } badge)
+    {
+        <span class="pspot-badge">@badge</span>
+    }
+    @if (OnToggleFavorite.HasDelegate)
+    {
+        <button type="button" class="pspot-heart @(IsFavorite ? "on" : null)" title="@(IsFavorite ? "Remove from favourites" : "Save as favourite")"
+                aria-pressed="@IsFavorite" @onclick="() => OnToggleFavorite.InvokeAsync(Item)">
+            <PortalGlyph Name="heart" Size="15" Filled="IsFavorite" />
+        </button>
+    }
+    <div class="pspot-body">
+        @if (!string.IsNullOrWhiteSpace(Item.CategoryName))
+        {
+            <div class="peyebrow">@Item.CategoryName</div>
+        }
+        <h3 class="pspot-title"><a href="@Route">@Item.Name</a></h3>
+        @if (!string.IsNullOrWhiteSpace(Item.ShortDescription))
+        {
+            <p class="pspot-desc">@Item.ShortDescription</p>
+        }
+        <div class="pspot-delivery"><Icon Name="@(Item.DeliveryDays <= 0 && string.IsNullOrWhiteSpace(Item.DeliveryText) ? "zap" : "clock")" Size="14" /> @PortalFormat.DeliveryLabel(Item)</div>
+        <div class="pspot-foot">
+            <span class="pspot-price">@PortalFormat.PriceLabel(Item, Currency)</span>
+            <a class="pspot-action" href="@Route">@(Item.HasPriceOptions ? "Configure" : "Request") <Icon Name="arrow-right" Size="14" /></a>
+        </div>
+    </div>
+</article>
+
+@code {
+    /// <summary>Gets or sets the item.</summary>
+    [Parameter, EditorRequired] public CatalogItemCard Item { get; set; } = default!;
+
+    /// <summary>Gets or sets the currency code used for prices.</summary>
+    [Parameter] public string? Currency { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the item is the user's favourite.</summary>
+    [Parameter] public bool IsFavorite { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the item is the most ordered one (shows a "Most ordered" badge).</summary>
+    [Parameter] public bool IsMostOrdered { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the compact variant (catalog grid) is rendered.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    /// <summary>Raised when the favourite heart is clicked.</summary>
+    [Parameter] public EventCallback<CatalogItemCard> OnToggleFavorite { get; set; }
+
+    private string Route => $"/portal/catalog/{Item.Id}";
+
+    private string? Badge => IsMostOrdered ? "Most ordered" : string.IsNullOrWhiteSpace(Item.BadgeText) ? null : Item.BadgeText;
+}

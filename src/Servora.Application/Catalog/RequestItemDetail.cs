@@ -24,8 +24,14 @@ public sealed record RequestItemDetail
     /// <summary>Gets the quantity.</summary>
     public int Quantity { get; init; }
 
-    /// <summary>Gets the unit price.</summary>
+    /// <summary>Gets the unit price (monthly price for monthly billed items).</summary>
     public decimal UnitPrice { get; init; }
+
+    /// <summary>Gets how the unit price is billed.</summary>
+    public CatalogBillingType BillingType { get; init; }
+
+    /// <summary>Gets the contract term in months of monthly billed items.</summary>
+    public int? TermMonths { get; init; }
 
     /// <summary>Gets the state.</summary>
     public RequestItemState State { get; init; }

@@ -1268,6 +1268,31 @@ namespace Servora.Persistence.SqlServer.Migrations
                     b.ToTable("sc_category", (string)null);
                 });
 
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogFavorite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CatalogItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogItemId");
+
+                    b.HasIndex("UserId", "CatalogItemId")
+                        .IsUnique();
+
+                    b.ToTable("sc_favorite", (string)null);
+                });
+
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1283,8 +1308,19 @@ namespace Servora.Persistence.SqlServer.Migrations
                     b.Property<bool>("ApprovalRequired")
                         .HasColumnType("bit");
 
+                    b.Property<string>("BadgeText")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("BillingType")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -1296,9 +1332,24 @@ namespace Servora.Persistence.SqlServer.Migrations
                     b.Property<int>("DeliveryDays")
                         .HasColumnType("int");
 
+                    b.Property<string>("DeliveryMarkdown")
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DeliveryText")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(8000)
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DetailsMarkdown")
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("FeaturedOrder")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("FulfillmentGroupId")
                         .HasColumnType("uniqueidentifier");
@@ -1307,12 +1358,22 @@ namespace Servora.Persistence.SqlServer.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<string>("Highlights")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("Icon")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<Guid?>("ImageId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsFeatured")
                         .HasColumnType("bit");
 
                     b.Property<bool>("ManagerApproval")
@@ -1322,6 +1383,10 @@ namespace Servora.Persistence.SqlServer.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal>("OneTimePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("Order")
                         .HasColumnType("int");
@@ -1333,6 +1398,21 @@ namespace Servora.Persistence.SqlServer.Migrations
                     b.Property<string>("ShortDescription")
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Subtitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Teaser")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("TeaserText")
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)");
+
+                    b.Property<int?>("TermMonths")
+                        .HasColumnType("int");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
@@ -1351,9 +1431,57 @@ namespace Servora.Persistence.SqlServer.Migrations
 
                     b.HasIndex("IsActive");
 
+                    b.HasIndex("IsFeatured");
+
                     b.HasIndex("Name");
 
                     b.ToTable("sc_cat_item", (string)null);
+                });
+
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogSection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CatalogItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogItemId", "Order");
+
+                    b.ToTable("sc_item_section", (string)null);
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogTask", b =>
@@ -1533,6 +1661,13 @@ namespace Servora.Persistence.SqlServer.Migrations
                     b.Property<int>("Order")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("PriceDelta")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid?>("SectionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("Type")
                         .HasColumnType("int");
 
@@ -1548,6 +1683,8 @@ namespace Servora.Persistence.SqlServer.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SectionId");
 
                     b.HasIndex("CatalogItemId", "Name")
                         .IsUnique();
@@ -1687,6 +1824,9 @@ namespace Servora.Persistence.SqlServer.Migrations
                     b.Property<Guid?>("AssignmentGroupId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("BillingType")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("CatalogItemId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1725,6 +1865,10 @@ namespace Servora.Persistence.SqlServer.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<decimal>("OneTimePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<DateTimeOffset>("OpenedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -1754,6 +1898,9 @@ namespace Servora.Persistence.SqlServer.Migrations
                     b.Property<string>("Tags")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("TermMonths")
+                        .HasColumnType("int");
 
                     b.Property<decimal>("UnitPrice")
                         .HasPrecision(18, 2)
@@ -5006,12 +5153,36 @@ namespace Servora.Persistence.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogFavorite", b =>
+                {
+                    b.HasOne("Servora.Domain.Catalog.CatalogItem", null)
+                        .WithMany()
+                        .HasForeignKey("CatalogItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Servora.Domain.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogItem", b =>
                 {
                     b.HasOne("Servora.Domain.Catalog.CatalogCategory", null)
                         .WithMany()
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogSection", b =>
+                {
+                    b.HasOne("Servora.Domain.Catalog.CatalogItem", null)
+                        .WithMany()
+                        .HasForeignKey("CatalogItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogTask", b =>
@@ -5030,6 +5201,10 @@ namespace Servora.Persistence.SqlServer.Migrations
                         .HasForeignKey("CatalogItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Servora.Domain.Catalog.CatalogSection", null)
+                        .WithMany()
+                        .HasForeignKey("SectionId");
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.RequestItem", b =>

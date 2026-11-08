@@ -7,7 +7,7 @@
     font-size: 12px;
     font-weight: 700;
     color: #fff;
-    background: var(--gradient);
+    background: var(--p-primary, #1b4535);
 }
 
 .preport-suggest {
@@ -15,7 +15,7 @@
     padding: 12px 14px;
     border-radius: var(--r);
     border: 1px solid rgba(34, 211, 238, .3);
-    background: var(--accent-soft);
+    background: var(--p-tint, #eef5f0);
     color: var(--text);
     animation: fade-up .2s var(--ease);
 }
@@ -58,7 +58,7 @@
 .preport-option.selected {
     border-color: var(--primary);
     background: var(--primary-soft);
-    box-shadow: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-primary, #1b4535) 16%, transparent);
 }
 
 .preport-option > span:last-child { display: flex; flex-direction: column; gap: 2px; }

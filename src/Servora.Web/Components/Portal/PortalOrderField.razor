@@ -1,0 +1,198 @@
+@* One question of a portal order form in the reference style: radio cards with price impacts for priced choices,
+   selects, checkbox cards for priced accessories, confirmation checkboxes, text areas with a character counter, date
+   and text inputs. Values use the CatalogVariableValidator formats (dates yyyy-MM-dd, booleans true/false, users as
+   GUID). *@
+<div class="pof @(IsWide(Definition) ? "wide" : null) @(Error is not null ? "invalid" : null)">
+    @switch (Kind)
+    {
+        case FieldKind.RadioCards:
+            <div class="pof-label" id="@LabelId">@Definition.Label<span class="pof-req">@(Definition.Mandatory ? " *" : null)</span></div>
+            <div class="pof-radios" role="radiogroup" aria-labelledby="@LabelId">
+                @foreach (var option in Definition.Choices)
+                {
+                    var selected = string.Equals(option.Label, Value, StringComparison.OrdinalIgnoreCase);
+                    <button type="button" role="radio" aria-checked="@selected" class="pof-radio @(selected ? "selected" : null)" disabled="@Disabled" @onclick="() => SetAsync(option.Label)">
+                        <span class="pof-radio-dot" aria-hidden="true"></span>
+                        <span class="pof-radio-text">
+                            <span class="pof-radio-label">@option.Label</span>
+                            <span class="pof-radio-sub">@(option.PriceDelta != 0 ? PortalFormat.Delta(option.PriceDelta, Monthly, Currency) : option.Description ?? "Included in the base price")</span>
+                            @if (option.PriceDelta != 0 && !string.IsNullOrWhiteSpace(option.Description))
+                            {
+                                <span class="pof-radio-sub">@option.Description</span>
+                            }
+                        </span>
+                        @if (selected)
+                        {
+                            <span class="pof-radio-tag">Selected</span>
+                        }
+                    </button>
+                }
+            </div>
+            break;
+
+        case FieldKind.Select:
+            <label class="pof-label" for="@InputId">@Definition.Label<span class="pof-req">@(Definition.Mandatory ? " *" : null)</span></label>
+            <div class="pof-control pof-select">
+                <select id="@InputId" value="@(Value ?? string.Empty)" disabled="@Disabled" @onchange="e => SetAsync(e.Value?.ToString())">
+                    <option value="">— Select —</option>
+                    @foreach (var option in Definition.Choices)
+                    {
+                        <option value="@option.Label">@option.Label@(option.PriceDelta != 0 ? $" ({PortalFormat.Delta(option.PriceDelta, Monthly, Currency)})" : string.Empty)</option>
+                    }
+                </select>
+                <Icon Name="chevron-down" Size="16" Class="pof-adorn" />
+            </div>
+            break;
+
+        case FieldKind.CheckCard:
+            <div class="pof-label">@SectionLabel</div>
+            <label class="pof-check-card @(IsChecked ? "selected" : null)">
+                <input type="checkbox" checked="@IsChecked" disabled="@Disabled" @onchange="OnCheckAsync" />
+                <span class="pof-check-box" aria-hidden="true"><Icon Name="check" Size="13" StrokeWidth="3" /></span>
+                <span class="pof-check-icon"><Icon Name="plug" Size="18" /></span>
+                <span class="pof-check-text">
+                    <span class="pof-check-label">@Definition.Label</span>
+                    @if (!string.IsNullOrWhiteSpace(Definition.HelpText))
+                    {
+                        <span class="pof-check-help">@Definition.HelpText</span>
+                    }
+                </span>
+                <span class="pof-check-price">@PortalFormat.Delta(Definition.PriceDelta ?? 0, Monthly, Currency)</span>
+            </label>
+            break;
+
+        case FieldKind.Checkbox:
+            <label class="pof-check-line">
+                <input type="checkbox" checked="@IsChecked" disabled="@Disabled" @onchange="OnCheckAsync" />
+                <span class="pof-check-box" aria-hidden="true"><Icon Name="check" Size="13" StrokeWidth="3" /></span>
+                <span>@Definition.Label<span class="pof-req">@(Definition.Mandatory ? " *" : null)</span></span>
+            </label>
+            break;
+
+        case FieldKind.Textarea:
+            <div class="pof-label-row">
+                <label class="pof-label" for="@InputId">@Definition.Label<span class="pof-req">@(Definition.Mandatory ? " *" : null)</span></label>
+                <span class="pof-counter">@(Value?.Length ?? 0) / @MaxLength</span>
+            </div>
+            <textarea id="@InputId" class="pof-input" rows="4" maxlength="@MaxLength" disabled="@Disabled" @bind="BoundValue" @bind:event="oninput"></textarea>
+            break;
+
+        case FieldKind.User:
+            <label class="pof-label">@Definition.Label<span class="pof-req">@(Definition.Mandatory ? " *" : null)</span></label>
+            <UserPicker Value="@UserValue" ValueChanged="v => SetAsync(v?.ToString())" Disabled="Disabled" />
+            break;
+
+        default:
+            <label class="pof-label" for="@InputId">@Definition.Label<span class="pof-req">@(Definition.Mandatory ? " *" : null)</span></label>
+            <div class="pof-control">
+                @if (Definition.Type == CatalogVariableType.Date)
+                {
+                    <input id="@InputId" class="pof-input" type="date" value="@Value" disabled="@Disabled" @onchange="e => SetAsync(e.Value?.ToString())" />
+                }
+                else if (Definition.Type == CatalogVariableType.Number)
+                {
+                    <input id="@InputId" class="pof-input" type="number" step="any" value="@Value" min="@Definition.MinValue" max="@Definition.MaxValue" disabled="@Disabled" @onchange="e => SetAsync(e.Value?.ToString())" />
+                }
+                else
+                {
+                    <input id="@InputId" class="pof-input @(LooksLikeLocation ? "with-adorn" : null)" value="@Value" maxlength="@MaxLength" disabled="@Disabled" @onchange="e => SetAsync(e.Value?.ToString())" />
+                    @if (LooksLikeLocation)
+                    {
+                        <Icon Name="map-pin" Size="16" Class="pof-adorn" />
+                    }
+                }
+            </div>
+            break;
+    }
+
+    @if (Error is not null)
+    {
+        <div class="pof-error" role="alert"><Icon Name="alert-circle" Size="13" /> @Error</div>
+    }
+    else if (!string.IsNullOrWhiteSpace(Definition.HelpText) && Kind is not FieldKind.CheckCard)
+    {
+        <div class="pof-help">@Definition.HelpText</div>
+    }
+</div>
+
+@code {
+    private enum FieldKind
+    {
+        Input,
+        RadioCards,
+        Select,
+        CheckCard,
+        Checkbox,
+        Textarea,
+        User,
+    }
+
+    /// <summary>Gets or sets the variable definition.</summary>
+    [Parameter, EditorRequired] public CatalogVariableDefinition Definition { get; set; } = default!;
+
+    /// <summary>Gets or sets the current value.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Raised when the value changes.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Gets or sets the validation error.</summary>
+    [Parameter] public string? Error { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the input is disabled.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Gets or sets the currency code used for price impacts.</summary>
+    [Parameter] public string? Currency { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the item is billed monthly.</summary>
+    [Parameter] public bool Monthly { get; set; }
+
+    /// <summary>Gets or sets the label shown above an accessory card (for example "Optional accessories").</summary>
+    [Parameter] public string SectionLabel { get; set; } = "Optional accessories";
+
+    private FieldKind Kind => KindOf(Definition);
+
+    private string InputId => $"pof-{Definition.Name}";
+
+    private string LabelId => $"pof-label-{Definition.Name}";
+
+    private bool IsChecked => Value == "true";
+
+    private int MaxLength => Definition.MaxLength ?? (Definition.Type == CatalogVariableType.MultilineText ? CatalogVariableValidator.DefaultMultilineLength : CatalogVariableValidator.DefaultTextLength);
+
+    private bool LooksLikeLocation => Definition.Name.Contains("location", StringComparison.OrdinalIgnoreCase);
+
+    private Guid? UserValue => Guid.TryParse(Value, out var id) ? id : null;
+
+    private string? BoundValue
+    {
+        get => Value;
+        set => _ = SetAsync(value);
+    }
+
+    /// <summary>Gets whether a variable spans both columns of the form grid.</summary>
+    /// <param name="definition">The variable.</param>
+    /// <returns><see langword="true"/> for radio cards, check boxes, cards and text areas.</returns>
+    public static bool IsWide(CatalogVariableDefinition definition) =>
+        KindOf(definition) is FieldKind.RadioCards or FieldKind.CheckCard or FieldKind.Checkbox or FieldKind.Textarea;
+
+    private static FieldKind KindOf(CatalogVariableDefinition definition) => definition.Type switch
+    {
+        CatalogVariableType.Choice when definition.Choices.Count is > 0 and <= 4 && definition.Choices.Any(c => c.PriceDelta != 0 || c.Description is not null) => FieldKind.RadioCards,
+        CatalogVariableType.Choice => FieldKind.Select,
+        CatalogVariableType.Boolean when definition.PriceDelta is { } delta && delta != 0 => FieldKind.CheckCard,
+        CatalogVariableType.Boolean => FieldKind.Checkbox,
+        CatalogVariableType.MultilineText => FieldKind.Textarea,
+        CatalogVariableType.UserReference => FieldKind.User,
+        _ => FieldKind.Input,
+    };
+
+    private Task OnCheckAsync(ChangeEventArgs e) => SetAsync(e.Value is true ? "true" : "false");
+
+    private async Task SetAsync(string? value)
+    {
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+}

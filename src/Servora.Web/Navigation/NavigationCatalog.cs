@@ -68,6 +68,7 @@ public static class NavigationCatalog
             new("System Settings", "/admin/settings", "sliders", Permissions.Configuration.ManageSettings, "properties branding smtp email"),
             new("Mail Outbox", "/admin/settings/outbox", "send", Permissions.Configuration.ManageSettings, "email queue delivery retry smtp"),
             new("Portal Announcements", "/portal/admin/announcements", "bell", Permissions.Portal.Manage, "portal banner news"),
+            new("Portal Settings", "/portal/admin/settings", "sliders", Permissions.Portal.Manage, "portal hero support footer links branding"),
             new("Secrets", "/admin/secrets", "key", Permissions.Configuration.ManageSecrets, "credentials vault"),
             new("API Keys", "/admin/api-keys", "braces", Permissions.Api.ManageApiKeys, "tokens rest"),
             new("MCP Server", "/admin/mcp", "bot", Permissions.Mcp.Manage, "model context protocol tools"),

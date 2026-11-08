@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Servora.Application.Activity;
 using Servora.Application.Approvals;
 using Servora.Application.Common;
+using Servora.Application.Configuration;
 using Servora.Application.Platform;
 using Servora.Application.Security;
 using Servora.Domain.Approvals;
@@ -21,6 +23,7 @@ namespace Servora.Application.Catalog;
 /// <param name="activity">The activity stream service.</param>
 /// <param name="approvals">The approval engine.</param>
 /// <param name="fulfillment">The fulfilment engine.</param>
+/// <param name="images">The catalog image store.</param>
 public sealed class CatalogOrderService(
     IAppDbContextFactory dbFactory,
     ICurrentUser currentUser,
@@ -28,9 +31,11 @@ public sealed class CatalogOrderService(
     INumberSequenceService numbers,
     IActivityService activity,
     ApprovalEngine approvals,
-    CatalogFulfillmentEngine fulfillment) : ICatalogOrderService
+    CatalogFulfillmentEngine fulfillment,
+    ICatalogImageStore images) : ICatalogOrderService
 {
     private const int MaxQuantity = 100;
+    private const int MaxFavorites = 500;
 
     /// <inheritdoc />
     public async Task<Result<IReadOnlyList<CatalogCategoryModel>>> GetCategoriesAsync(CancellationToken cancellationToken = default)
@@ -78,13 +83,16 @@ public sealed class CatalogOrderService(
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
-            query = query.Where(i => i.Name.ToLower().Contains(term) || (i.ShortDescription != null && i.ShortDescription.ToLower().Contains(term)));
+            query = query.Where(i => i.Name.ToLower().Contains(term)
+                || (i.ShortDescription != null && i.ShortDescription.ToLower().Contains(term))
+                || (i.Subtitle != null && i.Subtitle.ToLower().Contains(term)));
         }
 
         var rows = await query.OrderBy(i => i.Order).ThenBy(i => i.Name).Take(Math.Clamp(take, 1, 200)).ToListAsync(cancellationToken);
         var categoryIds = rows.Where(r => r.CategoryId.HasValue).Select(r => r.CategoryId!.Value).Distinct().ToList();
         var names = await db.Set<CatalogCategory>().AsNoTracking().Where(c => categoryIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
-        IReadOnlyList<CatalogItemCard> cards = rows.Select(r => ToCard(r, r.CategoryId is { } id ? names.GetValueOrDefault(id) : null)).ToList();
+        var priced = await PricedItemIdsAsync(db, rows.Select(r => r.Id).ToList(), cancellationToken);
+        IReadOnlyList<CatalogItemCard> cards = rows.Select(r => ToCard(r, r.CategoryId is { } id ? names.GetValueOrDefault(id) : null, priced.Contains(r.Id))).ToList();
         return Result<IReadOnlyList<CatalogItemCard>>.Success(cards);
     }
 
@@ -103,7 +111,55 @@ public sealed class CatalogOrderService(
             return Result<CatalogOrderForm>.NotFound("The catalog item is not available.");
         }
 
-        return Result<CatalogOrderForm>.Success(new CatalogOrderForm(ToCard(item, categoryName), item.Description, variables));
+        var sections = await db.Set<CatalogSection>().AsNoTracking()
+            .Where(s => s.CatalogItemId == item.Id)
+            .OrderBy(s => s.Order).ThenBy(s => s.Title)
+            .Take(CatalogAdminService.MaxSectionsPerItem)
+            .Select(s => new CatalogSectionModel { Id = s.Id, Title = s.Title, Description = s.Description, Order = s.Order })
+            .ToListAsync(cancellationToken);
+
+        User? requester = null;
+        var isFavorite = false;
+        if (currentUser.UserId is { } userId)
+        {
+            requester = await db.Set<User>().AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+            isFavorite = await db.Set<CatalogFavorite>().AnyAsync(f => f.UserId == userId && f.CatalogItemId == item.Id, cancellationToken);
+        }
+
+        var approver = item.ApprovalRequired ? await DescribeApproverAsync(db, item, requester, cancellationToken) : null;
+        var priced = variables.Any(v => v.PriceDelta is not null || v.Choices.Any(c => c.PriceDelta != 0m));
+        return Result<CatalogOrderForm>.Success(new CatalogOrderForm(ToCard(item, categoryName, priced), item.Description, variables)
+        {
+            Sections = sections,
+            Highlights = CatalogHighlight.ParseMany(item.Highlights),
+            DetailsMarkdown = item.DetailsMarkdown,
+            DeliveryMarkdown = item.DeliveryMarkdown,
+            Pricing = CatalogPricing.From(item),
+            ApproverName = approver,
+            IsFavorite = isFavorite,
+            CanOrderOnBehalf = await currentUser.HasPermissionAsync(Permissions.Requests.Write, cancellationToken),
+            RequesterName = requester?.DisplayName ?? currentUser.DisplayName,
+            RequesterDepartment = requester?.Department,
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<CatalogPriceQuote>> QuoteAsync(Guid catalogItemId, IReadOnlyDictionary<string, string?> variables, int quantity = 1, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(variables);
+        if (!await CanBrowseAsync(cancellationToken))
+        {
+            return Result<CatalogPriceQuote>.Forbidden();
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var (item, definitions, _) = await LoadItemAsync(db, catalogItemId, cancellationToken);
+        if (item is null || !item.IsActive)
+        {
+            return Result<CatalogPriceQuote>.NotFound("The catalog item is not available.");
+        }
+
+        return Result<CatalogPriceQuote>.Success(CatalogPriceCalculator.Calculate(CatalogPricing.From(item), definitions, variables, Math.Clamp(quantity, 1, MaxQuantity)));
     }
 
     /// <inheritdoc />
@@ -182,6 +238,9 @@ public sealed class CatalogOrderService(
             }
         }
 
+        // The price is always computed from the stored catalog definition and the validated answers – never taken
+        // from the client.
+        var quote = CatalogPriceCalculator.Calculate(CatalogPricing.From(item), definitions, validation.Values, quantity);
         var now = clock.UtcNow;
         var due = now.AddDays(item.DeliveryDays);
         var onBehalf = requestedFor != currentUser.UserId;
@@ -194,7 +253,7 @@ public sealed class CatalogOrderService(
             OpenedAt = now,
             DueAt = due,
             State = RequestState.Submitted,
-            TotalPrice = item.Price * quantity,
+            TotalPrice = quote.Total,
             Impact = Impact.Low,
             Urgency = Urgency.Low,
             Priority = PriorityMatrix.Calculate(Impact.Low, Urgency.Low),
@@ -211,7 +270,10 @@ public sealed class CatalogOrderService(
             OpenedAt = now,
             DueAt = due,
             Quantity = quantity,
-            UnitPrice = item.Price,
+            UnitPrice = quote.UnitPrice,
+            BillingType = quote.BillingType,
+            TermMonths = quote.TermMonths,
+            OneTimePrice = quote.UnitOneTimePrice,
             VariablesJson = JsonSerializer.Serialize(validation.Values),
             AssignmentGroupId = item.FulfillmentGroupId,
             State = item.ApprovalRequired ? RequestItemState.PendingApproval : RequestItemState.InFulfillment,
@@ -232,7 +294,10 @@ public sealed class CatalogOrderService(
 
         if (item.ApprovalRequired)
         {
-            var reason = $"{item.Name}{(quantity > 1 ? $" ×{quantity}" : string.Empty)} for {recipient.DisplayName}" + (item.Price > 0 ? $" · {request.TotalPrice:0.00}" : string.Empty);
+            var price = quote.Total > 0
+                ? $" · {quote.Total.ToString("0.00", CultureInfo.InvariantCulture)}{(quote.IsMonthly ? " / month" : string.Empty)}"
+                : string.Empty;
+            var reason = $"{item.Name}{(quantity > 1 ? $" ×{quantity}" : string.Empty)} for {recipient.DisplayName}{price}";
             var policy = item.ApprovalMode == ApprovalMode.AllApprovers ? ApprovalPolicy.AllApprovers : ApprovalPolicy.AnyApprover;
             var requested = await approvals.RequestAsync(new ApprovalRequest(TableNames.RequestItem, requestItem.Id, approverUsers, approverGroups, policy, reason), cancellationToken);
             if (!requested.Succeeded)
@@ -257,7 +322,117 @@ public sealed class CatalogOrderService(
             item.ApprovalRequired ? RequestItemState.PendingApproval : RequestItemState.InFulfillment));
     }
 
-    private static CatalogItemCard ToCard(CatalogItem item, string? categoryName) => new()
+    /// <inheritdoc />
+    public async Task<Result<IReadOnlyList<Guid>>> GetFavoriteIdsAsync(CancellationToken cancellationToken = default)
+    {
+        if (currentUser.UserId is not { } userId || !await CanBrowseAsync(cancellationToken))
+        {
+            return Result<IReadOnlyList<Guid>>.Forbidden();
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        IReadOnlyList<Guid> ids = await db.Set<CatalogFavorite>().AsNoTracking()
+            .Where(f => f.UserId == userId)
+            .OrderByDescending(f => f.CreatedAt)
+            .Take(MaxFavorites)
+            .Select(f => f.CatalogItemId)
+            .ToListAsync(cancellationToken);
+        return Result<IReadOnlyList<Guid>>.Success(ids);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> SetFavoriteAsync(Guid catalogItemId, bool favorite, CancellationToken cancellationToken = default)
+    {
+        if (currentUser.UserId is not { } userId || !await CanBrowseAsync(cancellationToken))
+        {
+            return Result.Forbidden();
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var existing = await db.Set<CatalogFavorite>().FirstOrDefaultAsync(f => f.UserId == userId && f.CatalogItemId == catalogItemId, cancellationToken);
+        if (!favorite)
+        {
+            if (existing is not null)
+            {
+                db.Set<CatalogFavorite>().Remove(existing);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            return Result.Success();
+        }
+
+        if (existing is not null)
+        {
+            return Result.Success();
+        }
+
+        if (!await db.Set<CatalogItem>().AnyAsync(i => i.Id == catalogItemId && i.IsActive, cancellationToken))
+        {
+            return Result.NotFound("The catalog item is not available.");
+        }
+
+        if (await db.Set<CatalogFavorite>().CountAsync(f => f.UserId == userId, cancellationToken) >= MaxFavorites)
+        {
+            return Result.Invalid($"You can save at most {MaxFavorites} favourites.");
+        }
+
+        db.Set<CatalogFavorite>().Add(new CatalogFavorite { UserId = userId, CatalogItemId = catalogItemId, CreatedAt = clock.UtcNow });
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent request added the same favourite (unique index) – the desired state is reached.
+        }
+
+        return Result.Success();
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<CatalogImage>> OpenImageAsync(Guid imageId, CancellationToken cancellationToken = default)
+    {
+        if (!await CanBrowseAsync(cancellationToken))
+        {
+            return Result<CatalogImage>.Forbidden();
+        }
+
+        bool? isActive;
+        await using (var db = await dbFactory.CreateDbContextAsync(cancellationToken))
+        {
+            isActive = await db.Set<CatalogItem>().AsNoTracking().Where(i => i.ImageId == imageId).Select(i => (bool?)i.IsActive).FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (isActive is null || (isActive == false && !await currentUser.HasPermissionAsync(Permissions.Requests.ManageCatalog, cancellationToken)))
+        {
+            return Result<CatalogImage>.NotFound();
+        }
+
+        var stream = images.Open(imageId);
+        if (stream is null)
+        {
+            return Result<CatalogImage>.NotFound();
+        }
+
+        var header = new byte[LogoImageValidator.HeaderLength];
+        var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
+        var contentType = LogoImageValidator.DetectContentType(header.AsSpan(0, read));
+        if (contentType is null)
+        {
+            await stream.DisposeAsync();
+            return Result<CatalogImage>.NotFound();
+        }
+
+        stream.Position = 0;
+        return Result<CatalogImage>.Success(new CatalogImage(stream, contentType));
+    }
+
+    /// <summary>Creates the card of an item.</summary>
+    /// <param name="item">The item.</param>
+    /// <param name="categoryName">The category name.</param>
+    /// <param name="hasPriceOptions">Whether options can change the price.</param>
+    /// <returns>The card.</returns>
+    internal static CatalogItemCard ToCard(CatalogItem item, string? categoryName, bool hasPriceOptions) => new()
     {
         Id = item.Id,
         Name = item.Name,
@@ -266,9 +441,57 @@ public sealed class CatalogOrderService(
         CategoryId = item.CategoryId,
         CategoryName = categoryName,
         Price = item.Price,
+        BillingType = item.BillingType,
+        TermMonths = item.BillingType == CatalogBillingType.Monthly ? item.TermMonths : null,
+        OneTimePrice = item.BillingType == CatalogBillingType.Monthly ? item.OneTimePrice : 0m,
+        HasPriceOptions = hasPriceOptions,
         DeliveryDays = item.DeliveryDays,
+        DeliveryText = item.DeliveryText,
         ApprovalRequired = item.ApprovalRequired,
+        Subtitle = item.Subtitle,
+        BadgeText = item.BadgeText,
+        Code = item.Code,
+        ImageUrl = ICatalogImageStore.UrlOf(item.ImageId),
+        Teaser = item.Teaser,
+        TeaserText = item.TeaserText,
+        IsFeatured = item.IsFeatured,
+        FeaturedOrder = item.FeaturedOrder,
+        Order = item.Order,
     };
+
+    private static async Task<HashSet<Guid>> PricedItemIdsAsync(IAppDbContext db, List<Guid> itemIds, CancellationToken cancellationToken)
+    {
+        if (itemIds.Count == 0)
+        {
+            return [];
+        }
+
+        var candidates = await db.Set<CatalogVariable>().AsNoTracking()
+            .Where(v => itemIds.Contains(v.CatalogItemId) && (v.PriceDelta != null || (v.Options != null && v.Options.Contains("|"))))
+            .Select(v => new { v.CatalogItemId, v.Options, v.PriceDelta })
+            .Take(itemIds.Count * CatalogVariableValidator.MaxVariablesPerItem)
+            .ToListAsync(cancellationToken);
+        return candidates
+            .Where(v => (v.PriceDelta is { } delta && delta != 0m) || CatalogChoiceOption.ParseMany(v.Options).Any(o => o.PriceDelta != 0m))
+            .Select(v => v.CatalogItemId)
+            .ToHashSet();
+    }
+
+    private static async Task<string?> DescribeApproverAsync(IAppDbContext db, CatalogItem item, User? requester, CancellationToken cancellationToken)
+    {
+        if (item.ManagerApproval && requester?.ManagerId is { } managerId)
+        {
+            var manager = await db.Set<User>().AsNoTracking().Where(u => u.Id == managerId && u.IsActive).Select(u => u.DisplayName).FirstOrDefaultAsync(cancellationToken);
+            if (manager is not null)
+            {
+                return manager;
+            }
+        }
+
+        return item.ApprovalGroupId is { } groupId
+            ? await db.Set<Group>().AsNoTracking().Where(g => g.Id == groupId).Select(g => g.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
+    }
 
     private static async Task<(CatalogItem? Item, IReadOnlyList<CatalogVariableDefinition> Variables, string? CategoryName)> LoadItemAsync(IAppDbContext db, Guid itemId, CancellationToken cancellationToken)
     {

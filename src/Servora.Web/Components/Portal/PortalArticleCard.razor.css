@@ -10,7 +10,7 @@
 
 .part.card:hover {
     color: var(--text);
-    border-color: rgba(124, 108, 255, .45);
+    border-color: color-mix(in srgb, var(--p-primary, #1b4535) 40%, transparent);
     transform: translateY(-1px);
 }
 
@@ -28,8 +28,8 @@
     display: grid;
     place-items: center;
     flex-shrink: 0;
-    color: var(--accent);
-    background: var(--accent-soft);
+    color: var(--p-primary, #1b4535);
+    background: var(--p-tint, #eef5f0);
 }
 
 .part-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }

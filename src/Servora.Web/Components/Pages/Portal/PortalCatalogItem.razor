@@ -1,179 +1,409 @@
 @page "/portal/catalog/{ItemId:guid}"
-@* Order form of a catalog item: renders the item's variables (CatalogVariableInput), validates inline and orders for the
-   current user through ICatalogOrderService (approval and fulfilment are started by the catalog module). *@
+@* Catalog item page (reference design 2): header with image, badge, highlights and favourite; tabs for configuration,
+   details and delivery; numbered section cards built from the item's variables (who is it for, options with price
+   impacts, delivery); a sticky summary with the live price, approval note and "what happens next". The price shown
+   here is informational – ICatalogOrderService calculates it again from the catalog definition when ordering. *@
 @attribute [RequirePermission(Permissions.Portal.Access)]
 @inject ICatalogOrderService Catalog
+@inject IPortalSettingsService PortalSettings
 @inject ToastService Toasts
 
 <PageTitle>@(_form?.Item.Name ?? "Order") · @Brand.ProductName</PageTitle>
 
-<div class="portal-container">
-    @if (_loading)
-    {
-        <div class="portal-page-head"><Skeleton Lines="2" Height="22px" /></div>
-        <div class="card card-body"><Skeleton Lines="6" /></div>
-    }
-    else if (_form is null)
-    {
-        <div class="portal-page-head"></div>
-        <div class="card">
+@if (_loading)
+{
+    <div class="portal-container pi-loading">
+        <Skeleton Lines="1" Width="30%" />
+        <div class="pcard" style="padding:24px;margin-top:20px"><Skeleton Lines="6" /></div>
+    </div>
+}
+else if (_form is null)
+{
+    <div class="portal-container" style="padding-top:40px">
+        <div class="pcard">
             <EmptyState Icon="package" Title="This item is not available" Text="@(_error ?? "The catalog item does not exist or can no longer be ordered.")">
-                <a class="btn btn-primary" href="/portal/catalog"><Icon Name="arrow-left" Size="16" /> Back to the catalog</a>
+                <a class="pbtn pbtn-primary" href="/portal/catalog"><Icon Name="arrow-left" Size="16" /> Back to the catalog</a>
             </EmptyState>
         </div>
-    }
-    else if (_confirmation is not null)
-    {
-        <div class="portal-page-head"></div>
-        <div class="card porder-done">
-            <div class="porder-done-icon"><Icon Name="check" Size="34" /></div>
+    </div>
+}
+else if (_confirmation is not null)
+{
+    <div class="portal-container">
+        <div class="pcard pi-done">
+            <div class="pi-done-icon"><Icon Name="check" Size="32" StrokeWidth="2.5" /></div>
             <h1>Thanks – your request is on its way</h1>
-            <p class="muted">
-                We created <b class="mono">@_confirmation.RequestNumber</b> for <b>@_form.Item.Name</b>.
-                @(_confirmation.ApprovalRequired ? "It now waits for approval; you will see the decision under My items." : "The fulfilment team has been notified.")
+            <p>
+                We created <b>@_confirmation.RequestNumber</b> for <b>@_form.Item.Name</b>@(_orderedQuote is { Total: > 0 } q ? $" ({PortalFormat.Period(q.Total, q.IsMonthly, Currency)})" : string.Empty).
+                @(_confirmation.ApprovalRequired ? $"It now waits for approval{(_form.ApproverName is { } approver ? $" by {approver}" : string.Empty)} – you will see the decision under My requests." : "The fulfilment team has been notified.")
             </p>
-            <div class="flex gap-2 justify-center flex-wrap mt-4">
-                <a class="btn btn-primary" href="/portal/requests/@_confirmation.RequestId"><Icon Name="activity" Size="16" /> Track my request</a>
-                <a class="btn btn-secondary" href="/portal/catalog"><Icon Name="shopping-cart" Size="16" /> Order something else</a>
+            <div class="pi-done-actions">
+                <a class="pbtn pbtn-primary" href="/portal/requests/@_confirmation.RequestId"><Icon Name="activity" Size="16" /> Track my request</a>
+                <a class="pbtn pbtn-outline" href="/portal/catalog">Order something else</a>
             </div>
         </div>
-    }
-    else
-    {
-        <div class="portal-page-head">
-            <div class="portal-crumbs">
-                <a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" />
-                <a href="/portal/catalog">Catalog</a> <Icon Name="chevron-right" Size="12" />
+    </div>
+}
+else
+{
+    var quote = Quote;
+    var monthly = quote.IsMonthly;
+    <div class="pi-top">
+        <div class="portal-container">
+            <nav class="portal-crumbs pi-crumbs" aria-label="Breadcrumb">
+                <a href="/portal/catalog"><Icon Name="arrow-left" Size="13" /> Service catalog</a>
                 @if (_form.Item.CategoryId is { } categoryId)
                 {
-                    <a href="/portal/catalog?category=@categoryId">@_form.Item.CategoryName</a> <Icon Name="chevron-right" Size="12" />
+                    <Icon Name="chevron-right" Size="12" />
+                    <a href="/portal/catalog?category=@categoryId">@_form.Item.CategoryName</a>
                 }
+                <Icon Name="chevron-right" Size="12" />
                 <span>@_form.Item.Name</span>
-            </div>
-            <div class="flex items-center gap-4 mt-3 porder-title">
-                <span class="portal-icon-tile lg"><Icon Name="@_form.Item.Icon" Size="26" /></span>
-                <div style="min-width:0">
-                    <h1 style="margin:0">@_form.Item.Name</h1>
-                    @if (!string.IsNullOrWhiteSpace(_form.Item.ShortDescription))
+            </nav>
+
+            <div class="pi-head">
+                <div class="pi-media @(_form.Item.ImageUrl is null ? "panel" : null)">
+                    @if (_form.Item.ImageUrl is { } image)
                     {
-                        <p>@_form.Item.ShortDescription</p>
+                        <img src="@image" alt="@_form.Item.Name" />
+                    }
+                    else
+                    {
+                        <span class="pi-media-icon"><PortalGlyph Name="@_form.Item.Icon" Size="44" StrokeWidth="1.4" /></span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_form.Item.BadgeText))
+                    {
+                        <span class="pi-badge">@_form.Item.BadgeText</span>
                     }
                 </div>
-            </div>
-        </div>
-
-        <div class="portal-two-col">
-            <div class="card" style="min-width:0">
-                <div class="card-body">
-                    @if (!string.IsNullOrWhiteSpace(_form.Description))
+                <div class="pi-info">
+                    <div class="pi-info-top">
+                        <div class="peyebrow">@Eyebrow</div>
+                        <button type="button" class="pi-save @(_favorite ? "on" : null)" aria-pressed="@_favorite" @onclick="ToggleFavoriteAsync">
+                            <PortalGlyph Name="heart" Size="15" Filled="_favorite" /> @(_favorite ? "Saved" : "Save")
+                        </button>
+                    </div>
+                    <h1 class="pi-title">@_form.Item.Name</h1>
+                    @if (!string.IsNullOrWhiteSpace(_form.Item.Subtitle))
                     {
-                        <div class="porder-description">@_form.Description</div>
+                        <div class="pi-subtitle">@_form.Item.Subtitle</div>
                     }
-
-                    <div class="form-section">
-                        <div class="form-section-title"><Icon Name="clipboard-list" Size="16" /> Tell us the details</div>
-                        @if (_form.Variables.Count == 0)
+                    @if (!string.IsNullOrWhiteSpace(_form.Description ?? _form.Item.ShortDescription))
+                    {
+                        <p class="pi-desc">@(_form.Description ?? _form.Item.ShortDescription)</p>
+                    }
+                    <div class="pi-highlights">
+                        @if (_form.Highlights.Count > 0)
                         {
-                            <div class="small faint">No questions – this item can be ordered right away.</div>
+                            @foreach (var highlight in _form.Highlights)
+                            {
+                                <span><PortalGlyph Name="@highlight.Icon" Size="15" /> @highlight.Text</span>
+                            }
                         }
                         else
                         {
-                            <div class="form-grid">
-                                @foreach (var variable in _form.Variables)
-                                {
-                                    <CatalogVariableInput @key="variable.Name" Definition="variable" Value="@_values.GetValueOrDefault(variable.Name)"
+                            <span><Icon Name="clock" Size="15" /> @PortalFormat.DeliveryLabel(_form.Item)</span>
+                            <span><Icon Name="tag" Size="15" /> @PortalFormat.PriceLabel(_form.Item, Currency)</span>
+                            @if (_form.Item.ApprovalRequired)
+                            {
+                                <span><Icon Name="check-square" Size="15" /> Approval required</span>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="pi-tabs" role="tablist">
+                <button role="tab" aria-selected="@(_tab == 0)" class="@(_tab == 0 ? "active" : null)" @onclick="() => _tab = 0">Configuration</button>
+                <button role="tab" aria-selected="@(_tab == 1)" class="@(_tab == 1 ? "active" : null)" @onclick="() => _tab = 1">Details &amp; equipment</button>
+                <button role="tab" aria-selected="@(_tab == 2)" class="@(_tab == 2 ? "active" : null)" @onclick="() => _tab = 2">Delivery &amp; support</button>
+                @if (!string.IsNullOrWhiteSpace(_form.Item.Code))
+                {
+                    <span class="pi-code">Service ID: @_form.Item.Code</span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="pi-body">
+        <div class="portal-container">
+            @if (_tab == 0)
+            {
+                <div class="pi-form-head">
+                    <h2>Your @_form.Item.Name, your configuration.</h2>
+                    <span>* Required field</span>
+                </div>
+            }
+            <div class="pi-grid">
+                <div class="pi-main">
+                    @if (_tab == 1)
+                    {
+                        <div class="pcard pi-doc">
+                            @if (!string.IsNullOrWhiteSpace(_form.DetailsMarkdown))
+                            {
+                                <MarkdownView Markdown="@_form.DetailsMarkdown" />
+                            }
+                            else
+                            {
+                                <p>@(_form.Description ?? _form.Item.ShortDescription ?? "No further details are available for this service.")</p>
+                            }
+                        </div>
+                    }
+                    else if (_tab == 2)
+                    {
+                        <div class="pcard pi-doc">
+                            @if (!string.IsNullOrWhiteSpace(_form.DeliveryMarkdown))
+                            {
+                                <MarkdownView Markdown="@_form.DeliveryMarkdown" />
+                            }
+                            else
+                            {
+                                <h3>Delivery</h3>
+                                <p>@PortalFormat.DeliveryLabel(_form.Item)@(_form.Item.ApprovalRequired ? " after approval" : string.Empty).</p>
+                                <h3>Support</h3>
+                                <p>Questions about this service? The IT team is happy to help.</p>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        @for (var i = 0; i < Sections.Count; i++)
+                        {
+                            var section = Sections[i];
+                            var number = i + 1;
+                            <section class="pcard pi-section" @key="section.Key">
+                                <div class="pi-section-head">
+                                    <span class="pi-step">@number</span>
+                                    <div>
+                                        <h3>@section.Title</h3>
+                                        @if (!string.IsNullOrWhiteSpace(section.Description))
+                                        {
+                                            <div class="pi-section-desc">@section.Description</div>
+                                        }
+                                    </div>
+                                </div>
+                                <div class="pi-fields">
+                                    @if (i == 0)
+                                    {
+                                        <div class="pof-host">
+                                            <label class="pi-label">Requested for <span class="pi-req">*</span></label>
+                                            @if (_onBehalf)
+                                            {
+                                                <UserPicker Value="_requestedFor" ValueChanged="v => _requestedFor = v" Disabled="_busy" />
+                                                <button type="button" class="pi-link" @onclick="() => { _onBehalf = false; _requestedFor = null; }">Order for myself instead</button>
+                                            }
+                                            else
+                                            {
+                                                <div class="pi-readonly">
+                                                    <span>@_form.RequesterName@(string.IsNullOrWhiteSpace(_form.RequesterDepartment) ? string.Empty : $" · {_form.RequesterDepartment}")</span>
+                                                    <Icon Name="user" Size="16" />
+                                                </div>
+                                                @if (_form.CanOrderOnBehalf)
+                                                {
+                                                    <button type="button" class="pi-link" @onclick="() => _onBehalf = true">Order for someone else</button>
+                                                }
+                                            }
+                                        </div>
+                                    }
+                                    @foreach (var variable in section.Variables)
+                                    {
+                                        <PortalOrderField @key="variable.Name" Definition="variable" Value="@_values.GetValueOrDefault(variable.Name)"
                                                           ValueChanged="v => SetValue(variable.Name, v)" Error="@_errors.GetValueOrDefault(variable.Name)"
-                                                          Disabled="_busy" Class="@(variable.Type == CatalogVariableType.MultilineText ? "span-all" : null)" />
+                                                          Disabled="_busy" Currency="@Currency" Monthly="monthly" />
+                                    }
+                                </div>
+                            </section>
+                        }
+                    }
+                </div>
+
+                <aside class="pi-side">
+                    <div class="pcard pi-summary">
+                        <h2>Your summary</h2>
+                        <div class="pi-sum-item">
+                            <span class="picon-tile"><PortalGlyph Name="@_form.Item.Icon" Size="18" /></span>
+                            <div class="pi-sum-item-text">
+                                <b>@_form.Item.Name</b>
+                                <span>@(_form.Item.Subtitle is { Length: > 0 } subtitle ? $"{subtitle} · " : string.Empty)Quantity: @_quantity</span>
+                            </div>
+                            <div class="pi-qty" role="group" aria-label="Quantity">
+                                <button type="button" aria-label="Decrease quantity" disabled="@(_quantity <= 1 || _busy)" @onclick="() => _quantity--"><Icon Name="minus" Size="13" /></button>
+                                <button type="button" aria-label="Increase quantity" disabled="@(_quantity >= 100 || _busy)" @onclick="() => _quantity++"><Icon Name="plus" Size="13" /></button>
+                            </div>
+                        </div>
+                        @if (quote.SelectedOptions.Count > 0)
+                        {
+                            <ul class="pi-sum-options">
+                                @foreach (var option in quote.SelectedOptions)
+                                {
+                                    <li><Icon Name="check" Size="13" StrokeWidth="2.5" /> @option</li>
+                                }
+                            </ul>
+                        }
+                        <dl class="pi-lines">
+                            @foreach (var line in quote.Lines)
+                            {
+                                <dt>@line.Label</dt>
+                                <dd>@(line.Amount == 0 && line == quote.Lines[0] ? "Included" : PortalFormat.Money(line.Amount, Currency))</dd>
+                            }
+                            @if (monthly)
+                            {
+                                <dt>One-time costs</dt>
+                                <dd>@PortalFormat.Money(quote.UnitOneTimePrice, Currency)</dd>
+                            }
+                        </dl>
+                        <div class="pi-total">
+                            <div class="pi-total-label">@(monthly ? "Monthly billing" : "Total")</div>
+                            <div class="pi-total-value">
+                                <span>@(quote.Total == 0 ? "No cost" : PortalFormat.Money(quote.Total, Currency))</span>
+                                @if (monthly && quote.Total > 0)
+                                {
+                                    <small>/ month</small>
                                 }
                             </div>
-                        }
-                    </div>
-
-                    <div class="form-section">
-                        <div class="form-section-title"><Icon Name="package" Size="16" /> Quantity</div>
-                        <div class="porder-qty">
-                            <button class="btn btn-secondary btn-icon" type="button" aria-label="Decrease quantity" disabled="@(_quantity <= 1 || _busy)" @onclick="() => _quantity--"><Icon Name="minus" Size="16" /></button>
-                            <input class="input" type="number" min="1" max="100" step="1" aria-label="Quantity" @bind="_quantity" disabled="@_busy" />
-                            <button class="btn btn-secondary btn-icon" type="button" aria-label="Increase quantity" disabled="@(_quantity >= 100 || _busy)" @onclick="() => _quantity++"><Icon Name="plus" Size="16" /></button>
-                            <span class="small faint">Ordered for you</span>
+                            @if (TotalNote is { } note)
+                            {
+                                <div class="pi-total-note">@note</div>
+                            }
                         </div>
-                        @if (_quantityError is not null)
-                        {
-                            <div class="small text-danger mt-2">@_quantityError</div>
-                        }
-                    </div>
-                </div>
-            </div>
-
-            <div class="portal-sticky stack" style="gap:16px">
-                <div class="card card-body">
-                    <div class="eyebrow mb-3">Summary</div>
-                    <dl class="portal-facts">
-                        <dt>Price</dt><dd>@PortalFormat.Price(_form.Item.Price)</dd>
-                        <dt>Quantity</dt><dd>@Math.Max(1, _quantity)</dd>
-                        <dt>Total</dt><dd><b>@PortalFormat.Price(_form.Item.Price * Math.Max(1, _quantity))</b></dd>
-                        <dt>Delivery</dt><dd>@PortalFormat.Delivery(_form.Item.DeliveryDays)</dd>
-                        <dt>Approval</dt><dd>@(_form.Item.ApprovalRequired ? "Required" : "Not needed")</dd>
-                    </dl>
-                    <button class="btn btn-primary btn-lg btn-block mt-4" disabled="@_busy" @onclick="OrderAsync">
-                        @if (_busy)
-                        {
-                            <span class="spinner"></span>
-                        }
-                        else
-                        {
-                            <Icon Name="send" Size="16" />
-                        }
-                        Submit request
-                    </button>
-                </div>
-                <div class="card card-body">
-                    <div class="eyebrow mb-3">What happens next</div>
-                    <ol class="porder-steps">
                         @if (_form.Item.ApprovalRequired)
                         {
-                            <li><span><Icon Name="check-square" Size="14" /></span> Your approver is asked to approve the request.</li>
+                            <div class="pi-approval">
+                                <Icon Name="user-check" Size="18" />
+                                <div>
+                                    <b>Approval required</b>
+                                    <span>Your request goes to @(_form.ApproverName ?? "your approver"). After that, IT takes care of everything else.</span>
+                                </div>
+                            </div>
                         }
-                        <li><span><Icon Name="users" Size="14" /></span> The fulfilment team prepares your order.</li>
-                        <li><span><Icon Name="bell" Size="14" /></span> Follow the progress and chat with the team under My items.</li>
-                    </ol>
-                </div>
+                        <button class="pbtn pbtn-primary pbtn-lg pbtn-block" disabled="@_busy" @onclick="OrderAsync">
+                            @if (_busy)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            Request now <Icon Name="arrow-right" Size="16" />
+                        </button>
+                        <p class="pi-fine">@(quote.Total > 0 || quote.OneTimeTotal > 0 ? "Costs are charged to your cost centre – no private payment is made." : "There are no costs for this service.") The price is confirmed when you submit.</p>
+                    </div>
+
+                    <div class="pcard pi-next">
+                        <h3>What happens next</h3>
+                        <ol>
+                            @if (_form.Item.ApprovalRequired)
+                            {
+                                <li><span>1</span><div><b>Your request is approved</b><small>by @(_form.ApproverName ?? "your approver")</small></div></li>
+                            }
+                            <li><span>@(_form.Item.ApprovalRequired ? 2 : 1)</span><div><b>We prepare everything for you</b><small>including software and security settings</small></div></li>
+                            <li><span>@(_form.Item.ApprovalRequired ? 3 : 2)</span><div><b>@_form.Item.Name is ready for you</b><small>@PortalFormat.DeliveryLabel(_form.Item)@(_form.Item.ApprovalRequired ? " after approval" : string.Empty)</small></div></li>
+                        </ol>
+                    </div>
+
+                    @if (PortalSettingsModel.SafeLink(_settings?.SupportUrl) is { } advice)
+                    {
+                        <div class="pi-advice">
+                            <PortalGlyph Name="headset" Size="18" />
+                            <div>
+                                <span>Unsure about the configuration?</span>
+                                <a href="@advice" rel="noopener">Contact IT advice <Icon Name="arrow-up-right" Size="13" /></a>
+                            </div>
+                        </div>
+                    }
+                </aside>
             </div>
         </div>
-    }
-</div>
+    </div>
+}
 
 @code {
     private CatalogOrderForm? _form;
+    private PortalSettingsModel? _settings;
     private OrderConfirmation? _confirmation;
+    private CatalogPriceQuote? _orderedQuote;
+    private IReadOnlyList<PortalOrderSection> _sections = [];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyDictionary<string, string> _errors = new Dictionary<string, string>();
+    private Guid? _requestedFor;
     private string? _error;
-    private string? _quantityError;
     private int _quantity = 1;
+    private int _tab;
+    private bool _favorite;
+    private bool _onBehalf;
     private bool _loading = true;
     private bool _busy;
 
     /// <summary>Gets or sets the catalog item identifier.</summary>
     [Parameter] public Guid ItemId { get; set; }
 
+    private string Currency => _settings?.Currency ?? "EUR";
+
+    private IReadOnlyList<PortalOrderSection> Sections => _sections;
+
+    private CatalogPriceQuote Quote => CatalogPriceCalculator.Calculate(_form!.Pricing, _form.Variables, _values, _quantity);
+
+    private string Eyebrow => string.IsNullOrWhiteSpace(_form?.Item.CategoryName) ? "Service catalog" : _form.Item.CategoryName;
+
+    private string? TotalNote
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (_values.GetValueOrDefault(CatalogPriceCalculator.CostCenterVariable) is { Length: > 0 } costCenter)
+            {
+                parts.Add($"Cost centre {costCenter.Split('·')[0].Trim()}");
+            }
+
+            if (_form?.Pricing.TermMonths is { } term && _form.Pricing.BillingType == CatalogBillingType.Monthly)
+            {
+                parts.Add($"Term {term} months");
+            }
+
+            return parts.Count == 0 ? null : string.Join(" · ", parts);
+        }
+    }
+
     /// <inheritdoc />
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
         _confirmation = null;
+        _settings ??= (await PortalSettings.GetAsync()).Value;
         var result = await Catalog.GetOrderFormAsync(ItemId);
         _form = result.Succeeded ? result.Value : null;
         _error = result.Succeeded ? null : result.Error;
         _values.Clear();
-        foreach (var variable in _form?.Variables.Where(v => v.DefaultValue is not null) ?? [])
-        {
-            _values[variable.Name] = variable.DefaultValue;
-        }
-
         _errors = new Dictionary<string, string>();
         _quantity = 1;
+        _tab = 0;
+        _requestedFor = null;
+        _onBehalf = false;
+        if (_form is not null)
+        {
+            foreach (var variable in _form.Variables.Where(v => v.DefaultValue is not null))
+            {
+                _values[variable.Name] = variable.DefaultValue;
+            }
+
+            PrefillCostCenter();
+            _favorite = _form.IsFavorite;
+            _sections = PortalOrderSection.Build(_form);
+        }
+
         _loading = false;
+    }
+
+    private void PrefillCostCenter()
+    {
+        var costCenter = _form!.Variables.FirstOrDefault(v => v.Name == CatalogPriceCalculator.CostCenterVariable && v.Type == CatalogVariableType.Choice);
+        if (costCenter is null || _values.ContainsKey(costCenter.Name) || string.IsNullOrWhiteSpace(_form.RequesterDepartment))
+        {
+            return;
+        }
+
+        var match = costCenter.Options.FirstOrDefault(o => o.Contains(_form.RequesterDepartment, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+        {
+            _values[costCenter.Name] = match;
+        }
     }
 
     private void SetValue(string name, string? value)
@@ -185,6 +415,15 @@
         }
     }
 
+    private async Task ToggleFavoriteAsync()
+    {
+        var result = await Catalog.SetFavoriteAsync(ItemId, !_favorite);
+        if (Toasts.FromResult(result, _favorite ? "Removed from your favourites" : "Saved to your favourites"))
+        {
+            _favorite = !_favorite;
+        }
+    }
+
     private async Task OrderAsync()
     {
         if (_form is null)
@@ -192,21 +431,29 @@
             return;
         }
 
-        // Inline pre-validation for a friendly form; the catalog service validates again (the UI is no security boundary).
-        _quantityError = _quantity is < 1 or > 100 ? "The quantity must be between 1 and 100." : null;
-        _errors = CatalogVariableValidator.Validate(_form.Variables, _values).Errors;
-        if (_quantityError is not null || _errors.Count > 0)
+        // Friendly inline validation; the catalog service validates and prices again (the UI is no security boundary).
+        _errors = CatalogVariableValidator.Validate(_form.Variables, _values).Errors
+            .ToDictionary(e => e.Key, e => _form.Variables.FirstOrDefault(v => v.Name == e.Key)?.Type == CatalogVariableType.Boolean ? "Please confirm to continue." : e.Value);
+        if (_onBehalf && _requestedFor is null)
         {
-            Toasts.Warning("Please complete the highlighted fields.");
+            Toasts.Warning("Select the person you are ordering for.");
+            return;
+        }
+
+        if (_errors.Count > 0)
+        {
+            _tab = 0;
+            Toasts.Warning("Please complete the highlighted fields.", $"{_errors.Count} field{(_errors.Count == 1 ? " needs" : "s need")} your attention.");
             return;
         }
 
         _busy = true;
         try
         {
-            var result = await Catalog.OrderAsync(_form.Item.Id, new Dictionary<string, string?>(_values), null, _quantity);
+            var result = await Catalog.OrderAsync(_form.Item.Id, new Dictionary<string, string?>(_values), _requestedFor, _quantity);
             if (Toasts.FromResult(result, result.Value is { } confirmation ? $"{confirmation.RequestNumber} submitted" : "Request submitted"))
             {
+                _orderedQuote = Quote;
                 _confirmation = result.Value;
             }
         }

@@ -14,6 +14,7 @@ internal sealed class RequestItemConfiguration : IEntityTypeConfiguration<Reques
     {
         builder.ConfigureTaskRecord(TableNames.RequestItem);
         builder.Property(r => r.UnitPrice).HasPrecision(18, 2);
+        builder.Property(r => r.OneTimePrice).HasPrecision(18, 2);
         builder.Property(r => r.VariablesJson).HasMaxLength(32_000);
         builder.HasIndex(r => r.RequestId);
         builder.HasIndex(r => r.CatalogItemId);

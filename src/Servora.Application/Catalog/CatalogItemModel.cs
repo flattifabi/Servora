@@ -1,4 +1,5 @@
 using Servora.Domain.Approvals;
+using Servora.Domain.Catalog;
 
 namespace Servora.Application.Catalog;
 
@@ -58,4 +59,55 @@ public sealed class CatalogItemModel
 
     /// <summary>Gets or sets the variables in display order (read only in this model).</summary>
     public List<CatalogVariableDefinition> Variables { get; set; } = [];
+
+    /// <summary>Gets or sets the order form sections in display order (read only in this model, edited individually).</summary>
+    public List<CatalogSectionModel> Sections { get; set; } = [];
+
+    /// <summary>Gets or sets how the price is billed.</summary>
+    public CatalogBillingType BillingType { get; set; } = CatalogBillingType.OneTime;
+
+    /// <summary>Gets or sets the contract term in months (monthly billed items).</summary>
+    public int? TermMonths { get; set; }
+
+    /// <summary>Gets or sets the one-time costs per unit (monthly billed items).</summary>
+    public decimal OneTimePrice { get; set; }
+
+    /// <summary>Gets or sets the subtitle (for example the model).</summary>
+    public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets the badge text.</summary>
+    public string? BadgeText { get; set; }
+
+    /// <summary>Gets or sets the public service identifier (letters, digits, dashes).</summary>
+    public string? Code { get; set; }
+
+    /// <summary>Gets or sets the product image identifier (read only, changed through the image upload).</summary>
+    public Guid? ImageId { get; set; }
+
+    /// <summary>Gets the relative URL of the product image.</summary>
+    public string? ImageUrl => ICatalogImageStore.UrlOf(ImageId);
+
+    /// <summary>Gets or sets the teaser headline shown on cards without an image.</summary>
+    public string? Teaser { get; set; }
+
+    /// <summary>Gets or sets the line below the teaser headline.</summary>
+    public string? TeaserText { get; set; }
+
+    /// <summary>Gets or sets the delivery text that replaces the computed one.</summary>
+    public string? DeliveryText { get; set; }
+
+    /// <summary>Gets or sets the highlight lines (<c>icon | text</c>).</summary>
+    public string? Highlights { get; set; }
+
+    /// <summary>Gets or sets the "Details &amp; equipment" Markdown.</summary>
+    public string? DetailsMarkdown { get; set; }
+
+    /// <summary>Gets or sets the "Delivery &amp; support" Markdown.</summary>
+    public string? DeliveryMarkdown { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the item is featured on the portal home page.</summary>
+    public bool IsFeatured { get; set; }
+
+    /// <summary>Gets or sets the order among featured items.</summary>
+    public int FeaturedOrder { get; set; }
 }

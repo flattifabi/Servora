@@ -1,7 +1,4 @@
-.psearch {
-    position: relative;
-    width: 100%;
-}
+.psearch { position: relative; width: 100%; }
 
 .psearch-field {
     position: relative;
@@ -9,26 +6,22 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 52px;
-    padding: 0 6px 0 16px;
-    border-radius: var(--r-lg);
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    box-shadow: var(--shadow);
-    color: var(--text-faint);
-    transition: border-color var(--speed), box-shadow var(--speed);
+    height: 48px;
+    padding: 0 5px 0 14px;
+    border-radius: var(--p-r, 12px);
+    background: var(--p-surface, #fff);
+    border: 1px solid var(--p-border, #dfe7e2);
+    box-shadow: 0 6px 20px -14px rgba(20, 33, 27, .35);
+    color: var(--p-muted, #5f6f67);
+    transition: border-color .15s, box-shadow .15s;
 }
 
 .psearch-field:focus-within {
-    border-color: var(--primary);
-    box-shadow: var(--ring), var(--shadow-lg);
+    border-color: var(--p-primary, #1b4535);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-primary, #1b4535) 18%, transparent), 0 10px 26px -16px rgba(20, 33, 27, .4);
 }
 
-.psearch.lg .psearch-field {
-    height: 64px;
-    padding-left: 22px;
-    border-radius: 20px;
-}
+.psearch.lg .psearch-field { height: 58px; padding-left: 18px; padding-right: 6px; }
 
 .psearch-input {
     flex: 1;
@@ -37,17 +30,29 @@
     border: 0;
     outline: none;
     background: transparent;
-    color: var(--text);
+    color: var(--p-text, #14211b);
     font: inherit;
-    font-size: 15px;
+    font-size: 14.5px;
 }
 
-.psearch.lg .psearch-input { font-size: 17px; }
-.psearch-input::placeholder { color: var(--text-faint); }
+.psearch.lg .psearch-input { font-size: 15px; }
+.psearch-input::placeholder { color: var(--p-muted, #5f6f67); opacity: .85; }
 .psearch-input::-webkit-search-cancel-button { display: none; }
 
-.psearch-go { height: 40px; border-radius: 12px; }
-.psearch.lg .psearch-go { height: 50px; padding: 0 22px; border-radius: 15px; }
+.psearch-go {
+    height: 38px;
+    padding: 0 16px;
+    border-radius: var(--p-r-sm, 8px);
+    border: 0;
+    background: var(--p-ink, #173f30) !important;
+    color: #fff !important;
+    font-weight: 650;
+}
+
+.psearch-go:hover:not(:disabled) { background: var(--p-primary, #1b4535) !important; }
+.psearch-go:disabled { opacity: 1; }
+.psearch.lg .psearch-go { height: 44px; padding: 0 22px; }
+.psearch-go ::deep .icon { display: none; }
 
 .psearch-menu {
     position: absolute;
@@ -58,65 +63,38 @@
     max-height: min(70vh, 520px);
     overflow-y: auto;
     padding: 8px;
-    border-radius: var(--r-lg);
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-lg);
+    border-radius: var(--p-r, 12px);
+    background: var(--p-surface, #fff);
+    border: 1px solid var(--p-border, #dfe7e2);
+    box-shadow: 0 24px 48px -20px rgba(20, 33, 27, .35);
     text-align: left;
-    animation: pop-in .14s var(--ease);
 }
 
-.psearch-group {
-    padding: 10px 10px 6px;
-    font-size: 11px;
-    font-weight: 650;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-}
+.psearch-group { padding: 10px 10px 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--p-muted, #5f6f67); }
 
-.psearch-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 9px 10px;
-    border-radius: var(--r);
-    color: var(--text);
-}
-
-.psearch-item:hover { background: var(--surface-hover); color: var(--text); }
+.psearch-item { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: var(--p-r-sm, 8px); color: var(--p-text, #14211b); text-decoration: none; }
+.psearch-item:hover { background: var(--p-tint, #eef5f0); color: var(--p-text, #14211b); }
 
 .psearch-icon {
     width: 32px;
     height: 32px;
-    border-radius: 10px;
+    border-radius: 9px;
     display: grid;
     place-items: center;
     flex-shrink: 0;
-    color: var(--primary);
-    background: var(--primary-soft);
+    color: var(--p-primary, #1b4535);
+    background: var(--p-tint, #eef5f0);
 }
 
-.psearch-icon.accent { color: var(--accent); background: var(--accent-soft); }
-.psearch-icon.neutral { color: var(--text-muted); background: var(--neutral-soft); }
+.psearch-icon.accent { color: var(--p-primary, #1b4535); background: color-mix(in srgb, var(--p-primary, #1b4535) 14%, #fff); }
+.psearch-icon.neutral { color: var(--p-muted, #5f6f67); background: var(--p-surface-2, #f6f8f7); }
 
-.psearch-text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-}
+.psearch-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.psearch-title { font-weight: 650; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.psearch-sub { font-size: 12.5px; color: var(--p-muted, #5f6f67); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.psearch-price { font-size: 12px; font-weight: 650; color: var(--p-primary, #1b4535); white-space: nowrap; }
 
-.psearch-title { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.psearch-sub { font-size: 12.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.psearch-empty {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-    padding: 14px;
-    color: var(--text-muted);
-}
+.psearch-empty { display: flex; gap: 12px; align-items: flex-start; padding: 14px; color: var(--p-muted, #5f6f67); }
 
 .psearch-all {
     display: flex;
@@ -127,20 +105,18 @@
     margin-top: 6px;
     padding: 10px;
     border: 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--p-border, #dfe7e2);
     background: transparent;
-    color: var(--primary);
+    color: var(--p-primary, #1b4535);
     font: inherit;
-    font-weight: 600;
+    font-weight: 650;
     font-size: 13px;
     cursor: pointer;
 }
 
-.psearch-all:hover { color: var(--accent); }
+.psearch-all:hover { text-decoration: underline; }
 
 @media (max-width: 720px) {
-    .psearch.lg .psearch-field { height: 56px; padding-left: 16px; }
-    .psearch.lg .psearch-input { font-size: 15.5px; }
-    .psearch-go-text { display: none; }
-    .psearch.lg .psearch-go { padding: 0 14px; height: 44px; }
+    .psearch.lg .psearch-field { height: 52px; padding-left: 14px; }
+    .psearch.lg .psearch-go { padding: 0 14px; height: 40px; }
 }

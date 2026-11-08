@@ -78,6 +78,35 @@ public interface ICatalogAdminService
     /// <returns>The result.</returns>
     Task<Result> DeleteVariableAsync(Guid variableId, CancellationToken cancellationToken = default);
 
+    /// <summary>Creates or updates an order form section of an item.</summary>
+    /// <param name="itemId">The item identifier.</param>
+    /// <param name="model">The section.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The section identifier.</returns>
+    Task<Result<Guid>> SaveSectionAsync(Guid itemId, CatalogSectionModel model, CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes a section; its variables move to the general section.</summary>
+    /// <param name="sectionId">The section identifier.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The result.</returns>
+    Task<Result> DeleteSectionAsync(Guid sectionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Validates (type sniffing: PNG, JPEG, GIF or WebP; size limit) and stores the product image of an item, replacing
+    /// the previous one.
+    /// </summary>
+    /// <param name="itemId">The item identifier.</param>
+    /// <param name="content">The uploaded content; at most <see cref="ICatalogImageStore.MaxImageBytes"/> bytes are read.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The result.</returns>
+    Task<Result> UploadItemImageAsync(Guid itemId, Stream content, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes the product image of an item.</summary>
+    /// <param name="itemId">The item identifier.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The result.</returns>
+    Task<Result> RemoveItemImageAsync(Guid itemId, CancellationToken cancellationToken = default);
+
     /// <summary>Moves a variable one position up (negative direction) or down (positive direction).</summary>
     /// <param name="variableId">The variable identifier.</param>
     /// <param name="direction">The direction.</param>

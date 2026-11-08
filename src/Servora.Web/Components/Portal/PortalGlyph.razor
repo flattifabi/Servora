@@ -1,0 +1,37 @@
+@* Portal icon: renders a few portal-specific glyphs (heart, headset, truck, sparkle) and falls back to the design system
+   icon set for every other name. *@
+@if (s_paths.TryGetValue(Name, out var path))
+{
+    <svg class="icon @Class" width="@Size" height="@Size" viewBox="0 0 24 24" fill="@(Filled ? "currentColor" : "none")" stroke="currentColor"
+         stroke-width="@StrokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">@((MarkupString)path)</svg>
+}
+else
+{
+    <Icon Name="@Name" Size="Size" StrokeWidth="StrokeWidth" Class="@Class" />
+}
+
+@code {
+    private static readonly Dictionary<string, string> s_paths = new(StringComparer.Ordinal)
+    {
+        ["heart"] = "<path d=\"M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z\"/>",
+        ["headset"] = "<path d=\"M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3\"/>",
+        ["truck"] = "<path d=\"M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2\"/><path d=\"M15 18H9\"/><path d=\"M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14\"/><circle cx=\"17\" cy=\"18\" r=\"2\"/><circle cx=\"7\" cy=\"18\" r=\"2\"/>",
+        ["sparkle"] = "<path d=\"M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9Z\"/>",
+        ["app-window"] = "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M3 9h18\"/><path d=\"M9 9v11\"/>",
+    };
+
+    /// <summary>Gets or sets the icon name.</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = "dot";
+
+    /// <summary>Gets or sets the pixel size.</summary>
+    [Parameter] public int Size { get; set; } = 18;
+
+    /// <summary>Gets or sets the stroke width.</summary>
+    [Parameter] public double StrokeWidth { get; set; } = 2;
+
+    /// <summary>Gets or sets a value indicating whether portal glyphs are filled (for example a saved heart).</summary>
+    [Parameter] public bool Filled { get; set; }
+
+    /// <summary>Gets or sets additional CSS classes.</summary>
+    [Parameter] public string? Class { get; set; }
+}

@@ -15,10 +15,12 @@ Service management covers three connected processes:
 | `change_request` | `ChangeRequest : TaskRecord` | `CHG0001001` | Type (Normal / Standard / Emergency), state, category, requested by, justification, implementation / backout / test plans, risk + score + questionnaire answers (JSON), planned and actual start/end, approval group, approval status (denormalized), close code + notes. |
 | `change_task` | `ChangeTask : TaskRecord` | `CTASK0001001` | Tasks of a change (state Open / In progress / Completed / Cancelled, planned window, order, close notes). |
 | `sc_category` | `CatalogCategory` | – | Name, description, icon, order, active. |
-| `sc_cat_item` | `CatalogItem` | – | Name, short/long description, icon, category, price, delivery days, fulfilment group, fulfilment task template (one task per line), approval required + approval group + manager approval + policy (any/all), order, active. |
-| `item_option_new` | `CatalogVariable` | – | Variable definitions of an item: name, label, type (text, multiline, number, choice, boolean, date, user reference), mandatory, order, help text, default, choice options, min/max, max length. |
+| `sc_cat_item` | `CatalogItem` | – | Name, short/long description, icon, category, price, **billing type (one-time / monthly), term months, one-time costs**, delivery days + **delivery text**, fulfilment group, fulfilment task template (one task per line), approval required + approval group + manager approval + policy (any/all), order, active; portal presentation (P-1): **subtitle, badge, service ID (`Code`), image id, teaser + teaser text, highlights (`icon \| text` lines), details / delivery Markdown, featured flag + featured order**. |
+| `item_option_new` | `CatalogVariable` | – | Variable definitions of an item: name, label, type (text, multiline, number, choice, boolean, date, user reference), mandatory, order, help text, default, choice options (optionally with price impact and description, see below), min/max, max length, **section** (`SectionId`), **price impact of a checked yes / no question** (`PriceDelta`). |
+| `sc_item_section` | `CatalogSection` | – | Numbered order form section of an item (title, description, order). Variables reference it; deleting a section moves its variables to the general section. |
+| `sc_favorite` | `CatalogFavorite` | – | A user's favourite catalog item (unique per user and item). |
 | `sc_request` | `Request` | `REQ0001001` | The order (requested for, ordered by, state Submitted / In progress / Completed / Rejected / Cancelled). |
-| `sc_req_item` | `RequestItem` | `RITM0001001` | One ordered item: catalog item, quantity, price, variable answers (JSON), state Pending approval / In fulfilment / Completed / Rejected / Cancelled, approval status. |
+| `sc_req_item` | `RequestItem` | `RITM0001001` | One ordered item: catalog item, quantity, unit price **computed server-side incl. option impacts**, billing type, term, one-time costs, variable answers (JSON), state Pending approval / In fulfilment / Completed / Rejected / Cancelled, approval status. |
 | `sc_task` | `CatalogTask : TaskRecord` | `SCTASK0001001` | Fulfilment task of a requested item. |
 | `sys_approval` | `Approval` | – | One approver's approval of any record (see below). |
 
@@ -91,6 +93,28 @@ The open-task check before closing stays in `ChangeService` (needs other records
   `GetCategoriesAsync`, `GetItemsAsync`, `GetOrderFormAsync`, `OrderAsync(itemId, variables, requestedFor, quantity)`.
   Answers are validated and normalized by `CatalogVariableValidator.Validate` (mandatory, type, choice options, ranges,
   length, active user references). Ordering for someone else requires `request.write`.
+* **Pricing (P-1)** – an item has a base `Price` billed one-time or monthly (`BillingType`, `TermMonths`, one-time
+  costs `OneTimePrice`). Choice options carry price impacts in a backwards-compatible line format stored in
+  `CatalogVariable.Options`: `Label` (no impact, the format used before) or `Label | +8.00 | optional description`; a
+  line whose second segment is not a number stays a plain label, so existing options containing `|` keep working
+  (`CatalogChoiceOption`). Answers store only the label. A checked yes / no question adds its `PriceDelta` (optional
+  accessories). `CatalogPriceCalculator` computes the quote (lines, unit price, total, one-time total, selected options);
+  the portal shows it live and `OrderAsync` **always recomputes it from the stored definition** – prices sent by a
+  client are never used. `Request.TotalPrice` = unit price × quantity (per month for monthly items). The well-known
+  choice variable `cost_center` is shown separately in summaries.
+* **Portal presentation (P-1)** – `ICatalogOrderService` additionally offers `QuoteAsync`, favourites
+  (`GetFavoriteIdsAsync`, `SetFavoriteAsync`, users only) and `OpenImageAsync`; the order form carries sections,
+  highlights, details / delivery Markdown (rendered with `SafeMarkdown`), the pricing, the approver to expect (manager of
+  the requester, otherwise the approval group), favourite state and whether the user may order on behalf.
+  `ICatalogAdminService` adds `SaveSectionAsync`, `DeleteSectionAsync`, `UploadItemImageAsync`, `RemoveItemImageAsync`
+  (all `catalog.manage`, audited). Images are verified by magic bytes (PNG, JPEG, GIF, WebP – never SVG, max. 2 MB),
+  stored as `<data dir>/catalog/images/<id>.bin` (`ICatalogImageStore`) and served by `GET /portal/catalog-images/{id}`
+  (catalog browse permission; images of inactive items only for catalog managers; `nosniff`). Duplicating an item copies
+  sections (remapped), presentation fields and a copy of the image.
+* **Builder additions (P-1)** – pricing (billing, term, one-time costs), portal presentation (subtitle, service ID,
+  badge, featured + order, teaser, highlights, image upload), order page tabs (Markdown), form sections (add / edit /
+  delete), section and price impact per question; option help text explains the `Label | +8.00 | description` format.
+  `/requests/new` shows the live price (incl. option impacts and term).
 * **Workflow** (`CatalogFulfillmentEngine`):
   1. Order → `REQ` + `RITM` (answers JSON).
   2. Approval required → approval round (approval group and/or the requested-for user's manager, policy any/all);
@@ -126,11 +150,24 @@ unless `approval.read` is granted).
 * `ChangeManagementSeeder` (order 110): groups *Change Advisory Board* (approval, admin as member), *Network
   Operations*, *Database Administration*, *Desktop Support*; six demo changes in different states (one awaiting CAB
   with a pending approval round).
-* `CatalogSeeder` (order 120): approval group *IT Approvers*, six categories and eight items with variables – New
-  laptop, Software installation, Access request, VPN access, Mobile phone, Password reset, New employee onboarding,
-  Shared mailbox.
+* `CatalogSeeder` (order 120): approval group *IT Approvers*; categories *Hardware*, *Software*, *Access &
+  permissions* (an existing *Access & Security* category is reused), *IT support*, *Communication*, *People &
+  Onboarding*; base items matched by name and only created when missing (Software installation, Access request, VPN
+  access, Mobile phone, Password reset, New employee onboarding, Shared mailbox). The **portal showcase** is added once
+  (marker setting `catalog.showcase.seeded`, so deleted items are not recreated): *Business laptop* (Lenovo ThinkPad T14
+  Gen 5, €39 / month, 36 months, three sections, 32 GB RAM +€8, 1 TB SSD +€4, USB-C dock +€5, cost centre, delivery
+  location, desired date, justification, return-device confirmation, manager + IT Approvers approval), *Microsoft 365*
+  (€22 / month, E5 +€16), the portal presentation of *VPN access* (only while its new presentation fields are still
+  empty) and a realistic range (24 hardware services in total, 11 software, 8 access, 6 IT support). Existing data is
+  never overwritten. Before P-1 *New laptop* was seeded; new installations no longer get it, existing ones keep it.
 
 ## Tests
+
+`tests/Servora.Tests.Unit/Catalog` (P-1): option line format and backwards compatibility (`CatalogChoiceOptionTests`),
+server-side price calculation (`CatalogPriceCalculatorTests`), ordering stores the server-computed price and ignores
+client price fields, order form sections / approver / requester, favourites, authorization of the new methods, section
+deletion, image type checks and serving rules, duplicate (`CatalogPortalServiceTests`), seeder showcase, idempotency,
+no overwriting of administrator changes and the legacy access category (`CatalogSeederTests`).
 
 `tests/Servora.Tests.Unit/ServiceManagement`: approval policy evaluator, approval engine (group expansion, any/all,
 on-behalf decisions, rounds, permission checks), change state machine, change lifecycle with CAB approval/rejection and

@@ -9,23 +9,53 @@ feature; all data access is restricted server-side to the user's own records or 
 
 | Route | Page |
 |-------|------|
-| `/portal` | Home: greeting hero with live search (knowledge, catalog, own items), quick actions, announcements, KPI tiles (open requests, open issues, awaiting confirmation, approvals), my open items, popular answers, popular requests (most ordered in the last 90 days). |
+| `/portal` | Home (P-1, reference design 1): mint hero with configurable greeting (`{name}` = first name), headline, subline, live search with a *Search* button and "Frequently searched" terms, hero image card (uploaded image or built-in brand-coloured SVG illustration) with caption chip; live announcements; "What do you need today?" category cards (icon, description, real number of services, "All N services"); "Frequently used. Quickly found." item cards (featured items in their order, otherwise the most ordered; "Most ordered" badge for the item ordered most in 90 days, item badge otherwise, favourite heart, delivery line, "from €39.00 / month" or "No additional cost", Configure / Request); "My requests" table (latest 4 items of any state, open count); "Questions?" support card. |
 | `/portal/search?q=` | Full search results in three sections. |
-| `/portal/catalog` (`?category=`) | Catalog browsing with search and category chips. |
-| `/portal/catalog/{id}` | Order form rendering the item's variables (`CatalogVariableInput`), inline validation, quantity, summary, "what happens next", confirmation with "Track my request". |
+| `/portal/catalog` (`?category=`) | Catalog browsing with search, category chips, a favourites filter and item cards with favourite hearts. |
+| `/portal/catalog/{id}` | Item page (P-1, reference design 2): breadcrumb, image or icon panel with badge, category eyebrow, title, subtitle, description, highlight facts, *Save* (favourite); tabs *Configuration* / *Details & equipment* / *Delivery & support* (safe Markdown) with the service ID; numbered section cards built from the item's sections (first card: *Requested for* – own name, "Order for someone else" with a user picker for `request.write`; variables without a section go to a general card); `PortalOrderField` renders priced choices as radio cards with "+ €8.00 / month", other choices as selects, priced yes / no questions as accessory cards, confirmations as check boxes, text areas with a character counter; the cost centre is pre-selected from the requester's department when an option matches. Sticky summary: chosen options, price lines, one-time costs, "Monthly billing" box with cost centre and term, approval note naming the approver, *Request now*, fine print; "What happens next" steps and "Contact IT advice" (support link). Required fields are validated inline; the price is recomputed by the catalog service when ordering. |
 | `/portal/report` | "Report an issue": summary with live knowledge suggestions (deflection), details, category, urgency cards, affected-people chips, up to 5 files (uploaded right after the incident is created). |
-| `/portal/my` | My items: incidents and requests (open / closed / all, kind chips, search, "show more"). |
+| `/portal/my` | My requests: incidents and requests (open / closed / all, kind chips, search, "show more"); requests show their price ("€52.00 / month"). |
 | `/portal/incidents/{id}` | Issue view: status timeline, "Is everything working again?" (accept → Closed / reopen with reason → In Progress), description, solution, conversation, details, who is helping. |
 | `/portal/requests/{id}` | Request view: status timeline (Submitted → Approval → Fulfilment → Delivered), requested items with answers, approval label and delivery progress, conversation, details, cancel with reason. |
 | `/portal/knowledge` (`?category=`, `?q=`) | Knowledge search, topic tiles, most read, recently published, category article lists. |
 | `/portal/knowledge/{id}` | Reader: safe rendered Markdown (`MarkdownView`), table of contents, helpful votes, related articles, hand-off to "Report an issue". Views are counted. |
 | `/portal/approvals` | Approvals for approvers: waiting / history, 30-day stats, expandable details (requested item answers, change window and risk), approve (optional comment) / reject (reason required). |
 | `/portal/admin/announcements` | Announcement administration in the application shell (`portal.manage`): KPIs, table, drawer editor with live preview, delete confirmation. |
+| `/portal/admin/settings` | Portal settings in the application shell (`portal.manage`, P-1): hero texts, frequently searched terms, hero image upload / removal, support card, footer tagline and links, currency; live hero preview. |
 
-All portal pages carry `[RequirePermission(Permissions.Portal.Access)]` (the admin page `portal.manage`). The layout
-hides the splash, enforces the forced password change like `MainLayout`, shows an approvals badge, a "Report an issue"
-call to action, theme switch, user menu ("Open workspace" only for users with fulfiller permissions) and collapses the
-navigation into a drawer below 1080 px. Pages are verified down to 375 px without horizontal scrolling.
+All portal pages carry `[RequirePermission(Permissions.Portal.Access)]` (the admin pages `portal.manage`). The layout
+(P-1) has a brand-ink top bar: logo tile (uploaded branding logo or a default mark) + product name, "Service portal",
+tabs *Service catalog* (also active on the home page and search), *My requests* with the number of open items,
+*Knowledge base* and – while approvals wait or on the approvals page – *Approvals* with a badge; a bell with pending
+approvals and live announcements; the user's initials, name and menu (my requests, report an issue, approvals, profile,
+password, theme, portal settings / announcements for `portal.manage`, open workspace for fulfillers, sign out). The
+footer shows the product name, the configurable tagline, a live status ("All systems operational" / "Maintenance in
+progress" / "Service disruption" derived from live announcements) and the configurable Contact / Privacy /
+Accessibility links (hidden when empty). It hides the splash, enforces the forced password change like `MainLayout` and
+collapses the navigation into a drawer below 1080 px. Pages are verified down to 375 px without horizontal scrolling.
+
+**Design (P-1):** every colour is derived from the design tokens (`--primary`, `--brand-ink`, `--surface-tint`,
+`--border`, ...) with fallbacks matching the reference design and `color-mix(...)` tints of `--primary`, so the portal
+follows the brand colour configured in the admin centre. The layout defines portal aliases (`--p-primary`, `--p-ink`,
+`--p-tint`, ...) and the shared vocabulary (`.portal-container`, `.pcard`, `.pbtn`, `.ppill`, `.picon-tile`,
+`.psection-head`, ...) with `::deep`; components: `PortalCategoryCard`, `PortalSpotlightCard`, `PortalRequestTable`,
+`PortalSupportCard`, `PortalHeroIllustration`, `PortalOrderField`, `PortalGlyph` (a few extra icons such as heart and
+headset).
+
+## Portal settings
+
+`IPortalSettingsService` (`Servora.Application.Portal`, implemented in `Infrastructure/Portal/PortalSettingsService`)
+stores the configurable texts as system settings (`PortalSettingDefinitionProvider`, keys `portal.*`, category
+*Portal*): greeting, headline, subline, search placeholder, frequently searched terms (max. 6), image caption, support
+eyebrow / title / text / button text / link / hours, footer tagline, contact / privacy / accessibility links and the
+currency (EUR, USD, GBP, CHF). Reading requires `portal.access` or `portal.manage`; saving requires `portal.manage`.
+Because `ISystemSettingsService` writes require `admin.settings.manage`, the service writes the (validated) `portal.*`
+keys in a child scope whose actor is the current user restricted to exactly that permission - so the settings audit
+trail names the real user - and writes its own audit entry `portal.settings.updated`. `PortalSettingsValidator` checks
+lengths and links: `PortalUrlPolicy` allows site-relative paths and absolute `http(s)` URLs only (no scriptable schemes,
+protocol-relative URLs, back-slashes, white space or user info); links are re-checked before rendering. All texts are
+plain text and HTML-encoded by Razor. The hero image is verified by magic bytes (PNG, JPEG, GIF, WebP; max. 2 MB),
+stored as `<data dir>/portal/hero.bin` and served by `GET /portal/hero-image` (`nosniff`, cache buster in the URL).
 
 **Landing page (T-13):** users who hold `portal.access` but none of `incident.read`, `problem.read`, `change.read`,
 `request.read` (for example the built-in `user` role) are redirected from `/` (My Work) to `/portal`
@@ -40,7 +70,8 @@ navigation into a drawer below 1080 px. Pages are verified down to 375 px withou
 | `IPortalKnowledgeService` | Published-only knowledge: home, ranked search (reuses `KnowledgeRanker` + `SafeMarkdown`), category lists, reader, view counter, one vote per user. Accepts `portal.access` or `knowledge.read`. |
 | `IPortalApprovalService` | What an approver approves (requested item facts and answers, change facts). Only for the approval's approver (or `approval.read`). Deciding uses the approvals module's `IApprovalInboxService`. |
 | `IPortalAnnouncementService` | Live announcements (`portal.access`); list / save (optimistic concurrency) / delete (`portal.manage`, audited as `portal.announcement.*`). |
-| `IPortalHomeService` | Home data (counts restricted to own records, popular catalog items via `ICatalogOrderService`, approvals count via `IApprovalService.CountPendingForUserAsync`) and the hero search. |
+| `IPortalHomeService` | Home data (counts restricted to own records, popular catalog items via `ICatalogOrderService`, approvals count via `IApprovalService.CountPendingForUserAsync`; P-1: categories with real counts, total services, spotlight items, most ordered item, latest items, favourites), open item count for the navigation badge and the hero search. Request summaries carry their price and billing period. |
+| `IPortalSettingsService` | Portal texts, links, currency and hero image (see *Portal settings*). |
 
 Pure logic: `PortalStatusMapper` (consumer statuses and timelines), `PortalLinkPolicy` (announcement links: site-relative
 paths or absolute `https://` only), `PortalIssueInput` / `PortalAnnouncementInput` validation.
@@ -69,15 +100,17 @@ paths or absolute `https://` only), `PortalIssueInput` / `PortalAnnouncementInpu
 |-------|--------|-------|
 | `portal_announcement` | `PortalAnnouncement` | Title (160), body (2000), kind (Info / Maintenance / Outage / Success), optional link + text, display window (starts / ends), active flag, order. Index on (active, starts). Outages are always listed first. |
 
-`PortalSeeder` (order 600) adds one welcome announcement once (marker `portal.demo_data.seeded`). No migrations are part
-of this task (T-13).
+`PortalSeeder` (order 600) adds one welcome announcement once (marker `portal.demo_data.seeded`). Portal settings live
+in `sys_properties` (no own table). The catalog model extensions used by the portal (pricing, presentation, sections,
+favourites) come with the migration `AddCatalogPortalExperience` for SQLite, SQL Server and PostgreSQL (see
+[service-management.md](service-management.md)).
 
 ## Permissions
 
 | Permission | Meaning |
 |------------|---------|
 | `portal.access` | Use the portal (built-in roles `user` and `itil`). |
-| `portal.manage` | Manage portal announcements (new; only `admin` holds it by default). |
+| `portal.manage` | Manage portal announcements and the portal settings (texts, links, hero image; only `admin` holds it by default). |
 
 ## Tests
 
@@ -93,6 +126,9 @@ graphs and saving hooks):
 * `PortalAnnouncementTests` – display window and ordering, `portal.manage` required, unsafe links rejected, concurrency,
   audit.
 * `PortalLogicTests` – link policy, status mapping, timelines, input validation.
+* `PortalSettingsTests` (P-1) – URL policy, settings validation, defaults, `portal.manage` is enough to save (narrowly
+  elevated settings write, audited), everything forbidden without portal permissions, hero image type check / storage /
+  removal (with `PortalActorAwareUser`, a test actor that honours `ActorContext` like the production `CurrentUser`).
 
 ## Known limitations
 
@@ -101,5 +137,9 @@ graphs and saving hooks):
   require `knowledge.read`.
 * The kernel `IAttachmentService` and `/attachments/{id}` have no record-level authorization; the portal therefore uses its
   own ownership-checked download endpoint.
-* Users cannot order on behalf of others in the portal (fulfillers use `/requests/new`).
+* Ordering on behalf of others in the portal is offered only to users holding `request.write` (enforced by the catalog
+  service).
+* "Save as draft" from the reference design is not offered: requests have no draft state.
+* Without an uploaded product image, item cards show an icon panel with the teaser instead of a photo (no stock photos
+  are shipped).
 * The greeting uses the server's local time.

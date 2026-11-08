@@ -86,7 +86,7 @@ internal static class PortalTicketReader
             var ids = requests.Select(r => r.Id).ToList();
             var items = await db.Set<RequestItem>().AsNoTracking().Where(ri => ids.Contains(ri.RequestId))
                 .OrderBy(ri => ri.Number)
-                .Select(ri => new { ri.RequestId, ri.CatalogItemId, ri.State })
+                .Select(ri => new { ri.RequestId, ri.CatalogItemId, ri.State, ri.UnitPrice, ri.Quantity, ri.BillingType })
                 .Take(window * 5)
                 .ToListAsync(cancellationToken);
             var catalogIds = items.Select(i => i.CatalogItemId).Distinct().ToList();
@@ -108,6 +108,8 @@ internal static class PortalTicketReader
                     OnBehalfOfName = r.RequestedForId != userId ? recipients.NameOf(r.RequestedForId) : null,
                     OpenedAt = r.OpenedAt,
                     UpdatedAt = r.UpdatedAt,
+                    Price = own.Sum(i => i.UnitPrice * i.Quantity),
+                    IsMonthly = own.Any(i => i.BillingType == CatalogBillingType.Monthly),
                 };
             }));
         }

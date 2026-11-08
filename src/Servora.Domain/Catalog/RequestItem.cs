@@ -23,8 +23,20 @@ public class RequestItem : TaskRecord
     /// <summary>Gets or sets the ordered quantity.</summary>
     public int Quantity { get; set; } = 1;
 
-    /// <summary>Gets or sets the unit price at the time of ordering.</summary>
+    /// <summary>
+    /// Gets or sets the unit price at the time of ordering including the price impacts of the chosen options (computed
+    /// server-side). For monthly billed items this is the monthly price.
+    /// </summary>
     public decimal UnitPrice { get; set; }
+
+    /// <summary>Gets or sets how <see cref="UnitPrice"/> is billed (copied from the catalog item when ordered).</summary>
+    public CatalogBillingType BillingType { get; set; } = CatalogBillingType.OneTime;
+
+    /// <summary>Gets or sets the contract term in months of monthly billed items.</summary>
+    public int? TermMonths { get; set; }
+
+    /// <summary>Gets or sets the one-time costs per unit of monthly billed items.</summary>
+    public decimal OneTimePrice { get; set; }
 
     /// <summary>Gets or sets the validated variable answers as a JSON object keyed by variable name.</summary>
     public string? VariablesJson { get; set; }

@@ -170,9 +170,14 @@ else
                     </div>
                 </div>
                 <dl class="kv">
-                    <dt>Unit price</dt><dd>@SmLabels.Price(_form.Item.Price)</dd>
+                    @{ var quote = CatalogPriceCalculator.Calculate(_form.Pricing, _form.Variables, _values, Math.Max(1, _quantity)); }
+                    <dt>Unit price</dt><dd>@SmLabels.Price(quote.UnitPrice)@(quote.IsMonthly ? " / month" : string.Empty)</dd>
                     <dt>Quantity</dt><dd>@_quantity</dd>
-                    <dt>Total</dt><dd><b>@SmLabels.Price(_form.Item.Price * Math.Max(1, _quantity))</b></dd>
+                    <dt>Total</dt><dd><b>@SmLabels.Price(quote.Total)@(quote.IsMonthly ? " / month" : string.Empty)</b></dd>
+                    @if (quote.IsMonthly && quote.TermMonths is { } term)
+                    {
+                        <dt>Term</dt><dd>@term months</dd>
+                    }
                     <dt>Delivery</dt><dd>@DeliveryText(_form.Item.DeliveryDays)</dd>
                     <dt>Approval</dt><dd>@(_form.Item.ApprovalRequired ? "Required" : "Not required")</dd>
                 </dl>
