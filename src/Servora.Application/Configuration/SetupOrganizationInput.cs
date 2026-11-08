@@ -15,6 +15,9 @@ public sealed class SetupOrganizationInput
     /// <summary>Gets or sets the default time zone.</summary>
     public string TimeZone { get; set; } = "UTC";
 
+    /// <summary>Gets or sets a value indicating whether sample users, tickets and articles are installed. Off by default.</summary>
+    public bool IncludeSampleData { get; set; }
+
     /// <summary>Converts the input into setting values.</summary>
     /// <returns>The raw values by setting key.</returns>
     public IReadOnlyDictionary<string, string?> ToSettings() => new Dictionary<string, string?>(StringComparer.Ordinal)

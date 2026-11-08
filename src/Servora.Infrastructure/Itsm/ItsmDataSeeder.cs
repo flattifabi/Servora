@@ -43,6 +43,9 @@ public sealed class ItsmDataSeeder(INumberSequenceService numbers, IClock clock,
     public int Order => 500;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         await SeedCategoriesAsync(db, cancellationToken);
@@ -209,7 +212,7 @@ public sealed class ItsmDataSeeder(INumberSequenceService numbers, IClock clock,
         CreatedAt = at,
     };
 
-    private static async Task SeedCategoriesAsync(IAppDbContext db, CancellationToken cancellationToken)
+    internal static async Task SeedCategoriesAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         if (await db.Set<IncidentCategory>().AnyAsync(cancellationToken))
         {

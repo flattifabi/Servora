@@ -24,6 +24,9 @@ public sealed class AutomationSeeder : IDataSeeder
     public int Order => 300;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         var source = await db.Set<DataSource>().FirstOrDefaultAsync(s => s.Name == DemoDataSourceName, cancellationToken);

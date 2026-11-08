@@ -46,6 +46,9 @@ public sealed class IdentityDemoSeeder(IPasswordHasherService hasher, ILogger<Id
     public int Order => 100;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         if (await db.Set<SystemSetting>().AnyAsync(s => s.Key == MarkerKey, cancellationToken))

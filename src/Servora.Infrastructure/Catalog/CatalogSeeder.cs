@@ -31,6 +31,9 @@ public sealed class CatalogSeeder : IDataSeeder
     public int Order => 120;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         var serviceDesk = await ServiceManagementSeedHelper.EnsureGroupAsync(db, "Service Desk", GroupType.Assignment, "First line support for all employees.", cancellationToken);

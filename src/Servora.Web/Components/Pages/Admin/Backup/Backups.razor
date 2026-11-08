@@ -211,6 +211,11 @@
     </div>
 </div>
 
+@if (_canRestore)
+{
+    <DataResetCard />
+}
+
 <BackupScheduleDrawer @bind-Open="_scheduleOpen" Settings="_settings" Save="SaveScheduleAsync" />
 <RestoreBackupDialog @bind-Open="_restoreOpen" Check="_restoreCheck" Confirm="RestoreAsync" />
 <ConfirmDialog Open="_deleteTarget is not null" OpenChanged="v => { if (!v) { _deleteTarget = null; } }" Danger="true" Title="Delete backup?"

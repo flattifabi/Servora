@@ -19,6 +19,9 @@ public sealed class KnowledgeSeeder(INumberSequenceService numbers) : IDataSeede
     public int Order => 130;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         var it = await EnsureBaseAsync(db, "IT Knowledge", "How-tos, troubleshooting guides and runbooks for IT services.", "book-open", 10, cancellationToken);

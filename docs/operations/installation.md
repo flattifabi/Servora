@@ -66,6 +66,18 @@ setup token that Servora writes to `%ProgramData%\Servora\setup-token.txt` while
 
 Afterwards sign in with **`admin` / `admin`** – you must choose a new password immediately.
 
+### Start empty or with sample data
+
+A new installation contains only the `admin` account and reference data (roles, incident categories, CI classes,
+notification templates, system reports). To try the product with demo users, tickets, articles, assets and a service
+catalog, switch on **Install sample data** in the setup wizard.
+
+**Backup & Restore → Reset data** empties an instance later. It requires the permission `backup.restore`, creates a
+full backup first, and removes tickets, requests, the service catalog, knowledge, assets and CIs, flows and data
+sources, comments, attachments, approvals, notifications, AI conversations, groups and all users except `admin`, the
+signed-in administrator and service accounts. Settings, branding, roles, secrets, API keys, SLA definitions,
+categories, CI classes, reports and the audit log stay. Record numbers start again at 1001. Roll back with **Restore**.
+
 ## 3. Install unattended (silent)
 
 ```powershell

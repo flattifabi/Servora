@@ -107,7 +107,7 @@ cannot be restored into a version with migrations either.
 
 - **Development / evaluation database:** reset it – stop Servora, delete `App_Data/servora.db` (SQLite; also the
   `-wal`/`-shm` files) or drop/recreate the SQL Server / PostgreSQL database, and start again. The schema is created
-  by migrations and seeded (`admin` / `admin`).
+  by migrations and seeded with the administrator (`admin` / `admin`) and reference data.
 - **Data worth keeping:** baseline the schema as described in
   [upgrade.md › Legacy databases](../operations/upgrade.md#legacy-databases-without-migration-history) (only when the
   schema matches `InitialCreate` exactly), after a database-native backup.

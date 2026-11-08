@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Servora.Application.Common;
@@ -23,11 +24,21 @@ namespace Servora.Infrastructure.Persistence;
 /// <param name="logger">The logger.</param>
 public sealed class DatabaseInitializer(IServiceScopeFactory scopeFactory, ILogger<DatabaseInitializer> logger)
 {
-    /// <summary>Migrates the database to the latest migration and seeds it.</summary>
+    /// <summary>The configuration key that adds the sample data on every start (development and demo systems).</summary>
+    public const string SeedDemoDataKey = "Servora:SeedDemoData";
+
+    /// <summary>Migrates the database to the latest migration and seeds the reference data.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the schema is up to date and seed data exists.</returns>
     /// <exception cref="DatabaseMigrationException">Thrown when the schema cannot be brought up to date safely.</exception>
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public Task InitializeAsync(CancellationToken cancellationToken = default) => InitializeAsync(includeDemoData: false, cancellationToken);
+
+    /// <summary>Migrates the database to the latest migration and seeds it.</summary>
+    /// <param name="includeDemoData">Whether the sample data is added as well (the setup option).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the schema is up to date and seed data exists.</returns>
+    /// <exception cref="DatabaseMigrationException">Thrown when the schema cannot be brought up to date safely.</exception>
+    public async Task InitializeAsync(bool includeDemoData, CancellationToken cancellationToken = default)
     {
         using var scope = scopeFactory.CreateScope();
         scope.ServiceProvider.GetRequiredService<ActorContext>().Set(ActorInfo.SystemNamed("System Setup"));
@@ -53,7 +64,9 @@ public sealed class DatabaseInitializer(IServiceScopeFactory scopeFactory, ILogg
         }
 
         await using var db = factory.Create();
-        foreach (var seeder in scope.ServiceProvider.GetServices<IDataSeeder>().OrderBy(s => s.Order))
+        var configured = scope.ServiceProvider.GetService<IConfiguration>()?[SeedDemoDataKey];
+        var seedDemoData = includeDemoData || string.Equals(configured, "true", StringComparison.OrdinalIgnoreCase);
+        foreach (var seeder in scope.ServiceProvider.GetServices<IDataSeeder>().Where(s => seedDemoData || !s.IsDemoData).OrderBy(s => s.Order))
         {
             logger.LogDebug("Running seeder {Seeder}", seeder.GetType().Name);
             await seeder.SeedAsync(db, cancellationToken);

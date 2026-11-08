@@ -29,6 +29,8 @@ public static class BackupModule
         services.AddSingleton<BackupAuditFlusher>();
         services.AddSingleton<IApplicationRestarter, HostApplicationRestarter>();
         services.AddScoped<IBackupService, BackupService>();
+        services.AddScoped<DataResetEngine>();
+        services.AddScoped<IDataResetService, DataResetService>();
         services.AddHostedService<BackupSchedulerService>();
         return services;
     }

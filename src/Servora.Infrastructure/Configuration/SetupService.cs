@@ -188,8 +188,8 @@ public sealed class SetupService(
             Report(progress, SetupStep.SeedData, SetupStepStatus.Running);
             try
             {
-                await initializer.InitializeAsync(cancellationToken);
-                Report(progress, SetupStep.SeedData, SetupStepStatus.Done, "Roles and administrator created");
+                await initializer.InitializeAsync(organization.IncludeSampleData, cancellationToken);
+                Report(progress, SetupStep.SeedData, SetupStepStatus.Done, organization.IncludeSampleData ? "Roles, administrator and sample data created" : "Roles and administrator created");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

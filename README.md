@@ -28,6 +28,7 @@ dotnet run --project src/Servora.Web
 Open http://localhost:5080 and sign in with **admin / admin** – you will be asked to choose a new password
 immediately. Development uses SQLite in `src/Servora.Web/App_Data` (see `appsettings.Development.json`).
 To try the first-run setup wizard, use the launch profile `Servora (setup wizard)`.
+A new database contains only the administrator; set `Servora__SeedDemoData=true` to add the sample data at startup.
 
 ## Installation (production)
 

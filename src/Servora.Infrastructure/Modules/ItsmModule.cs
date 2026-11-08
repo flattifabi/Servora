@@ -19,6 +19,7 @@ public static class ItsmModule
         services.AddScoped<IProblemService, ProblemService>();
         services.AddScoped<IMyWorkService, MyWorkService>();
         services.AddScoped<IRecordSavingHook, ItsmSavingHook>();
+        services.AddScoped<IDataSeeder, ItsmReferenceSeeder>();
         services.AddScoped<IDataSeeder, ItsmDataSeeder>();
         return services;
     }

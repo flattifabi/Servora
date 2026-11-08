@@ -16,6 +16,9 @@ public sealed class AssetSeeder(INumberSequenceService numbers) : IDataSeeder
     public int Order => 120;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         if (await db.Set<Asset>().AnyAsync(cancellationToken))

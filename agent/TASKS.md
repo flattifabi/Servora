@@ -45,6 +45,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | D-1 | Design system redesign (light forest-green look from product owner references, brand-derived tokens, shell, sign-in) | UI Agent | T-13 | ✅ Done |
 | P-1 | Self-service portal + catalog redesign (home, item configuration with live price summary, portal settings, catalog model + migration) | UI Agent | T-13 | ✅ Done |
 | T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | ✅ Done |
+| G-1 | Clean start without sample data, setup option, Reset data with backup (getting-started guide still open) | Orchestrator | T-13 | ✅ Done |
 
 Dependency graph:
 

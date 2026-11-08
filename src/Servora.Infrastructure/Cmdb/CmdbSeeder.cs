@@ -21,6 +21,9 @@ public sealed class CmdbSeeder : IDataSeeder
     public int Order => 110;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         await SeedClassesAsync(db, cancellationToken);
@@ -35,7 +38,7 @@ public sealed class CmdbSeeder : IDataSeeder
     private static CiAttributeDefinition Attr(string name, string label, CiAttributeType type, string? unit = null, bool required = false, params string[] choices) =>
         new() { Name = name, Label = label, Type = type, Unit = unit, Required = required, Choices = [.. choices] };
 
-    private static async Task SeedClassesAsync(IAppDbContext db, CancellationToken cancellationToken)
+    internal static async Task SeedClassesAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         var definitions = new List<CiClass>
         {

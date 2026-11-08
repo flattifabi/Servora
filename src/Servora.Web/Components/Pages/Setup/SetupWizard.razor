@@ -274,6 +274,11 @@
                         </FormField>
                     </div>
 
+                    <div class="mt-6">
+                        <Switch Value="_organization.IncludeSampleData" ValueChanged="v => _organization.IncludeSampleData = v" Label="Install sample data" />
+                        <div class="small faint mt-2">Adds demo users, tickets, knowledge articles, assets and a service catalog for trying the product. Leave it off to start with only the administrator.</div>
+                    </div>
+
                     <div class="brand-preview mt-6">
                         <div class="setup-mark"><Icon Name="layers" Size="16" /></div>
                         <div class="flex-1">
@@ -315,6 +320,8 @@
                             <dd><span class="inline-swatch" style="background:@SafeAccent"></span> <span class="mono small">@_organization.AccentColor</span></dd>
                             <dt>Time zone</dt>
                             <dd>@TimeZoneName</dd>
+                            <dt>Sample data</dt>
+                            <dd>@(_organization.IncludeSampleData ? "Installed" : "None – only the administrator")</dd>
                         </dl>
                         <div class="review-section mt-4"><Icon Name="user-check" Size="15" /> Administrator</div>
                         <dl class="kv setup-kv">

@@ -1,0 +1,97 @@
+@* Removes all records of the instance after creating a backup; the administrator must type RESET. *@
+@inject IDataResetService DataReset
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<div class="card mt-6">
+    <div class="card-header"><h3><Icon Name="alert-triangle" Size="16" /> Reset data</h3></div>
+    <div class="card-body">
+        <p class="small muted">Remove the sample data and every other record to start empty. Settings, roles and the administrator stay.</p>
+        <button class="btn btn-outline-danger mt-3" @onclick="OpenAsync"><Icon Name="trash" Size="16" /> Reset data…</button>
+    </div>
+</div>
+
+<Modal Open="_open" OpenChanged="v => _open = v" Title="Reset data" Subtitle="Remove all records of this instance" Icon="alert-triangle" CloseOnBackdrop="false">
+    <ChildContent>
+        @if (_preview is null)
+        {
+            <Skeleton Lines="6" />
+        }
+        else
+        {
+            <div class="eyebrow mb-2">Will be removed (@_preview.TotalRows.ToString("N0") rows)</div>
+            <dl class="kv">
+                @foreach (var area in _preview.Areas)
+                {
+                    <dt>@area.Name</dt>
+                    <dd>@area.Rows.ToString("N0")</dd>
+                }
+            </dl>
+            <div class="eyebrow mt-4 mb-2">Stays</div>
+            <p class="small muted">The administrator, your own account and service accounts, roles, settings and branding, secrets, API keys, SLA definitions, categories, CI classes, reports and the audit log. Record numbers start again at 1001.</p>
+            <div class="alert alert-info mt-4"><Icon Name="info" Size="16" /><span>A full backup is created first. If it fails, nothing is removed. You can roll back with Restore on this page.</span></div>
+            <FormField Label="@($"Type {IDataResetService.ConfirmationText} to confirm")" Class="mt-4">
+                <input class="input mono" autocomplete="off" @bind="_confirmation" @bind:event="oninput" />
+            </FormField>
+            @if (_error is not null)
+            {
+                <div class="alert alert-danger mt-4"><Icon Name="alert-triangle" Size="16" /><span>@_error</span></div>
+            }
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _open = false">Cancel</button>
+        <button class="btn btn-danger" disabled="@(_busy || _confirmation != IDataResetService.ConfirmationText)" @onclick="ResetAsync">
+            @if (_busy)
+            {
+                <span class="spinner"></span> <span>Backing up and removing…</span>
+            }
+            else
+            {
+                <Icon Name="trash" Size="16" /> <span>Create backup and reset</span>
+            }
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private bool _open;
+    private bool _busy;
+    private string _confirmation = string.Empty;
+    private string? _error;
+    private DataResetPreview? _preview;
+
+    private async Task OpenAsync()
+    {
+        _open = true;
+        _confirmation = string.Empty;
+        _error = null;
+        _preview = null;
+        var result = await DataReset.GetPreviewAsync();
+        if (result.Succeeded)
+        {
+            _preview = result.Value;
+        }
+        else
+        {
+            _open = false;
+            Toasts.Error(result.Error ?? "The data could not be counted.");
+        }
+    }
+
+    private async Task ResetAsync()
+    {
+        _busy = true;
+        _error = null;
+        var result = await DataReset.ResetAsync(_confirmation);
+        _busy = false;
+        if (!result.Succeeded)
+        {
+            _error = result.Error;
+            return;
+        }
+
+        Toasts.Success($"Removed {result.Value!.DeletedRows:N0} records. Backup created first.");
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+}

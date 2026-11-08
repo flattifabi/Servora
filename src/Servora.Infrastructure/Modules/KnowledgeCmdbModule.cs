@@ -30,6 +30,7 @@ public static class KnowledgeCmdbModule
         services.AddScoped<IAssetService, AssetService>();
 
         // Seed data (CI classes and service map first, then assets and articles that reference CIs).
+        services.AddScoped<IDataSeeder, CmdbReferenceSeeder>();
         services.AddScoped<IDataSeeder, CmdbSeeder>();
         services.AddScoped<IDataSeeder, AssetSeeder>();
         services.AddScoped<IDataSeeder, KnowledgeSeeder>();

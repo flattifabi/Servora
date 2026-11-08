@@ -18,6 +18,9 @@ public sealed class PortalSeeder : IDataSeeder
     public int Order => 600;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         if (await db.Set<SystemSetting>().AnyAsync(s => s.Key == MarkerKey, cancellationToken))

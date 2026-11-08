@@ -24,6 +24,9 @@ public sealed class ChangeManagementSeeder(INumberSequenceService numbers, ICloc
     public int Order => 110;
 
     /// <inheritdoc />
+    public bool IsDemoData => true;
+
+    /// <inheritdoc />
     public async Task SeedAsync(IAppDbContext db, CancellationToken cancellationToken)
     {
         var cabId = await ServiceManagementSeedHelper.EnsureGroupAsync(db, ChangeTables.ChangeAdvisoryBoardGroup, GroupType.Approval,

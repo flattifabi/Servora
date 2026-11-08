@@ -5,7 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- A new installation starts with only the administrator and reference data. Sample data is an option in the setup
+  wizard (off by default) or the setting `Servora:SeedDemoData`.
+
 ### Added
+- **Reset data** in Backup & Restore removes all records after creating a backup and keeps the configuration.
 - Platform kernel: clean architecture solution (.NET 10), EF Core persistence for SQLite / SQL Server / PostgreSQL,
   audit fields, optimistic concurrency, before-save hooks and asynchronous record events.
 - Authentication & authorization: cookie sign-in, lockout, password policy, forced password change for the bootstrap
