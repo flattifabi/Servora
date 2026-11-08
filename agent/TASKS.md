@@ -40,7 +40,7 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-10 | API keys, REST API foundation & docs, MCP server, AI providers / orchestrator / assistant | API & AI Agent | T-01 | ✅ Done |
 | T-11 | Self-service portal | Portal Agent | T-04, T-05, T-06 (merged) | ✅ Done |
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
-| T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ⏳ Planned |
+| T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | 🔨 In Progress |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏳ Planned |
 | T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | ✅ Done |
 
@@ -520,7 +520,9 @@ config (T-13); keep `/health` anonymous while unconfigured (T-03/T-09 – alread
 
 ---
 
-## T-13 Integration ⏳ (Orchestrator)
+## T-13 Integration 🔨 (Orchestrator)
+
+**Split (2026-11-08):** T-13a *Migrations* (`src/Servora.Persistence.*`, `DatabaseInitializer.cs`, migration tests, `docs/development/migrations.md`) and T-13b *Cross-module integration* (Web/layout/navigation/auth/seeders, no EF model changes) run in parallel worktrees; the orchestrator merges both and verifies migrations against the merged model.
 
 Merge all branches, resolve conflicts, process "Requests to orchestrator" (nav entries, shared files, packages),
 wire cross-module UI (branding into layout, notification bell, custom fields section in typed forms), generate
@@ -636,3 +638,4 @@ build green, tests pass.
 | 2026-11-07 | T-08 validated and merged (✅). |
 | 2026-11-07 | T-15 validated (incl. orchestrator end-to-end backup/restore on the full schema) and merged (✅). |
 | 2026-11-07 | T-11 validated and merged (✅). All implementation tasks done; next: T-13 integration. |
+| 2026-11-08 | T-13 started: T-13a migrations and T-13b cross-module integration in parallel. |
