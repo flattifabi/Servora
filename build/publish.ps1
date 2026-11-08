@@ -48,6 +48,9 @@ if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $repoRoot 'artifacts'
 }
 
+# MSBuild resolves relative paths against the project folder, so -p:PayloadZip must be absolute.
+$OutputDirectory = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine((Get-Location).ProviderPath, $OutputDirectory))
+
 if (-not $Version) {
     [xml] $props = Get-Content -Raw -Path (Join-Path $repoRoot 'Directory.Build.props')
     $node = $props.SelectSingleNode('/Project/PropertyGroup/Version')
