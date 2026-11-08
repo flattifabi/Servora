@@ -23,7 +23,7 @@
 
 .icon-choice.selected {
     background: var(--gradient);
-    color: #fff;
+    color: var(--primary-contrast);
     border-color: transparent;
     box-shadow: var(--glow);
 }

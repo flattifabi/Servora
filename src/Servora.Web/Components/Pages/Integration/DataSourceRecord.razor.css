@@ -2,8 +2,8 @@
 .auth-type { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: var(--r-sm); cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); transition: all var(--speed) var(--ease); }
 .auth-type:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
 .auth-type.active { color: var(--text); border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px var(--primary-soft); }
-.cred-status { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: var(--r); color: var(--warning); background: var(--warning-soft); border: 1px solid rgba(245, 158, 11, .3); }
-.cred-status.ok { color: var(--success); background: var(--success-soft); border-color: rgba(34, 197, 94, .3); }
+.cred-status { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: var(--r); color: var(--warning); background: var(--warning-soft); border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent); }
+.cred-status.ok { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
 .cred-title { font-weight: 650; color: var(--text); font-size: 13.5px; }
 .method { display: inline-flex; align-items: center; justify-content: center; min-width: 56px; height: 22px; padding: 0 8px; border-radius: var(--r-xs); font-family: var(--font-mono); font-size: 11px; font-weight: 800; color: var(--info); background: var(--info-soft); }
 .method-post { color: var(--success); background: var(--success-soft); }

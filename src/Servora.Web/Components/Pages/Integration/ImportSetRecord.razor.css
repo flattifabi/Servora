@@ -3,7 +3,7 @@
 .source-type > span { display: flex; flex-direction: column; gap: 4px; }
 .source-type strong { color: var(--text); font-size: 13.5px; }
 .source-type:hover { border-color: var(--border-strong); }
-.source-type.active { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px var(--primary-soft); }
+.source-type.active { color: var(--primary-text); border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px var(--primary-soft); }
 .upload-zone { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 12px; cursor: pointer; text-align: center; color: var(--text-muted); }
 .upload-zone ::deep input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .csv-preview { overflow-x: auto; border-radius: var(--r-sm); border: 1px solid var(--border); max-height: 220px; }

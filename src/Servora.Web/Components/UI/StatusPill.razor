@@ -24,8 +24,8 @@
         var s = (state ?? string.Empty).Replace(" ", string.Empty).ToLowerInvariant();
         return s switch
         {
-            "new" or "draft" or "open" or "requested" or "planned" => "info",
-            "inprogress" or "active" or "workinprogress" or "implement" or "running" or "assess" or "authorize" or "scheduled" or "review" => "primary",
+            "new" or "draft" or "open" or "requested" or "planned" => "neutral",
+            "inprogress" or "active" or "workinprogress" or "implement" or "running" or "assess" or "authorize" or "scheduled" or "review" => "info",
             "onhold" or "pending" or "awaiting" or "waiting" or "maintenance" or "paused" => "warning",
             "resolved" or "closed" or "completed" or "complete" or "approved" or "published" or "operational" or "succeeded" or "success" or "fulfilled" or "healthy" or "enabled" => "success",
             "cancelled" or "canceled" or "rejected" or "failed" or "error" or "breached" or "nonoperational" or "unhealthy" or "disabled" => "danger",

@@ -20,7 +20,7 @@
     border-radius: 50%;
     border: 2px solid transparent;
     cursor: pointer;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 18%, transparent);
     transition: transform var(--speed) var(--ease), box-shadow var(--speed);
 }
 
@@ -62,9 +62,10 @@
 .logo-placeholder {
     width: 52px;
     height: 52px;
-    border-radius: 15px;
+    border-radius: var(--r-lg);
     display: grid;
     place-items: center;
+    background: var(--brand-ink);
     color: #fff;
 }
 
@@ -73,78 +74,159 @@
     pointer-events: none;
 }
 
+/* Mini mock of the product shell, recoloured live with the chosen accent (.brand-scope). */
 .preview-shell {
+    /* Always previews the light theme, also while the admin works in the dark theme. */
+    --surface: #ffffff;
+    --surface-hover: #f2f6f4;
+    --text: #15211b;
+    --text-2: #38443e;
+    --border: #dfe7e2;
+    --border-strong: #cbd6d0;
+    --info: #2160c0;
+    --info-soft: #e5eefb;
+    color-scheme: light;
+    color: var(--text);
+    display: grid;
+    grid-template-columns: 128px 1fr;
+    min-height: 210px;
+    border-radius: var(--r);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.preview-side {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    padding: 16px;
-    border-radius: var(--r);
-    background: var(--sidebar);
-    border: 1px solid var(--border);
+    gap: 14px;
+    padding: 12px 10px;
+    background: var(--brand-ink);
+    color: rgba(255, 255, 255, .78);
 }
 
 .preview-brand {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    min-width: 0;
+}
+
+.preview-mark,
+.preview-logo {
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    border-radius: 7px;
 }
 
 .preview-mark {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
     display: grid;
     place-items: center;
-    color: #fff;
+    background: color-mix(in srgb, var(--brand) 14%, #fff);
+    color: var(--brand-ink);
 }
 
 .preview-logo {
-    width: 34px;
-    height: 34px;
     object-fit: contain;
+    background: #fff;
+    padding: 2px;
 }
 
 .preview-name {
     font-weight: 700;
-    font-size: 14px;
+    font-size: 12.5px;
+    color: #fff;
+    letter-spacing: -.01em;
 }
 
 .preview-sub {
-    font-size: 11px;
-    color: var(--text-faint);
-    text-transform: uppercase;
-    letter-spacing: .06em;
+    font-size: 10px;
+    color: rgba(255, 255, 255, .56);
 }
 
 .preview-nav {
     display: grid;
-    gap: 4px;
+    gap: 2px;
 }
 
 .preview-link {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    border-radius: var(--r-sm);
-    color: var(--text-muted);
-    font-size: 13px;
+    gap: 7px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 11.5px;
 }
 
 .preview-link.active {
-    color: var(--text);
-    background: color-mix(in srgb, var(--accent-preview) 16%, transparent);
-    box-shadow: inset 2px 0 0 var(--accent-preview);
+    color: #fff;
+    font-weight: 600;
+    background: rgba(255, 255, 255, .13);
 }
 
-.preview-button {
-    align-self: flex-start;
+.preview-main {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 14px;
+    background: var(--surface-tint);
+    min-width: 0;
+}
+
+.preview-eyebrow {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--primary-text);
+}
+
+.preview-title {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    color: var(--text);
+}
+
+.preview-tile {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.preview-tile .pill {
+    margin-left: auto;
+    height: 18px;
+    font-size: 10px;
+    padding: 0 7px;
+}
+
+.preview-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    background: var(--primary-soft);
+    color: var(--primary-text);
+}
+
+.preview-link-text {
     display: inline-flex;
     align-items: center;
-    height: 32px;
-    padding: 0 14px;
-    border-radius: var(--r-sm);
-    color: #fff;
-    font-size: 12.5px;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 11.5px;
     font-weight: 600;
+    color: var(--primary-text);
 }

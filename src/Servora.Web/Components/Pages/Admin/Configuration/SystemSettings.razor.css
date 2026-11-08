@@ -21,7 +21,7 @@
     place-items: center;
     border-radius: 50%;
     background: var(--primary-soft);
-    color: var(--primary);
+    color: var(--primary-text);
 }
 
 .history-message {

@@ -2,6 +2,7 @@
 @inject IBrandingService Branding
 @inject ToastService Toasts
 @inject Servora.Web.Services.BrandingState BrandingState
+@inject IJSRuntime JS
 
 <div class="grid grid-sidebar">
     <div class="card">
@@ -27,6 +28,7 @@
                     </FormField>
                     <div class="field span-all">
                         <label class="required">Accent color</label>
+                        <div class="help" style="margin-top:-2px">The whole palette derives from this colour: buttons, links, the sidebar and portal header (a deep shade of it) and the light tints. Deep, saturated colours work best.</div>
                         <div class="swatches">
                             @foreach (var color in s_swatches)
                             {
@@ -48,7 +50,7 @@
                         }
                         else
                         {
-                            <div class="logo-placeholder" style="background:@PreviewGradient"><Icon Name="sparkles" Size="22" /></div>
+                            <div class="logo-placeholder"><Icon Name="layers" Size="22" /></div>
                         }
                     </div>
                     <div class="flex-1">
@@ -93,39 +95,50 @@
 
     <div class="stack sticky-top" style="gap:16px">
         <div class="card">
-            <div class="card-header"><h3><Icon Name="eye" Size="18" /> Preview</h3></div>
+            <div class="card-header"><div><h3><Icon Name="eye" Size="18" /> Preview</h3><div class="card-subtitle">Light theme; the dark theme derives from the same colour.</div></div></div>
             <div class="card-body">
-                <div class="preview-shell">
-                    <div class="preview-brand">
-                        @if (_branding?.LogoUrl is { } previewUrl)
-                        {
-                            <img class="preview-logo" src="@previewUrl" alt="" />
-                        }
-                        else
-                        {
-                            <div class="preview-mark" style="background:@PreviewGradient"><Icon Name="sparkles" Size="15" /></div>
-                        }
-                        <div>
-                            <div class="preview-name">@(string.IsNullOrWhiteSpace(_productName) ? "Servora" : _productName)</div>
-                            <div class="preview-sub">@(string.IsNullOrWhiteSpace(_companyName) ? "Service Platform" : _companyName)</div>
+                <div class="preview-shell brand-scope" style="@PreviewStyle">
+                    <div class="preview-side">
+                        <div class="preview-brand">
+                            @if (_branding?.LogoUrl is { } previewUrl)
+                            {
+                                <img class="preview-logo" src="@previewUrl" alt="" />
+                            }
+                            else
+                            {
+                                <div class="preview-mark"><Icon Name="layers" Size="14" /></div>
+                            }
+                            <div class="flex-1">
+                                <div class="preview-name truncate">@(string.IsNullOrWhiteSpace(_productName) ? "Servora" : _productName)</div>
+                                <div class="preview-sub truncate">@(string.IsNullOrWhiteSpace(_companyName) ? "Service Platform" : _companyName)</div>
+                            </div>
+                        </div>
+                        <div class="preview-nav">
+                            <div class="preview-link active"><Icon Name="home" Size="14" /> My Work</div>
+                            <div class="preview-link"><Icon Name="alert-triangle" Size="14" /> Incidents</div>
+                            <div class="preview-link"><Icon Name="book-open" Size="14" /> Knowledge</div>
                         </div>
                     </div>
-                    <div class="preview-nav">
-                        <div class="preview-link active" style="--accent-preview:@SafeAccent"><Icon Name="home" Size="14" /> My Work</div>
-                        <div class="preview-link"><Icon Name="alert-triangle" Size="14" /> Incidents</div>
-                        <div class="preview-link"><Icon Name="book-open" Size="14" /> Knowledge</div>
+                    <div class="preview-main">
+                        <div class="preview-eyebrow">Overview</div>
+                        <div class="preview-title">Good morning</div>
+                        <div class="preview-tile"><span class="preview-icon"><Icon Name="laptop" Size="14" /></span><span>Laptop request</span><span class="pill pill-info">In progress</span></div>
+                        <div class="flex gap-2 mt-3">
+                            <span class="btn btn-primary btn-sm" aria-hidden="true">Primary</span>
+                            <span class="btn btn-secondary btn-sm" aria-hidden="true">Secondary</span>
+                        </div>
+                        <span class="preview-link-text">View all requests <Icon Name="arrow-right" Size="12" /></span>
                     </div>
-                    <span class="preview-button" style="background:@SafeAccent">Primary action</span>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<ConfirmDialog @bind-Open="_confirmRemove" Title="Remove the logo?" Message="The default Servora mark is shown again." ConfirmText="Remove logo" Danger="true" OnConfirm="RemoveAsync" />
+<ConfirmDialog @bind-Open="_confirmRemove" Title="Remove the logo?" Message="The default mark is shown again." ConfirmText="Remove logo" Danger="true" OnConfirm="RemoveAsync" />
 
 @code {
-    private static readonly string[] s_swatches = ["#7c6cff", "#6366f1", "#0ea5e9", "#14b8a6", "#22c55e", "#f59e0b", "#f43f5e", "#ec4899"];
+    private static readonly IReadOnlyList<string> s_swatches = AccentSwatches.All;
     private static readonly SettingDefinition s_accentDefinition = CoreSettingDefinitionProvider.All.First(d => d.Key == SystemSettingKeys.AccentColor);
 
     private BrandingInfo? _branding;
@@ -142,7 +155,8 @@
 
     private string SafeAccent => _accent is { Length: 7 } && _accent[0] == '#' && _accent.Skip(1).All(Uri.IsHexDigit) ? _accent : CoreSettingDefinitionProvider.DefaultAccentColor;
 
-    private string PreviewGradient => $"linear-gradient(135deg, {SafeAccent} 0%, #a855f7 55%, #22d3ee 100%)";
+    // SafeAccent is validated as #rrggbb, so it is safe inside the style attribute.
+    private string PreviewStyle => $"--brand:{SafeAccent};--primary:{SafeAccent};--primary-contrast:{Servora.Web.Services.BrandingState.ContrastColorFor(SafeAccent)}";
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -166,11 +180,26 @@
             if (Toasts.FromResult(result, "Branding saved"))
             {
                 await LoadAsync();
+                await ApplyBrandAsync();
             }
         }
         finally
         {
             _saving = false;
+        }
+    }
+
+    /// <summary>Recolours the open page right away (new pages pick the accent up from the document head).</summary>
+    private async Task ApplyBrandAsync()
+    {
+        var accent = BrandingState.CustomAccentColor;
+        try
+        {
+            await JS.InvokeVoidAsync("servora.applyBrand", accent, accent is null ? null : Servora.Web.Services.BrandingState.ContrastColorFor(accent));
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit closed; the next page load applies the accent anyway.
         }
     }
 

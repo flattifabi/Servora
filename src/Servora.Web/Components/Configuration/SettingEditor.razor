@@ -68,7 +68,7 @@
         _ => "text",
     };
 
-    private string SafeColor => Value is { Length: 7 } && Value[0] == '#' && Value.Skip(1).All(Uri.IsHexDigit) ? Value : "#7c6cff";
+    private string SafeColor => Value is { Length: 7 } && Value[0] == '#' && Value.Skip(1).All(Uri.IsHexDigit) ? Value : CoreSettingDefinitionProvider.DefaultAccentColor;
 
     private bool IsOn => Value == "true";
 

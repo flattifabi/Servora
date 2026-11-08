@@ -19,7 +19,7 @@
 }
 
 .row-actions .icon-btn.restore:hover {
-    color: var(--primary);
+    color: var(--primary-text);
     background: var(--primary-soft);
 }
 

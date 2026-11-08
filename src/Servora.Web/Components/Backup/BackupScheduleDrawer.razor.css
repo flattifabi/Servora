@@ -33,7 +33,7 @@
 .weekday.selected {
     background: var(--gradient);
     border-color: transparent;
-    color: #fff;
+    color: var(--primary-contrast);
     box-shadow: var(--glow);
 }
 
@@ -43,7 +43,7 @@
     padding: 12px 14px;
     border-radius: var(--r);
     background: var(--primary-soft);
-    border: 1px solid rgba(124, 108, 255, .25);
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
 }
 
 .next-run {

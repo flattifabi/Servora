@@ -6,7 +6,7 @@
     place-items: center;
     flex: none;
     background: var(--gradient);
-    color: #fff;
+    color: var(--primary-contrast);
     box-shadow: var(--glow);
 }
 

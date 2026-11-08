@@ -19,7 +19,7 @@
     place-items: center;
     margin-bottom: 6px;
     background: var(--gradient-soft);
-    color: var(--primary);
+    color: var(--primary-text);
     border: 1px solid var(--border);
 }
 

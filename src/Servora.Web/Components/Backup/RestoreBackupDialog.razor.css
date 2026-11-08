@@ -16,7 +16,7 @@
     flex: none;
     border-radius: 12px;
     background: var(--primary-soft);
-    color: var(--primary);
+    color: var(--primary-text);
 }
 
 .restore-facts {

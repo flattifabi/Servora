@@ -5,4 +5,4 @@
 .pill-menu-item { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; padding: 7px 8px; border-radius: var(--r-sm); cursor: pointer; }
 .pill-menu-item:hover { background: var(--surface-hover); }
 .pill-menu-empty { padding: 16px; text-align: center; color: var(--text-faint); font-size: 13px; }
-.data-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-full); font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border: 1px solid rgba(34, 211, 238, .3); }
+.data-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-full); font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--info) 30%, transparent); }

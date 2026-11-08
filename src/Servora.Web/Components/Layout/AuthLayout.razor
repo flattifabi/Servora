@@ -1,4 +1,4 @@
-@* Layout for sign-in, password change and setup pages: aurora hero on the left, form panel on the right. *@
+@* Layout for sign-in, password change and setup pages: calm brand panel on the left, form panel on the right. *@
 @inherits LayoutComponentBase
 @using Servora.Application.Configuration
 @inject IBrandingService BrandingService
@@ -6,39 +6,50 @@
 @inject IJSRuntime JS
 
 <div class="auth-shell">
-    <section class="auth-hero">
-        <div class="flex items-center gap-3">
-            @if (_branding.LogoUrl is { } logo)
-            {
-                <img class="brand-logo" src="@logo" alt="" />
-            }
-            else
-            {
-                <div class="brand-mark"><Icon Name="sparkles" Size="18" /></div>
-            }
+    <section class="auth-hero" aria-label="@_branding.ProductName">
+        <div class="auth-brand">
+            @BrandMark
             <div>
-                <div class="brand-name" style="color:#fff">@_branding.ProductName</div>
-                <div class="brand-sub" style="color:rgba(255,255,255,.55)">@(string.IsNullOrWhiteSpace(_branding.CompanyName) ? "Service Platform" : _branding.CompanyName)</div>
+                <div class="brand-name">@_branding.ProductName</div>
+                <div class="brand-sub">@(string.IsNullOrWhiteSpace(_branding.CompanyName) ? "Service Platform" : _branding.CompanyName)</div>
             </div>
         </div>
         <div>
-            <h1>Run every service your business depends on — on your own terms.</h1>
-            <p>Incidents, changes, requests, knowledge, CMDB, automation and AI agents in one open-source, self-hosted platform.</p>
+            <div class="eyebrow mb-3">Service management, self-hosted</div>
+            <h1>Every service your business depends on, in one calm place.</h1>
+            <p>Incidents, changes, requests, knowledge, CMDB, automation and AI agents on one open-source platform that runs on your own terms.</p>
         </div>
         <div class="auth-features">
-            <div class="auth-feature"><div class="icon-wrap"><Icon Name="shield-check" Size="17" /></div><div><b>Self-hosted & secure</b><span>Your data, your network, your keys.</span></div></div>
-            <div class="auth-feature"><div class="icon-wrap"><Icon Name="workflow" Size="17" /></div><div><b>No-code automation</b><span>Flows, rules, SLAs and approvals.</span></div></div>
-            <div class="auth-feature"><div class="icon-wrap"><Icon Name="id-card" Size="17" /></div><div><b>Active Directory</b><span>LDAP sign-in and Windows SSO.</span></div></div>
-            <div class="auth-feature"><div class="icon-wrap"><Icon Name="bot" Size="17" /></div><div><b>AI & MCP ready</b><span>Scoped agents and tools.</span></div></div>
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="shield-check" Size="18" /></div><div><b>Self-hosted &amp; secure</b><span>Your data, your network, your keys.</span></div></div>
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="workflow" Size="18" /></div><div><b>No-code automation</b><span>Flows, rules, SLAs and approvals.</span></div></div>
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="id-card" Size="18" /></div><div><b>Active Directory</b><span>LDAP sign-in and Windows SSO.</span></div></div>
+            <div class="auth-feature"><div class="icon-wrap"><Icon Name="bot" Size="18" /></div><div><b>AI &amp; MCP ready</b><span>Scoped agents and tools.</span></div></div>
         </div>
     </section>
     <section class="auth-panel">
+        <div class="auth-mobile-brand auth-brand">
+            @BrandMark
+            <div class="brand-name">@_branding.ProductName</div>
+        </div>
         @Body
+        <div class="auth-footer">@_branding.ProductName · @(string.IsNullOrWhiteSpace(_branding.CompanyName) ? "Service Platform" : _branding.CompanyName)</div>
     </section>
 </div>
 
 @code {
     private BrandingInfo _branding = BrandingInfo.Default;
+
+    private RenderFragment BrandMark => __builder =>
+    {
+        if (_branding.LogoUrl is { } logo)
+        {
+            <img class="brand-logo" src="@logo" alt="" />
+        }
+        else
+        {
+            <div class="brand-mark"><Icon Name="layers" Size="18" /></div>
+        }
+    };
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()

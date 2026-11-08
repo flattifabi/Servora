@@ -3,8 +3,20 @@ namespace Servora.Application.Configuration;
 /// <summary>Built-in setting definitions of the platform (general, branding, localization, e-mail and feature flags).</summary>
 public sealed class CoreSettingDefinitionProvider : ISettingDefinitionProvider
 {
-    /// <summary>The default accent color of the design system.</summary>
-    public const string DefaultAccentColor = "#7c6cff";
+    /// <summary>The default accent color of the design system (deep forest green).</summary>
+    public const string DefaultAccentColor = "#1b4535";
+
+    /// <summary>
+    /// Accent defaults of earlier versions. Instances that still store one of them never chose a colour themselves,
+    /// so they follow the current default.
+    /// </summary>
+    private static readonly string[] s_legacyDefaultAccentColors = ["#7c6cff"];
+
+    /// <summary>Determines whether the colour is the accent default of an earlier version.</summary>
+    /// <param name="color">The stored accent colour.</param>
+    /// <returns><see langword="true"/> when the colour is a retired default.</returns>
+    public static bool IsLegacyDefaultAccentColor(string? color) =>
+        color is not null && s_legacyDefaultAccentColors.Contains(color.Trim(), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The default product name.</summary>
     public const string DefaultProductName = "Servora";

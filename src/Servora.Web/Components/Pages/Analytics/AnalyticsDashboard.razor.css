@@ -3,10 +3,8 @@
     margin: -8px -8px 24px;
     padding: 18px 18px 14px;
     border-radius: var(--r-xl);
-    background:
-        radial-gradient(1200px 260px at 0% 0%, rgba(124, 108, 255, .16), transparent 60%),
-        radial-gradient(900px 240px at 100% 0%, rgba(34, 211, 238, .10), transparent 60%);
-    border: 1px solid var(--border);
+    background: var(--surface-tint);
+    border: 1px solid color-mix(in srgb, var(--primary) 12%, var(--border));
 }
 
 .analytics-hero ::deep .page-header { margin-bottom: 12px; }

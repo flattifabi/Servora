@@ -5,4 +5,4 @@
 .min-w-0 { min-width: 0; }
 .scp-outputs { display: flex; flex-direction: column; gap: 6px; }
 .scp-output { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); }
-.scp-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-full); font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border: 1px solid rgba(34, 211, 238, .3); }
+.scp-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-full); font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--info) 30%, transparent); }

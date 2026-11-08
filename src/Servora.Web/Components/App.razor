@@ -1,11 +1,11 @@
 @inject InstanceCookieNames CookieNames
 @inject BrandingState Branding
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-theme-handover="@CookieNames.Theme">
+<html lang="en" data-theme="light" data-theme-handover="@CookieNames.Theme">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="light dark" />
     <base href="/" />
     <script>
         (function () {
@@ -19,20 +19,20 @@
                 }
                 if (match) { document.cookie = handover + "=; Max-Age=0; path=/; SameSite=Lax"; }
             }
+            // Light is the default; "dark" and "system" (follow the operating system) are opt-in preferences.
             var p = null;
             try { p = localStorage.getItem("servora.theme"); } catch (e) { }
-            p = p || "dark";
-            if (p === "system") { p = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; }
-            document.documentElement.setAttribute("data-theme", p);
+            if (p === "system") { p = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; }
+            document.documentElement.setAttribute("data-theme", p === "dark" ? "dark" : "light");
         })();
     </script>
     <link rel="stylesheet" href="@Assets["css/servora.css"]" />
     <link rel="stylesheet" href="@Assets["Servora.styles.css"]" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    @if (Branding.CustomAccentColor is { } accent)
+    @if (Branding.ThemeStyle is { } themeStyle)
     {
-        @* The accent is validated as #rrggbb by BrandingState before it is embedded. *@
-        <style>:root, [data-theme] { --primary: @accent; --primary-strong: @accent; --primary-soft: color-mix(in srgb, @accent 16%, transparent); }</style>
+        @* Built by BrandingState from the accent validated as #rrggbb; the stylesheet derives every tint from it. *@
+        <style id="servora-brand">@((MarkupString)themeStyle)</style>
     }
     <ImportMap />
     <HeadOutlet @rendermode="PageRenderMode" />

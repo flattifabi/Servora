@@ -9,7 +9,7 @@
 }
 
 .kb-row:hover { background: var(--surface-hover); color: var(--text); }
-.kb-row:hover .kb-row-title { color: var(--primary); }
+.kb-row:hover .kb-row-title { color: var(--primary-text); }
 
 .kb-row-icon {
     display: grid;
@@ -18,7 +18,7 @@
     height: 34px;
     border-radius: 10px;
     flex-shrink: 0;
-    color: var(--primary);
+    color: var(--primary-text);
     background: var(--primary-soft);
 }
 

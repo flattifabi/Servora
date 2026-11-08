@@ -28,7 +28,7 @@
 
 .asset-chart { display: flex; justify-content: center; }
 
-.asset-icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--primary); background: var(--primary-soft); }
+.asset-icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--primary-text); background: var(--primary-soft); }
 .asset-icon.cat-2 { color: var(--accent); background: var(--accent-soft); }
 .asset-icon.cat-3 { color: var(--purple); background: var(--purple-soft); }
 

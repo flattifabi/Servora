@@ -8,9 +8,9 @@
 
 <PageTitle>Set up · @Brand.ProductName</PageTitle>
 
-<div class="setup-card">
+<div class="setup-card brand-scope" style="@BrandStyle">
     <div class="setup-top">
-        <div class="setup-mark" style="background: @MarkGradient"><Icon Name="sparkles" Size="16" /></div>
+        <div class="setup-mark"><Icon Name="layers" Size="17" /></div>
         <div class="flex-1">
             <div class="eyebrow">First-run setup</div>
             <div class="setup-product">@(string.IsNullOrWhiteSpace(_organization.ProductName) ? "Servora" : _organization.ProductName)</div>
@@ -275,12 +275,12 @@
                     </div>
 
                     <div class="brand-preview mt-6">
-                        <div class="setup-mark" style="background: @MarkGradient"><Icon Name="sparkles" Size="15" /></div>
+                        <div class="setup-mark"><Icon Name="layers" Size="16" /></div>
                         <div class="flex-1">
                             <div class="brand-preview-name">@(string.IsNullOrWhiteSpace(_organization.ProductName) ? "Servora" : _organization.ProductName)</div>
                             <div class="small faint">@(string.IsNullOrWhiteSpace(_organization.CompanyName) ? "Service Platform" : _organization.CompanyName)</div>
                         </div>
-                        <span class="preview-button" style="background:@SafeAccent">Primary action</span>
+                        <span class="btn btn-primary btn-sm" aria-hidden="true">Primary action</span>
                     </div>
 
                     @if (_organizationError is not null)
@@ -402,7 +402,7 @@
 
 @code {
     private static readonly string[] s_stepTitles = ["Welcome", "Database", "Organisation", "Review", "Install"];
-    private static readonly string[] s_swatches = ["#7c6cff", "#6366f1", "#0ea5e9", "#14b8a6", "#22c55e", "#f59e0b", "#f43f5e", "#ec4899"];
+    private static readonly IReadOnlyList<string> s_swatches = Servora.Web.Components.Configuration.AccentSwatches.All;
     private static readonly (string Key, string Title, string Tagline, string Icon, string? Badge)[] s_providers =
     [
         (DatabaseProviderKeys.Sqlite, "SQLite", "Zero configuration, single file.", "hard-drive", "Quick start"),
@@ -432,7 +432,15 @@
 
     private string ColorInputValue => IsHexColor(_organization.AccentColor) && _organization.AccentColor.Length == 7 ? _organization.AccentColor.ToLowerInvariant() : CoreSettingDefinitionProvider.DefaultAccentColor;
 
-    private string MarkGradient => $"linear-gradient(135deg, {SafeAccent} 0%, #a855f7 55%, #22d3ee 100%)";
+    // Previews the chosen accent on the whole wizard (SafeAccent is validated as a hex colour).
+    private string BrandStyle
+    {
+        get
+        {
+            var accent = SafeAccent.Length == 7 ? SafeAccent : CoreSettingDefinitionProvider.DefaultAccentColor;
+            return $"--brand:{accent};--primary:{accent};--primary-contrast:{Servora.Web.Services.BrandingState.ContrastColorFor(accent)}";
+        }
+    }
 
     private string ExampleConnectionString => Session.Backend.GetProviders().FirstOrDefault(p => p.Key == _connection.Provider)?.ExampleConnectionString ?? string.Empty;
 

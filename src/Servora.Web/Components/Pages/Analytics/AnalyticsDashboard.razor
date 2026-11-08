@@ -111,18 +111,18 @@ else
         </ChartCard>
         <ChartCard Title="Changes by state" Subtitle="All change requests" Icon="git-pull-request" Chart="d.Chart(AnalyticsChartKeys.ChangesByState)">
             @{ var changes = d.Chart(AnalyticsChartKeys.ChangesByState); }
-            <BarChart Labels="changes.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Changes", changes.Slices.Select(s => s.Value).ToList(), "#a855f7")])" Height="230" ValueFormat="0" />
+            <BarChart Labels="changes.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Changes", changes.Slices.Select(s => s.Value).ToList(), "var(--purple)")])" Height="230" ValueFormat="0" />
         </ChartCard>
     </div>
 
     <div class="grid grid-3 mb-6">
         <ChartCard Title="Requests by catalog item" Subtitle="Most requested items" Icon="shopping-cart" Chart="d.Chart(AnalyticsChartKeys.RequestsByItem)">
             @{ var requests = d.Chart(AnalyticsChartKeys.RequestsByItem); }
-            <BarChart Labels="requests.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Requests", requests.Slices.Select(s => s.Value).ToList(), "#22d3ee")])" Horizontal="true" ValueFormat="0" />
+            <BarChart Labels="requests.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Requests", requests.Slices.Select(s => s.Value).ToList(), "var(--info)")])" Horizontal="true" ValueFormat="0" />
         </ChartCard>
         <ChartCard Title="Top incident categories" Subtitle="@($"Incidents opened · {PeriodLabel(_period)}")" Icon="tag" Chart="d.Chart(AnalyticsChartKeys.TopCategories)">
             @{ var categories = d.Chart(AnalyticsChartKeys.TopCategories); }
-            <BarChart Labels="categories.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Incidents", categories.Slices.Select(s => s.Value).ToList(), "#7c6cff")])" Horizontal="true" ValueFormat="0" />
+            <BarChart Labels="categories.Slices.Select(s => s.Label).ToList()" Series="@([new ChartSeries("Incidents", categories.Slices.Select(s => s.Value).ToList(), "var(--primary)")])" Horizontal="true" ValueFormat="0" />
         </ChartCard>
         <ChartCard Title="Automation outcomes" Subtitle="@($"Flow runs · {PeriodLabel(_period)}")" Icon="workflow" Chart="d.Chart(AnalyticsChartKeys.AutomationSuccess)">
             @{ var automation = d.Chart(AnalyticsChartKeys.AutomationSuccess); }

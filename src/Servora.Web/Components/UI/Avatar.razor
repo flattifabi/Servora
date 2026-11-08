@@ -1,12 +1,11 @@
-@* Circular avatar with initials and a deterministic gradient derived from the name. *@
-<span class="avatar @Size" style="background:@Background" title="@(ShowTitle ? Name : null)">@Initials</span>
+@* Circular avatar with initials on a soft tint whose hue is derived deterministically from the name. *@
+<span class="avatar @Size" style="--av:@Hue" title="@(ShowTitle ? Name : null)">@Initials</span>
 
 @code {
-    private static readonly string[] s_gradients =
+    // Calm, muted hues; the design system renders them as a light tint with dark initials (see .avatar).
+    private static readonly string[] s_hues =
     [
-        "linear-gradient(135deg,#7c6cff,#a855f7)", "linear-gradient(135deg,#22d3ee,#3b82f6)", "linear-gradient(135deg,#f43f5e,#f97316)",
-        "linear-gradient(135deg,#22c55e,#14b8a6)", "linear-gradient(135deg,#f59e0b,#ef4444)", "linear-gradient(135deg,#ec4899,#8b5cf6)",
-        "linear-gradient(135deg,#06b6d4,#22c55e)", "linear-gradient(135deg,#6366f1,#22d3ee)",
+        "var(--primary)", "#2f6fb0", "#a0522d", "#2b7a6f", "#7a5aa6", "#9a6b12", "#b04a5a", "#4a6a8a",
     ];
 
     /// <summary>Gets or sets the person or entity name.</summary>
@@ -32,7 +31,7 @@
         }
     }
 
-    private string Background
+    private string Hue
     {
         get
         {
@@ -42,7 +41,7 @@
                 hash = unchecked((hash * 31) + c);
             }
 
-            return s_gradients[Math.Abs(hash % s_gradients.Length)];
+            return s_hues[Math.Abs(hash % s_hues.Length)];
         }
     }
 }

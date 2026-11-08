@@ -196,7 +196,7 @@ else
 
 @code {
     private static readonly IReadOnlyList<TimeZoneInfo> s_timeZones = TimeZoneInfo.GetSystemTimeZones();
-    private static readonly (string Key, string Label, string Icon)[] s_themes = [("dark", "Dark", "moon"), ("light", "Light", "sun"), ("system", "System", "monitor")];
+    private static readonly (string Key, string Label, string Icon)[] s_themes = [("light", "Light", "sun"), ("dark", "Dark", "moon"), ("system", "System", "monitor")];
     private MyProfile? _profile;
     private MyProfileUpdate _update = new();
     private string _authSource = "local";
@@ -250,7 +250,7 @@ else
             LastName = _profile.LastName,
             Phone = _profile.Phone,
             TimeZone = _profile.TimeZone,
-            Theme = _profile.Theme ?? "dark",
+            Theme = _profile.Theme ?? "light",
         };
     }
 

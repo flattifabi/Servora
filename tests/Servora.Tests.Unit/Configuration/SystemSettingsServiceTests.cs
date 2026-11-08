@@ -30,7 +30,7 @@ public sealed class SystemSettingsServiceTests : IDisposable
     public async Task SetAsync_PersistsNormalizedValue_InvalidatesCache_AndAudits()
     {
         var service = CreateService();
-        Assert.Equal("#7c6cff", await service.GetStringAsync(SystemSettingKeys.AccentColor));
+        Assert.Equal(CoreSettingDefinitionProvider.DefaultAccentColor, await service.GetStringAsync(SystemSettingKeys.AccentColor));
 
         var result = await service.SetAsync(SystemSettingKeys.AccentColor, "#ABC");
 

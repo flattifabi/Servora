@@ -98,11 +98,11 @@ else
     <div class="grid grid-2 mb-6">
         <ChartCard Title="Throughput" Subtitle="@($"Requests per minute · {WindowLabel(_window)}")" Icon="activity">
             <LineChart Labels="MinuteLabels" Height="220" ValueFormat="0"
-                       Series="@([new ChartSeries("Requests", r.Requests.Minutes.Select(m => (double)m.Count).ToList(), "#7c6cff"), new ChartSeries("4xx", r.Requests.Minutes.Select(m => (double)m.ClientErrors).ToList(), "#f59e0b"), new ChartSeries("5xx", r.Requests.Minutes.Select(m => (double)m.ServerErrors).ToList(), "#f43f5e")])" />
+                       Series="@([new ChartSeries("Requests", r.Requests.Minutes.Select(m => (double)m.Count).ToList(), "var(--primary)"), new ChartSeries("4xx", r.Requests.Minutes.Select(m => (double)m.ClientErrors).ToList(), "var(--warning)"), new ChartSeries("5xx", r.Requests.Minutes.Select(m => (double)m.ServerErrors).ToList(), "var(--danger)")])" />
         </ChartCard>
         <ChartCard Title="Latency" Subtitle="Average and 95th percentile per minute (ms)" Icon="gauge">
             <LineChart Labels="MinuteLabels" Height="220" ValueFormat="0"
-                       Series="@([new ChartSeries("Average", r.Requests.Minutes.Select(m => Math.Round(m.AverageMs, 1)).ToList(), "#22d3ee"), new ChartSeries("p95", r.Requests.Minutes.Select(m => m.P95Ms).ToList(), "#a855f7")])" />
+                       Series="@([new ChartSeries("Average", r.Requests.Minutes.Select(m => Math.Round(m.AverageMs, 1)).ToList(), "var(--info)"), new ChartSeries("p95", r.Requests.Minutes.Select(m => m.P95Ms).ToList(), "var(--purple)")])" />
         </ChartCard>
     </div>
 

@@ -31,7 +31,7 @@ public sealed class AnalyticsService(
     /// <summary>The maximum number of rows read per dashboard query.</summary>
     public const int MaxRows = 200_000;
 
-    private static readonly string[] s_priorityColors = ["#f43f5e", "#f59e0b", "#3b82f6", "#22c55e", "#64748b"];
+    private static readonly string[] s_priorityColors = ["var(--danger)", "var(--warning)", "var(--info)", "var(--success)", "var(--text-faint)"];
     private static readonly string[] s_successStates = ["succeeded", "success", "completed", "complete", "done", "finished"];
     private static readonly string[] s_failureStates = ["failed", "failure", "error", "errored", "timedout", "timeout", "aborted"];
 
@@ -140,7 +140,7 @@ public sealed class AnalyticsService(
         var resolvedSeries = buckets.CountPerBucket(resolved.Select(r => r.Resolved));
         charts[AnalyticsChartKeys.IncidentTrend] = AnalyticsChart.FromSeries(
             buckets.Labels,
-            [new AnalyticsSeries("Opened", openedSeries, "#7c6cff"), new AnalyticsSeries("Resolved", resolvedSeries, "#22c55e")],
+            [new AnalyticsSeries("Opened", openedSeries, "var(--primary)"), new AnalyticsSeries("Resolved", resolvedSeries, "var(--success)")],
             "No incidents were opened or resolved in this period.");
 
         var current = resolved.Where(r => r.Resolved >= buckets.Start).ToList();
@@ -155,7 +155,7 @@ public sealed class AnalyticsService(
 
         charts[AnalyticsChartKeys.Mttr] = current.Count == 0
             ? AnalyticsChart.Unavailable(AnalyticsAvailability.NoData, "No incidents were resolved in this period.")
-            : new AnalyticsChart { Labels = buckets.Labels, Series = [new AnalyticsSeries("MTTR (hours)", mttrSeries, "#22d3ee")], Headline = Math.Round(mttr, 1), Caption = "hours on average" };
+            : new AnalyticsChart { Labels = buckets.Labels, Series = [new AnalyticsSeries("MTTR (hours)", mttrSeries, "var(--info)")], Headline = Math.Round(mttr, 1), Caption = "hours on average" };
 
         // Open backlog by priority.
         var priorityField = table.FindField("Priority");
@@ -271,7 +271,7 @@ public sealed class AnalyticsService(
         {
             Headline = Math.Round(compliance, 1),
             Caption = "met within target",
-            Slices = [new AnalyticsSlice("Met", current.Count - breached, "#22c55e"), new AnalyticsSlice("Breached", breached, "#f43f5e")],
+            Slices = [new AnalyticsSlice("Met", current.Count - breached, "var(--success)"), new AnalyticsSlice("Breached", breached, "var(--danger)")],
         };
     }
 
@@ -333,7 +333,7 @@ public sealed class AnalyticsService(
             {
                 Headline = finished == 0 ? null : Math.Round(rate, 1),
                 Caption = "success rate",
-                Slices = statuses.Select(s => new AnalyticsSlice(s.Status, s.Count, s_successStates.Contains(s.Status.ToLowerInvariant()) ? "#22c55e" : s_failureStates.Contains(s.Status.ToLowerInvariant()) ? "#f43f5e" : null)).ToList(),
+                Slices = statuses.Select(s => new AnalyticsSlice(s.Status, s.Count, s_successStates.Contains(s.Status.ToLowerInvariant()) ? "var(--success)" : s_failureStates.Contains(s.Status.ToLowerInvariant()) ? "var(--danger)" : null)).ToList(),
             };
     }
 
@@ -368,7 +368,7 @@ public sealed class AnalyticsService(
             "accent",
             "log-in",
             AnalyticsAvailability.Ready);
-        charts[AnalyticsChartKeys.SignIns] = AnalyticsChart.FromSeries(buckets.Labels, [new AnalyticsSeries("Sign-ins", series, "#22d3ee")], "Nobody signed in during this period.");
+        charts[AnalyticsChartKeys.SignIns] = AnalyticsChart.FromSeries(buckets.Labels, [new AnalyticsSeries("Sign-ins", series, "var(--info)")], "Nobody signed in during this period.");
 
         if (canReadUsers)
         {
@@ -464,7 +464,7 @@ public sealed class AnalyticsService(
             AnalyticsAvailability.Ready);
         charts[AnalyticsChartKeys.AuditActivity] = AnalyticsChart.FromSeries(
             buckets.Labels,
-            [new AnalyticsSeries("Successful", success, "#7c6cff"), new AnalyticsSeries("Failed", failure, "#f59e0b"), new AnalyticsSeries("Denied", denied, "#f43f5e")],
+            [new AnalyticsSeries("Successful", success, "var(--primary)"), new AnalyticsSeries("Failed", failure, "var(--warning)"), new AnalyticsSeries("Denied", denied, "var(--danger)")],
             "No audited activity in this period.");
     }
 

@@ -37,7 +37,6 @@
 .graph-canvas {
     position: relative;
     background:
-        radial-gradient(800px 360px at 50% 40%, rgba(124, 108, 255, .08), transparent 70%),
         color-mix(in srgb, var(--bg) 55%, var(--surface));
 }
 
@@ -65,7 +64,7 @@
 /* Nodes */
 .graph-svg .node { cursor: pointer; transition: opacity .15s; }
 .graph-svg .node.dim { opacity: .28; }
-.graph-svg .node-bg { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1; transition: stroke .15s, fill .15s; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .35)); }
+.graph-svg .node-bg { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1; transition: stroke .15s, fill .15s; filter: drop-shadow(0 2px 4px rgba(16, 28, 22, .08)); }
 .graph-svg .node.hover .node-bg { stroke: var(--primary); fill: var(--surface-hover); }
 .graph-svg .node.root .node-bg { fill: var(--surface-3); stroke: transparent; }
 .graph-svg .focus-glow { fill: none; stroke-width: 2.5; }
@@ -73,7 +72,7 @@
 .graph-svg .node-name { font-size: 13px; font-weight: 650; fill: var(--text); }
 .graph-svg .node-name.radial { font-size: 12px; }
 .graph-svg .node-class { font-size: 11px; fill: var(--text-muted); }
-.graph-svg .node.down .node-bg { stroke: rgba(244, 63, 94, .55); }
+.graph-svg .node.down .node-bg { stroke: color-mix(in srgb, var(--danger) 55%, transparent); }
 .graph-svg .pulse { transform-box: fill-box; transform-origin: center; animation: graph-pulse 1.6s ease-out infinite; }
 
 .hover-card {
