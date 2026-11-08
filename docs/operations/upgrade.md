@@ -113,9 +113,17 @@ guessing. Options:
   ```
 
   The migration identifiers are listed on the *Database schema* card of Backup & Restore and in the release notes.
-  Take a database-native backup first.
+  The first migration of every provider is `InitialCreate`: `20261108021317_InitialCreate` (SQLite),
+  `20261108021327_InitialCreate` (SQL Server), `20261108021332_InitialCreate` (PostgreSQL). Only a database created
+  by a build whose model equals `InitialCreate` (the last pre-release builds) can be baselined; older pre-release
+  databases miss tables – start fresh instead. Take a database-native backup first.
 
 Backups created by pre-release builds without migrations cannot be restored into versions with migrations.
+
+> **Note (since the first release with migrations):** every environment – service, console/development and the setup
+> wizard – creates and updates the schema only through the migrations shipped in the `Servora.Persistence.*`
+> assemblies; `EnsureCreated` is no longer used. Developers add migrations as described in
+> [development/migrations.md](../development/migrations.md).
 
 ## Manual rollback
 
