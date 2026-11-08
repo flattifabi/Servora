@@ -1,12 +1,13 @@
 using System.Data.Common;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Servora.Application.Common;
 using Servora.Application.Configuration;
 using Servora.Application.Observability;
-using Servora.Domain.Identity;
 using Servora.Infrastructure.Persistence;
 
 namespace Servora.Infrastructure.Configuration;
@@ -258,29 +259,28 @@ public sealed class SetupService(
     private async Task<bool> CreateSchemaAsync(DatabaseSettings settings, CancellationToken cancellationToken)
     {
         await using var db = new ServoraDbContext(optionsProvider.Build(settings)) { ActorName = "System Setup" };
-        if (db.Database.GetMigrations().Any())
+        if (!db.Database.GetMigrations().Any())
         {
-            var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
-            await db.Database.MigrateAsync(cancellationToken);
-            return pending.Count > 0;
+            throw new InvalidOperationException("This Servora build contains no database migrations, so the schema cannot be created. Use an official build.");
         }
 
-        if (await db.Database.EnsureCreatedAsync(cancellationToken))
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToList();
+        if (applied.Count == 0)
         {
-            return true;
+            var creator = db.GetService<IRelationalDatabaseCreator>();
+            if (await creator.ExistsAsync(cancellationToken) && await creator.HasTablesAsync(cancellationToken))
+            {
+                // Tables without migration history: a foreign database or a pre-release Servora database. Neither can
+                // be migrated safely, so refuse instead of failing halfway through the schema creation.
+                throw new InvalidOperationException(
+                    "The database already contains tables but no Servora migration history. Use an empty database " +
+                    "(see docs/operations/upgrade.md for databases created by pre-release builds).");
+            }
         }
 
-        // The database already has tables. Accept it only if it is a Servora schema (re-running setup against an
-        // existing installation); refuse foreign databases instead of failing later during seeding.
-        try
-        {
-            _ = await db.Set<User>().AsNoTracking().AnyAsync(cancellationToken);
-            return false;
-        }
-        catch (DbException)
-        {
-            throw new InvalidOperationException("The database already contains tables that do not belong to Servora. Use an empty database.");
-        }
+        var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+        await db.Database.MigrateAsync(cancellationToken);
+        return pending.Count > 0;
     }
 
     private async Task<Result> ApplyOrganizationAsync(DatabaseSettings settings, SetupOrganizationInput organization, CancellationToken cancellationToken)

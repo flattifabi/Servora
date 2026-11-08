@@ -23,16 +23,18 @@ internal sealed class StartupTestHost : IDisposable
 
     /// <summary>Initializes a new instance of the <see cref="StartupTestHost"/> class.</summary>
     /// <param name="withBackupModule">Whether the backup module's migration runner stays registered.</param>
-    public StartupTestHost(bool withBackupModule = true)
+    /// <param name="configureDatabase">Whether the database is configured (otherwise the host is in setup mode).</param>
+    public StartupTestHost(bool withBackupModule = true, bool configureDatabase = true)
     {
         ConnectionString = $"Data Source={Path.Combine(Paths.DataDirectory, "servora.db")};Pooling=False";
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+        var values = configureDatabase
+            ? new Dictionary<string, string?>
             {
                 ["Servora:Database:Provider"] = "Sqlite",
                 ["Servora:Database:ConnectionString"] = ConnectionString,
-            })
-            .Build();
+            }
+            : new Dictionary<string, string?>();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -59,6 +61,12 @@ internal sealed class StartupTestHost : IDisposable
     /// <summary>Runs the startup database initialization like <c>Program.cs</c>.</summary>
     /// <returns>A task that completes when the database is initialized.</returns>
     public Task InitializeAsync() => _services.GetRequiredService<DatabaseInitializer>().InitializeAsync();
+
+    /// <summary>Gets a registered service.</summary>
+    /// <typeparam name="T">The service type.</typeparam>
+    /// <returns>The service.</returns>
+    public T GetRequiredService<T>()
+        where T : notnull => _services.GetRequiredService<T>();
 
     /// <summary>Creates a context for the configured database.</summary>
     /// <returns>The context.</returns>

@@ -2,7 +2,7 @@ namespace Servora.Application.Backup;
 
 /// <summary>Migration state of the configured database.</summary>
 /// <param name="Provider">The database provider key.</param>
-/// <param name="UsesMigrations">Whether this version ships migrations (otherwise the schema is created with <c>EnsureCreated</c>).</param>
+/// <param name="UsesMigrations">Whether this version ships migrations (always true for official builds; a build without migrations cannot start).</param>
 /// <param name="CurrentMigration">The last applied migration.</param>
 /// <param name="Applied">The applied migrations, oldest first.</param>
 /// <param name="Pending">The migrations that will be applied at the next start, oldest first.</param>

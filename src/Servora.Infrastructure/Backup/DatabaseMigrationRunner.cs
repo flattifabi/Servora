@@ -10,7 +10,7 @@ namespace Servora.Infrastructure.Backup;
 /// <summary>
 /// Brings the database schema up to date at startup, guarded by backups:
 /// <list type="number">
-/// <item>no migrations shipped (development builds) → <c>EnsureCreated</c>;</item>
+/// <item>no migrations shipped (incomplete build) → stop; the schema is never created with <c>EnsureCreated</c>;</item>
 /// <item>database at a migration unknown to this version → stop (downgrade without restore);</item>
 /// <item>tables but no migration history (legacy <c>EnsureCreated</c> database) → stop with instructions;</item>
 /// <item>pending migrations on an existing database → <see cref="BackupKind.PreMigration"/> backup first (configurable),
@@ -47,9 +47,9 @@ public sealed class DatabaseMigrationRunner(
         var migrations = db.Database.GetMigrations().ToList();
         if (migrations.Count == 0)
         {
-            var created = await db.Database.EnsureCreatedAsync(cancellationToken);
-            logger.LogInformation(created ? "Database schema created (no migrations in this build)." : "Database schema already exists (no migrations in this build).");
-            return;
+            throw new DatabaseMigrationException(
+                $"This Servora build contains no database migrations for the provider {db.Database.ProviderName}, so the schema cannot be created or upgraded. " +
+                "Use an official build, or add the migrations as described in docs/development/migrations.md.");
         }
 
         var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToList();
