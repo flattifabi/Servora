@@ -6,7 +6,7 @@
     place-items: center;
     flex-shrink: 0;
     background: var(--gradient-soft);
-    color: var(--primary);
+    color: var(--primary-text);
     border: 1px solid var(--border);
 }
 

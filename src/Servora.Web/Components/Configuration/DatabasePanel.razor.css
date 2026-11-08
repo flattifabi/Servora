@@ -16,7 +16,7 @@
     place-items: center;
     border-radius: 13px;
     background: var(--surface);
-    color: var(--primary);
+    color: var(--primary-text);
     border: 1px solid var(--border-strong);
 }
 

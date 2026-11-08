@@ -43,7 +43,7 @@
 
     private double Length => Math.Clamp(Value, 0, 100) / 100 * Circumference;
 
-    private string Color => Value >= SuccessFrom ? "#22c55e" : Value >= WarningFrom ? "#f59e0b" : "#f43f5e";
+    private string Color => Value >= SuccessFrom ? "var(--success)" : Value >= WarningFrom ? "var(--warning)" : "var(--danger)";
 
     private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 }

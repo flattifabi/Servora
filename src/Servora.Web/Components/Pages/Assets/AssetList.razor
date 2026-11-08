@@ -188,11 +188,11 @@
 
     private static string StateColor(AssetState state) => state switch
     {
-        AssetState.InStock => "#3b82f6",
-        AssetState.InUse => "#22c55e",
-        AssetState.InRepair => "#f59e0b",
-        AssetState.Retired => "#94a3b8",
-        _ => "#475569",
+        AssetState.InStock => "var(--info)",
+        AssetState.InUse => "var(--success)",
+        AssetState.InRepair => "var(--warning)",
+        AssetState.Retired => "var(--text-faint)",
+        _ => "var(--text-muted)",
     };
 
     private string StateCount(AssetState state) => _overview?.ByState.GetValueOrDefault(state).ToString("N0") ?? "–";

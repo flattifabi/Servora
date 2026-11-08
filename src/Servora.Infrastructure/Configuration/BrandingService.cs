@@ -51,7 +51,7 @@ public sealed class BrandingService(
             return new BrandingInfo(
                 string.IsNullOrWhiteSpace(productName) ? BrandingInfo.Default.ProductName : productName,
                 values.GetValueOrDefault(SystemSettingKeys.CompanyName) ?? string.Empty,
-                string.IsNullOrWhiteSpace(accent) ? BrandingInfo.Default.AccentColor : accent,
+                string.IsNullOrWhiteSpace(accent) || CoreSettingDefinitionProvider.IsLegacyDefaultAccentColor(accent) ? BrandingInfo.Default.AccentColor : accent,
                 logoUrl);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

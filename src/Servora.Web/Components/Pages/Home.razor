@@ -14,11 +14,11 @@
 
 <PageTitle>My Work · @Brand.ProductName</PageTitle>
 
-<div class="card highlight mb-6" style="overflow:hidden">
-    <div class="card-body" style="padding:26px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;background:radial-gradient(600px 220px at 100% 0%, rgba(124,108,255,.16), transparent 70%), radial-gradient(500px 200px at 0% 100%, rgba(34,211,238,.08), transparent 70%)">
+<div class="card tint mb-6" style="overflow:hidden">
+    <div class="card-body" style="padding:30px 32px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap">
         <div style="min-width:0">
             <div class="eyebrow">@DateTime.Now.ToString("dddd, d MMMM", CultureInfo.InvariantCulture)</div>
-            <h1 style="margin-top:6px;font-size:30px">Good @DayPart, <span class="gradient-text">@FirstName</span></h1>
+            <h1 style="margin-top:8px;font-size:30px">Good @DayPart, @FirstName.</h1>
             <div class="muted mt-2" style="font-size:14.5px">@Summary</div>
         </div>
         <div class="flex gap-2 flex-wrap">
@@ -182,7 +182,7 @@ else
                     </div>
                     <div class="card-body">
                         <LineChart Labels="_data.TrendLabels" Height="260" ValueFormat="0"
-                                   Series="@([new ChartSeries("Opened", _data.OpenedPerDay, "#7c6cff"), new ChartSeries("Resolved", _data.ResolvedPerDay, "#22c55e")])" />
+                                   Series="@([new ChartSeries("Opened", _data.OpenedPerDay, "var(--primary)"), new ChartSeries("Resolved", _data.ResolvedPerDay, "var(--success)")])" />
                     </div>
                 </div>
                 <div class="card" style="min-width:0">
@@ -209,7 +209,7 @@ else
 }
 
 @code {
-    private static readonly string[] s_priorityColors = ["#f43f5e", "#f97316", "#f59e0b", "#3b82f6", "#64748b"];
+    private static readonly string[] s_priorityColors = ["var(--danger)", "#c8561f", "var(--warning)", "var(--info)", "var(--text-faint)"];
 
     private MyWorkDashboard? _data;
 

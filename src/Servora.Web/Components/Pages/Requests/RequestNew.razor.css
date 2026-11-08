@@ -39,7 +39,7 @@
 .category-chip.active {
     background: var(--gradient);
     border-color: transparent;
-    color: #fff;
+    color: var(--primary-contrast);
     box-shadow: var(--glow);
 }
 
@@ -52,8 +52,8 @@
 }
 
 .category-chip.active .chip-count {
-    background: rgba(255, 255, 255, .22);
-    color: #fff;
+    background: color-mix(in srgb, var(--primary-contrast) 22%, transparent);
+    color: var(--primary-contrast);
 }
 
 .catalog-grid {
@@ -82,7 +82,7 @@
     place-items: center;
     flex: none;
     background: var(--gradient-soft);
-    color: var(--primary);
+    color: var(--primary-text);
 }
 
 .catalog-name {

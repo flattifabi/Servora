@@ -3,7 +3,7 @@
 .provider-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
 .provider-card, .agent-card { display: flex; flex-direction: column; }
 .provider-card .card-footer { justify-content: flex-start; margin-top: auto; }
-.provider-icon, .agent-icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--gradient-soft); color: var(--primary); border: 1px solid var(--border); }
+.provider-icon, .agent-icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--gradient-soft); color: var(--primary-text); border: 1px solid var(--border); }
 .agent-icon { color: var(--accent); }
 .provider-name { font-weight: 650; font-size: 15px; color: var(--text); }
 .compact-kv { grid-template-columns: 110px 1fr; gap: 6px 12px; }

@@ -20,10 +20,10 @@ public static class IdentityEndpoints
         <!DOCTYPE html>
         <html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Windows sign-in · Servora</title>
-        <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0d17;color:#e6e8f2;font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
-        main{max-width:440px;padding:32px;border:1px solid #262a3d;border-radius:16px;background:#12152a}
-        h1{font-size:20px;margin:0 0 8px}p{color:#a3a8c3;margin:0 0 20px}
-        a{display:inline-block;padding:10px 16px;border-radius:10px;background:#7c6cff;color:#fff;text-decoration:none;font-weight:600}</style></head>
+        <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#eef5f0;color:#15211b;font:15px/1.55 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif}
+        main{max-width:440px;padding:32px;border:1px solid #dfe7e2;border-radius:14px;background:#fff}
+        h1{font-size:20px;margin:0 0 8px;letter-spacing:-.02em}p{color:#56625c;margin:0 0 20px}
+        a{display:inline-block;padding:10px 16px;border-radius:8px;background:#1b4535;color:#fff;text-decoration:none;font-weight:600}</style></head>
         <body><main><h1>Windows sign-in was not completed</h1>
         <p>Your browser did not provide Windows credentials. Make sure you are signed in to the domain and that this site is
         in your browser's intranet zone, or sign in with your user name and password.</p>

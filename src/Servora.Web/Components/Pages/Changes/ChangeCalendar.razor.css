@@ -33,7 +33,7 @@
 }
 
 .cal-day.other {
-    background: rgba(0, 0, 0, .12);
+    background: var(--surface-2);
 }
 
 .cal-day.other .cal-date {
@@ -53,7 +53,7 @@
 
 .cal-day.today .cal-date {
     background: var(--gradient);
-    color: #fff;
+    color: var(--primary-contrast);
     box-shadow: var(--glow);
 }
 

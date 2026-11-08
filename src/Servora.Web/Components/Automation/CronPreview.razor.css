@@ -1,5 +1,5 @@
 .cron-preset { cursor: pointer; transition: border-color var(--speed) var(--ease), color var(--speed) var(--ease); }
-.cron-preset:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.cron-preset:hover:not(:disabled) { border-color: var(--primary); color: var(--primary-text); }
 .cron-next { padding: 12px 14px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--border); }
 .cron-occurrence { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; color: var(--text-2); }
 .cron-occurrence + .cron-occurrence { border-top: 1px dashed var(--border); }

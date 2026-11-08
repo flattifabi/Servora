@@ -18,13 +18,13 @@
     width: 520px;
     height: 320px;
     border-radius: 50%;
-    background: radial-gradient(circle, var(--hero-glow, rgba(34, 197, 94, .22)), transparent 70%);
+    background: none;
     pointer-events: none;
 }
 
-.status-healthy { --hero-color: var(--success); --hero-soft: var(--success-soft); --hero-glow: rgba(34, 197, 94, .22); border-color: rgba(34, 197, 94, .3); }
-.status-degraded { --hero-color: var(--warning); --hero-soft: var(--warning-soft); --hero-glow: rgba(245, 158, 11, .24); border-color: rgba(245, 158, 11, .35); }
-.status-unhealthy { --hero-color: var(--danger); --hero-soft: var(--danger-soft); --hero-glow: rgba(244, 63, 94, .26); border-color: rgba(244, 63, 94, .45); }
+.status-healthy { --hero-color: var(--success); --hero-soft: var(--success-soft); --hero-glow: color-mix(in srgb, var(--success) 22%, transparent); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+.status-degraded { --hero-color: var(--warning); --hero-soft: var(--warning-soft); --hero-glow: color-mix(in srgb, var(--warning) 24%, transparent); border-color: color-mix(in srgb, var(--warning) 35%, transparent); }
+.status-unhealthy { --hero-color: var(--danger); --hero-soft: var(--danger-soft); --hero-glow: color-mix(in srgb, var(--danger) 26%, transparent); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 
 .status-orb {
     position: relative;
@@ -36,7 +36,7 @@
     flex-shrink: 0;
     color: var(--hero-color);
     background: var(--hero-soft);
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--hero-soft) 60%, transparent), 0 0 36px -4px var(--hero-color);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--hero-soft) 60%, transparent);
 }
 
 .status-orb::after {

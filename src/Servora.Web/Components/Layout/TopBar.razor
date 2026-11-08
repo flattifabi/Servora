@@ -9,7 +9,7 @@
 @inject IJSRuntime JS
 
 <header class="topbar">
-    <button class="icon-btn mobile-only" @onclick="Ui.ToggleMobileSidebar" title="Menu">
+    <button class="icon-btn mobile-only" @onclick="Ui.ToggleMobileSidebar" title="Menu" aria-label="Open navigation">
         <Icon Name="menu" />
     </button>
     <div class="topbar-title">
@@ -17,7 +17,7 @@
         {
             <span class="faint small">@_currentSection</span>
             <Icon Name="chevron-right" Size="14" Class="faint" />
-            <span class="small" style="font-weight:600">@_current.Title</span>
+            <span class="small current">@_current.Title</span>
         }
     </div>
 
@@ -50,17 +50,21 @@
             </div>
         }
 
-        <button class="icon-btn" title="Toggle theme" @onclick="ToggleTheme">
-            <Icon Name="@(_theme == "light" ? "moon" : "sun")" />
+        <button class="icon-btn" title="@(_theme == "dark" ? "Switch to light theme" : "Switch to dark theme")" aria-label="Toggle theme" @onclick="ToggleTheme">
+            <Icon Name="@(_theme == "dark" ? "sun" : "moon")" />
         </button>
 
-        <a class="icon-btn" href="/approvals" title="My approvals"><Icon Name="check-square" /></a>
+        <a class="icon-btn" href="/approvals" title="My approvals" aria-label="My approvals"><Icon Name="check-square" /></a>
 
         <NotificationBell />
 
+        <span class="topbar-divider" aria-hidden="true"></span>
+
         <div class="dropdown">
-            <button class="icon-btn" style="width:auto;padding:0 4px" @onclick="() => _userOpen = !_userOpen" title="Account">
-                <Avatar Name="@CurrentUser.DisplayName" Size="sm" />
+            <button class="icon-btn topbar-user" @onclick="() => _userOpen = !_userOpen" title="Account" aria-label="Account menu">
+                <Avatar Name="@CurrentUser.DisplayName" Size="sm" ShowTitle="false" />
+                <span class="topbar-user-name">@CurrentUser.DisplayName</span>
+                <Icon Name="chevron-down" Size="14" />
             </button>
             @if (_userOpen)
             {
@@ -102,7 +106,7 @@
     private string? _currentSection;
     private bool _createOpen;
     private bool _userOpen;
-    private string _theme = "dark";
+    private string _theme = "light";
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
@@ -121,7 +125,7 @@
     {
         if (firstRender)
         {
-            _theme = await JS.InvokeAsync<string>("servora.getTheme");
+            _theme = await JS.InvokeAsync<string>("servora.getAppliedTheme");
             StateHasChanged();
         }
     }
@@ -131,7 +135,7 @@
 
     private async Task ToggleTheme()
     {
-        _theme = _theme == "light" ? "dark" : "light";
+        _theme = _theme == "dark" ? "light" : "dark";
         await JS.InvokeVoidAsync("servora.setTheme", _theme);
     }
 

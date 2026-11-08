@@ -1,5 +1,5 @@
 .debug-panel { overflow: hidden; }
-.debug-panel.verbose { box-shadow: 0 0 0 1px rgba(168, 85, 247, .35), 0 18px 40px -18px rgba(168, 85, 247, .55); }
+.debug-panel.verbose { border-color: color-mix(in srgb, var(--purple) 45%, var(--border)); }
 
 .debug-head {
     display: flex;
@@ -8,7 +8,7 @@
     gap: 16px;
     flex-wrap: wrap;
     padding: 18px 22px;
-    background: radial-gradient(700px 160px at 0% 0%, rgba(124, 108, 255, .14), transparent 70%);
+    background: var(--surface-tint);
 }
 
 .debug-title { display: flex; align-items: center; gap: 14px; }
@@ -16,12 +16,11 @@
 .debug-icon {
     width: 44px;
     height: 44px;
-    border-radius: 14px;
+    border-radius: var(--r);
     display: grid;
     place-items: center;
     background: var(--gradient);
-    color: #fff;
-    box-shadow: 0 10px 24px -10px rgba(124, 108, 255, .9);
+    color: var(--primary-contrast);
 }
 
 .verbose .debug-icon { animation: pulse-mark 2.4s infinite; }
@@ -46,11 +45,11 @@
 }
 
 pre.wrap { white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 360px; }
-pre.exception { color: #fda4af; border-color: rgba(244, 63, 94, .35); }
+pre.exception { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 
 .log-table ::deep .message { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); word-break: break-word; }
 .log-table ::deep .category { display: inline-block; max-width: 220px; color: var(--text-muted); }
-.log-table ::deep tr.row-error td { background: rgba(244, 63, 94, .06); }
+.log-table ::deep tr.row-error td { background: color-mix(in srgb, var(--danger) 6%, transparent); }
 .log-table ::deep tr.row-error td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .log-table ::deep tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
 .log-table ::deep tr.row-debug .message { color: var(--text-muted); }

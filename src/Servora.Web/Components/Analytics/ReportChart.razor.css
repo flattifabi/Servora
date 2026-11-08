@@ -6,7 +6,7 @@
     text-align: center;
     gap: 6px;
     border-radius: var(--r);
-    background: radial-gradient(circle at 50% 30%, rgba(124, 108, 255, .14), transparent 65%);
+    background: var(--surface-tint);
 }
 
 .metric-value { font-family: var(--font-display); font-size: 64px; font-weight: 750; letter-spacing: -.03em; line-height: 1; }

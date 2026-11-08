@@ -103,7 +103,7 @@
     <div class="audit-charts mb-6">
         <ChartCard Title="Activity" Subtitle="Audited events per day (14 days)" Icon="bar-chart">
             <BarChart Labels="@(stats.PerDay.Select(d => d.Day.ToString("dd MMM")).ToList())" Height="200" ValueFormat="0"
-                      Series="@([new ChartSeries("Successful", stats.PerDay.Select(d => (double)d.Success).ToList(), "#7c6cff"), new ChartSeries("Failed", stats.PerDay.Select(d => (double)d.Failure).ToList(), "#f59e0b"), new ChartSeries("Denied", stats.PerDay.Select(d => (double)d.Denied).ToList(), "#f43f5e")])" />
+                      Series="@([new ChartSeries("Successful", stats.PerDay.Select(d => (double)d.Success).ToList(), "var(--primary)"), new ChartSeries("Failed", stats.PerDay.Select(d => (double)d.Failure).ToList(), "var(--warning)"), new ChartSeries("Denied", stats.PerDay.Select(d => (double)d.Denied).ToList(), "var(--danger)")])" />
         </ChartCard>
         <ChartCard Title="By category" Subtitle="Last 14 days" Icon="pie-chart">
             @if (stats.ByCategory.Count == 0)

@@ -1,2 +1,2 @@
 .ds-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--text-muted); background: var(--surface-3); border: 1px solid var(--border); }
-.ds-icon.on { color: var(--info); background: var(--info-soft); border-color: rgba(59, 130, 246, .35); }
+.ds-icon.on { color: var(--info); background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 35%, transparent); }

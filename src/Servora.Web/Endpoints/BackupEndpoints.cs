@@ -27,26 +27,25 @@ public static class BackupEndpoints
         <title>Restoring · Servora</title>
         <link rel="icon" href="/favicon.svg" />
         <style>
-          :root { color-scheme: dark; }
+          :root { color-scheme: light; }
           * { box-sizing: border-box; }
-          body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: "Segoe UI", Inter, system-ui, sans-serif;
-                 color: #e7e9f3; background: radial-gradient(1200px 600px at 85% -10%, rgba(109,94,252,.18), transparent 60%),
-                 radial-gradient(900px 500px at -10% 110%, rgba(34,211,238,.10), transparent 60%), #07090f; }
-          .card { width: min(560px, calc(100vw - 32px)); padding: 36px 36px 30px; border-radius: 20px; background: rgba(16,20,30,.82);
-                  border: 1px solid rgba(255,255,255,.07); box-shadow: 0 30px 80px rgba(0,0,0,.45); backdrop-filter: blur(12px); }
-          .ring { width: 64px; height: 64px; border-radius: 50%; margin-bottom: 22px; border: 3px solid rgba(124,108,255,.18);
-                  border-top-color: #7c6cff; border-right-color: #22d3ee; animation: spin 1.1s linear infinite; }
-          .done .ring { animation: none; border-color: #34d399; }
-          h1 { margin: 0 0 6px; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
-          p { margin: 0; color: #9aa3b8; line-height: 1.55; font-size: 14.5px; }
+          body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+                 color: #15211b; background: #eef5f0; }
+          .card { width: min(560px, calc(100vw - 32px)); padding: 36px 36px 30px; border-radius: 14px; background: #ffffff;
+                  border: 1px solid #dfe7e2; }
+          .ring { width: 56px; height: 56px; border-radius: 50%; margin-bottom: 22px; border: 3px solid #e3ede7;
+                  border-top-color: #1b4535; animation: spin 1.1s linear infinite; }
+          .done .ring { animation: none; border-color: #1e7a4c; }
+          h1 { margin: 0 0 6px; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+          p { margin: 0; color: #56625c; line-height: 1.55; font-size: 14.5px; }
           ol { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 12px; }
-          li { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #6f7890; }
-          li .dot { width: 10px; height: 10px; border-radius: 50%; background: #2a3145; flex: none; }
-          li.active { color: #e7e9f3; } li.active .dot { background: #7c6cff; box-shadow: 0 0 0 4px rgba(124,108,255,.18); }
-          li.ok { color: #b9f3dc; } li.ok .dot { background: #34d399; }
-          .hint { margin-top: 24px; padding: 12px 14px; border-radius: 12px; background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.25);
-                  color: #fcd34d; font-size: 13.5px; display: none; }
-          .meta { margin-top: 22px; font-size: 12px; color: #586178; font-family: ui-monospace, Consolas, monospace; }
+          li { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #65716b; }
+          li .dot { width: 10px; height: 10px; border-radius: 50%; background: #cbd6d0; flex: none; }
+          li.active { color: #15211b; font-weight: 600; } li.active .dot { background: #1b4535; box-shadow: 0 0 0 4px #e3ede7; }
+          li.ok { color: #1e7a4c; } li.ok .dot { background: #1e7a4c; }
+          .hint { margin-top: 24px; padding: 12px 14px; border-radius: 10px; background: #fcf0d9; border: 1px solid #f0d9a8;
+                  color: #7a4800; font-size: 13.5px; display: none; }
+          .meta { margin-top: 22px; font-size: 12px; color: #65716b; font-family: ui-monospace, Consolas, monospace; }
           @keyframes spin { to { transform: rotate(360deg); } }
         </style>
         </head>

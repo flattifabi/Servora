@@ -20,19 +20,19 @@
 .md-body ::deep h2 { font-size: 20px; margin: 34px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .md-body ::deep h3 { font-size: 16.5px; margin: 26px 0 8px; }
 .md-body ::deep h4 { font-size: 14.5px; margin: 20px 0 6px; }
-.md-body ::deep h2:focus, .md-body ::deep h3:focus { color: var(--primary); }
+.md-body ::deep h2:focus, .md-body ::deep h3:focus { color: var(--primary-text); }
 
 .md-body ::deep p { margin: 0 0 14px; color: var(--text-2); }
 .md-body ::deep strong { color: var(--text); font-weight: 650; }
 .md-body ::deep del { color: var(--text-faint); }
-.md-body ::deep a { color: var(--primary); text-decoration: underline; text-decoration-color: rgba(124, 108, 255, .4); text-underline-offset: 3px; }
+.md-body ::deep a { color: var(--primary-text); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent); text-underline-offset: 3px; }
 .md-body ::deep a:hover { color: var(--accent); text-decoration-color: currentColor; }
 .md-body ::deep a.md-image-link::before { content: "🖼 "; }
 
 .md-body ::deep ul,
 .md-body ::deep ol { margin: 0 0 16px; padding-left: 24px; }
 .md-body ::deep li { margin: 6px 0; padding-left: 4px; }
-.md-body ::deep li::marker { color: var(--primary); font-weight: 600; }
+.md-body ::deep li::marker { color: var(--primary-text); font-weight: 600; }
 .md-body ::deep li > ul, .md-body ::deep li > ol { margin: 6px 0 0; }
 
 .md-body ::deep code {

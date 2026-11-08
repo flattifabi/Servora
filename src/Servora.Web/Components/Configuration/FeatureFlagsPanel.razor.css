@@ -35,8 +35,7 @@
 
 .flag-row.on .flag-icon {
     background: var(--primary-soft);
-    color: var(--primary);
-    box-shadow: 0 0 18px -6px rgba(124, 108, 255, .7);
+    color: var(--primary-text);
 }
 
 .flag-title {
