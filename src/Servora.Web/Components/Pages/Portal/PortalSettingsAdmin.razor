@@ -1,0 +1,242 @@
+@page "/portal/admin/settings"
+@* Portal settings (portal.manage): hero texts and image, frequently searched terms, support card, footer links and the
+   currency of catalog prices, with a live preview of the hero. Uses the application shell (MainLayout). *@
+@layout Servora.Web.Components.Layout.MainLayout
+@attribute [RequirePermission(Permissions.Portal.Manage)]
+@inject IPortalSettingsService PortalSettings
+@inject ICurrentUser CurrentUser
+@inject ToastService Toasts
+
+<PageTitle>Portal settings · @Brand.ProductName</PageTitle>
+
+<PageHeader Title="Portal settings" Subtitle="Texts, image and links of the self-service portal. The colours follow the brand colour of the branding settings." Icon="sliders">
+    <Breadcrumbs><a href="/portal">Self-Service Portal</a> <Icon Name="chevron-right" Size="12" /> <span>Settings</span></Breadcrumbs>
+    <Actions>
+        <a class="btn btn-secondary" href="/portal/admin/announcements"><Icon Name="bell" Size="16" /> Announcements</a>
+        <a class="btn btn-secondary" href="/portal" target="_blank" rel="noopener"><Icon Name="external-link" Size="16" /> Open portal</a>
+        <button class="btn btn-primary" disabled="@(_saving || _model is null)" @onclick="SaveAsync">
+            @if (_saving)
+            {
+                <span class="spinner"></span>
+            }
+            <Icon Name="save" Size="16" /> Save settings
+        </button>
+    </Actions>
+</PageHeader>
+
+@if (_model is null)
+{
+    <div class="grid grid-sidebar"><div class="card card-body"><Skeleton Lines="10" Height="34px" /></div><div class="card card-body"><Skeleton Lines="6" /></div></div>
+}
+else
+{
+    <div class="grid grid-sidebar">
+        <div class="stack" style="gap:20px;min-width:0">
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="home" Size="16" /> Home page hero</h3><div class="card-subtitle">Greeting, headline and search of the portal home page.</div></div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Greeting" Class="span-all" Help="{name} is replaced by the user's first name. Leave empty to hide.">
+                            <input class="input" @bind="_model.HeroGreeting" @bind:event="oninput" maxlength="120" />
+                        </FormField>
+                        <FormField Label="Headline" Required="true" Class="span-all"><input class="input" @bind="_model.HeroTitle" @bind:event="oninput" maxlength="80" /></FormField>
+                        <FormField Label="Subline" Class="span-all"><input class="input" @bind="_model.HeroSubtitle" @bind:event="oninput" maxlength="200" /></FormField>
+                        <FormField Label="Search placeholder" Class="span-all"><input class="input" @bind="_model.SearchPlaceholder" maxlength="120" /></FormField>
+                        <FormField Label="Frequently searched" Help="One search term per line (max. 6, up to 40 characters each).">
+                            <textarea class="textarea" rows="4" @bind="_model.FrequentSearches" @bind:event="oninput" maxlength="400"></textarea>
+                        </FormField>
+                        <FormField Label="Image caption" Help="Small caption on the hero image. Leave empty to hide.">
+                            <input class="input" @bind="_model.HeroImageCaption" @bind:event="oninput" maxlength="80" />
+                        </FormField>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="eye" Size="16" /> Hero image</h3><div class="card-subtitle">Shown next to the headline. Without an image a built-in illustration in your brand colour is used.</div></div></div>
+                <div class="card-body">
+                    <div class="flex gap-4 flex-wrap items-center">
+                        <div class="ps-hero-thumb">
+                            @if (_model.HeroImageUrl is { } url)
+                            {
+                                <img src="@url" alt="Current hero image" />
+                            }
+                            else
+                            {
+                                <Servora.Web.Components.Portal.PortalHeroIllustration />
+                            }
+                        </div>
+                        <div class="flex-1" style="min-width:220px">
+                            <div class="small muted mb-3">PNG, JPEG, GIF or WebP up to @(IPortalSettingsService.MaxHeroImageBytes / (1024 * 1024)) MB, ideally 1200 × 750 px. SVG is not accepted for security reasons.</div>
+                            <div class="flex gap-2 flex-wrap">
+                                <label class="btn btn-secondary @(_uploading ? "disabled" : null)">
+                                    @if (_uploading)
+                                    {
+                                        <span class="spinner"></span>
+                                    }
+                                    else
+                                    {
+                                        <Icon Name="upload" Size="16" />
+                                    }
+                                    Upload image
+                                    <InputFile class="hidden" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp" OnChange="UploadAsync" disabled="@_uploading" />
+                                </label>
+                                @if (_model.HeroImageUrl is not null)
+                                {
+                                    <button class="btn btn-outline-danger" @onclick="() => _confirmRemove = true"><Icon Name="trash" Size="16" /> Use illustration</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="life-buoy" Size="16" /> Support card</h3><div class="card-subtitle">The "Questions?" card on the home page; the link is also used for "Contact IT advice" on order pages.</div></div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Eyebrow"><input class="input" @bind="_model.SupportEyebrow" maxlength="60" /></FormField>
+                        <FormField Label="Title" Required="true"><input class="input" @bind="_model.SupportTitle" maxlength="80" /></FormField>
+                        <FormField Label="Text" Class="span-all"><textarea class="textarea" rows="2" @bind="_model.SupportText" maxlength="240"></textarea></FormField>
+                        <FormField Label="Button text"><input class="input" @bind="_model.SupportLinkText" maxlength="60" /></FormField>
+                        <FormField Label="Button link" Help="Site-relative path (/portal/report) or http(s) URL."><input class="input" @bind="_model.SupportUrl" maxlength="500" /></FormField>
+                        <FormField Label="Hours and phone" Class="span-all"><input class="input" @bind="_model.SupportHours" maxlength="120" /></FormField>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="link" Size="16" /> Footer and prices</h3><div class="card-subtitle">Empty links are hidden.</div></div></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <FormField Label="Tagline" Class="span-all"><input class="input" @bind="_model.FooterTagline" maxlength="120" /></FormField>
+                        <FormField Label="Contact link"><input class="input" @bind="_model.ContactUrl" maxlength="500" placeholder="/portal/report" /></FormField>
+                        <FormField Label="Privacy link"><input class="input" @bind="_model.PrivacyUrl" maxlength="500" placeholder="https://example.com/privacy" /></FormField>
+                        <FormField Label="Accessibility link"><input class="input" @bind="_model.AccessibilityUrl" maxlength="500" placeholder="https://example.com/accessibility" /></FormField>
+                        <FormField Label="Currency" Help="Currency of catalog prices.">
+                            <select class="select" @bind="_model.Currency">
+                                @foreach (var currency in PortalSettingDefinitionProvider.Currencies)
+                                {
+                                    <option value="@currency">@currency</option>
+                                }
+                            </select>
+                        </FormField>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sticky-top">
+            <div class="card">
+                <div class="card-header"><div><h3><Icon Name="eye" Size="16" /> Live preview</h3><div class="card-subtitle">The hero as employees see it.</div></div><span class="live-dot"></span></div>
+                <div class="card-body">
+                    <div class="ps-preview">
+                        @if (!string.IsNullOrWhiteSpace(_model.HeroGreeting))
+                        {
+                            <div class="ps-preview-greeting">@_model.GreetingFor(Servora.Web.Components.Portal.PortalFormat.FirstName(CurrentUser.DisplayName))</div>
+                        }
+                        <div class="ps-preview-title">@_model.HeroTitle</div>
+                        <div class="ps-preview-sub">@_model.HeroSubtitle</div>
+                        <div class="ps-preview-search"><Icon Name="search" Size="14" /> <span>@_model.SearchPlaceholder</span><b>Search</b></div>
+                        @if (_model.FrequentSearchTerms.Count > 0)
+                        {
+                            <div class="ps-preview-terms">Frequently searched @foreach (var term in _model.FrequentSearchTerms) {<span>@term ↗</span>}</div>
+                        }
+                    </div>
+                    <div class="small faint mt-3">Changes apply immediately after saving and are audited.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <ConfirmDialog @bind-Open="_confirmRemove" Title="Remove the hero image?" ConfirmText="Remove" Danger="true"
+                   Message="The uploaded image is deleted and the built-in illustration is shown again." OnConfirm="RemoveImageAsync" />
+}
+
+@code {
+    private PortalSettingsModel? _model;
+    private bool _saving;
+    private bool _uploading;
+    private bool _confirmRemove;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var result = await PortalSettings.GetAsync();
+        if (result.Succeeded)
+        {
+            _model = result.Value!.Clone();
+        }
+        else
+        {
+            Toasts.Error("The portal settings could not be loaded", result.Error);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var result = await PortalSettings.SaveAsync(_model);
+            if (Toasts.FromResult(result, "Portal settings saved"))
+            {
+                await LoadAsync();
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        if (e.File.Size > IPortalSettingsService.MaxHeroImageBytes)
+        {
+            Toasts.Error("Image too large", $"The image must not exceed {IPortalSettingsService.MaxHeroImageBytes / (1024 * 1024)} MB.");
+            return;
+        }
+
+        _uploading = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(IPortalSettingsService.MaxHeroImageBytes);
+            var result = await PortalSettings.UploadHeroImageAsync(stream);
+            if (Toasts.FromResult(result, "Hero image updated"))
+            {
+                var keep = _model;
+                await LoadAsync();
+                if (keep is not null && _model is not null)
+                {
+                    keep.HeroImageUrl = _model.HeroImageUrl;
+                    _model = keep;
+                }
+            }
+        }
+        catch (IOException)
+        {
+            Toasts.Error("Upload failed", "The file could not be read.");
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task RemoveImageAsync()
+    {
+        var result = await PortalSettings.RemoveHeroImageAsync();
+        if (Toasts.FromResult(result, "Hero image removed") && _model is not null)
+        {
+            _model.HeroImageUrl = null;
+        }
+    }
+}

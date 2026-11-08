@@ -1,18 +1,19 @@
 @page "/portal/catalog"
-@* Service catalog browsing: search, category chips and item cards (data from ICatalogOrderService). *@
+@* Service catalog browsing: search, category and favourites chips and item cards (data from ICatalogOrderService). *@
 @attribute [RequirePermission(Permissions.Portal.Access)]
 @implements IDisposable
 @inject ICatalogOrderService Catalog
 @inject NavigationManager Navigation
 @inject ToastService Toasts
+@inject IPortalSettingsService PortalSettings
 
 <PageTitle>Service catalog · @Brand.ProductName</PageTitle>
 
 <div class="portal-container">
     <div class="portal-page-head">
-        <div class="portal-crumbs"><a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" /> <span>Catalog</span></div>
-        <h1>What do you need?</h1>
-        <p>Order hardware, software, access and services. Approvals and delivery are handled for you – track everything under My items.</p>
+        <div class="portal-crumbs"><a href="/portal">Service portal</a> <Icon Name="chevron-right" Size="12" /> <span>Service catalog</span></div>
+        <h1>@(_selectedCategory?.Name ?? "Service catalog")</h1>
+        <p>@(_selectedCategory?.Description is { Length: > 0 } description ? description : "Order hardware, software, access and services. Approvals and delivery are handled for you – track everything under My requests.")</p>
     </div>
 
     <div class="pcatalog-toolbar">
@@ -21,20 +22,19 @@
             <input class="input" type="search" placeholder="Search the catalog…" value="@_search" maxlength="100" @oninput="OnSearchInputAsync" aria-label="Search the catalog" />
         </div>
         <div class="portal-chip-row">
-            <button class="portal-chip @(CategoryId is null ? "active" : null)" @onclick="() => SelectCategory(null)"><Icon Name="grid" Size="14" /> All</button>
+            <button class="portal-chip @(CategoryId is null && !_onlyFavorites ? "active" : null)" @onclick="() => SelectCategory(null)"><Icon Name="grid" Size="14" /> All</button>
+            @if (_favorites.Count > 0)
+            {
+                <button class="portal-chip @(_onlyFavorites ? "active" : null)" @onclick="() => _onlyFavorites = !_onlyFavorites"><PortalGlyph Name="heart" Size="14" Filled="_onlyFavorites" /> Favourites <span class="chip-count">@_favorites.Count</span></button>
+            }
             @foreach (var category in _categories)
             {
-                <button class="portal-chip @(CategoryId == category.Id ? "active" : null)" @key="category.Id" @onclick="() => SelectCategory(category.Id)">
-                    <Icon Name="@category.Icon" Size="14" /> @category.Name <span class="chip-count">@category.ItemCount</span>
+                <button class="portal-chip @(CategoryId == category.Id && !_onlyFavorites ? "active" : null)" @key="category.Id" @onclick="() => SelectCategory(category.Id)">
+                    <PortalGlyph Name="@category.Icon" Size="14" /> @category.Name <span class="chip-count">@category.ItemCount</span>
                 </button>
             }
         </div>
     </div>
-
-    @if (_selectedCategory?.Description is { Length: > 0 } description)
-    {
-        <p class="muted small mt-4 mb-0">@description</p>
-    }
 
     <div class="portal-section" style="margin-top:20px">
         @if (_loading)
@@ -42,25 +42,25 @@
             <div class="portal-card-grid">
                 @for (var i = 0; i < 8; i++)
                 {
-                    <div class="card card-body"><Skeleton Lines="4" /></div>
+                    <div class="pcard" style="padding:18px"><Skeleton Lines="5" /></div>
                 }
             </div>
         }
-        else if (_items.Count == 0)
+        else if (Visible.Count == 0)
         {
             <div class="card">
                 <EmptyState Icon="package" Title="Nothing found" Text="@(string.IsNullOrWhiteSpace(_search) ? "There are no orderable items in this category yet." : $"No catalog item matches “{_search}”. Describe what you need instead and we will help.")">
-                    <a class="btn btn-primary" href="/portal/report"><Icon Name="message-square" Size="16" /> Tell us what you need</a>
+                    <a class="pbtn pbtn-primary" href="/portal/report"><Icon Name="message-square" Size="16" /> Tell us what you need</a>
                 </EmptyState>
             </div>
         }
         else
         {
-            <div class="small faint mb-3">@_items.Count item@(_items.Count == 1 ? string.Empty : "s")</div>
-            <div class="portal-card-grid">
-                @foreach (var item in _items)
+            <div class="pcatalog-count">@Visible.Count service@(Visible.Count == 1 ? string.Empty : "s")</div>
+            <div class="pcatalog-grid">
+                @foreach (var item in Visible)
                 {
-                    <PortalCatalogCard @key="item.Id" Item="item" />
+                    <PortalSpotlightCard @key="item.Id" Item="item" Compact="true" Currency="@_currency" IsFavorite="_favorites.Contains(item.Id)" OnToggleFavorite="ToggleFavoriteAsync" />
                 }
             </div>
         }
@@ -76,6 +76,11 @@
     private CancellationTokenSource? _debounce;
     private Guid? _loadedCategory;
     private bool _initialized;
+    private bool _onlyFavorites;
+    private string? _currency;
+    private HashSet<Guid> _favorites = [];
+
+    private IReadOnlyList<CatalogItemCard> Visible => _onlyFavorites ? _items.Where(i => _favorites.Contains(i.Id)).ToList() : _items;
 
     /// <summary>Gets or sets the selected category (query string <c>?category=</c>).</summary>
     [SupplyParameterFromQuery(Name = "category")] public Guid? CategoryId { get; set; }
@@ -83,6 +88,8 @@
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
+        _currency = (await PortalSettings.GetAsync()).Value?.Currency;
+        _favorites = [.. (await Catalog.GetFavoriteIdsAsync()).Value ?? []];
         var categories = await Catalog.GetCategoriesAsync();
         _categories = categories.Value ?? [];
         if (!categories.Succeeded)
@@ -124,8 +131,28 @@
         }
     }
 
-    private void SelectCategory(Guid? categoryId) =>
+    private void SelectCategory(Guid? categoryId)
+    {
+        _onlyFavorites = false;
         Navigation.NavigateTo(categoryId is { } id ? $"/portal/catalog?category={id}" : "/portal/catalog");
+    }
+
+    private async Task ToggleFavoriteAsync(CatalogItemCard item)
+    {
+        var add = !_favorites.Contains(item.Id);
+        var result = await Catalog.SetFavoriteAsync(item.Id, add);
+        if (Toasts.FromResult(result, add ? $"{item.Name} saved to your favourites" : $"{item.Name} removed from your favourites"))
+        {
+            if (add)
+            {
+                _favorites.Add(item.Id);
+            }
+            else
+            {
+                _favorites.Remove(item.Id);
+            }
+        }
+    }
 
     private async Task OnSearchInputAsync(ChangeEventArgs e)
     {

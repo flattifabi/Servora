@@ -244,6 +244,8 @@ public sealed class RequestService(
                 Icon = catalogItems.GetValueOrDefault(i.CatalogItemId)?.Icon ?? "package",
                 Quantity = i.Quantity,
                 UnitPrice = i.UnitPrice,
+                BillingType = i.BillingType,
+                TermMonths = i.TermMonths,
                 State = i.State,
                 Approval = i.Approval,
                 AssignmentGroupName = groups.NameOf(i.AssignmentGroupId),

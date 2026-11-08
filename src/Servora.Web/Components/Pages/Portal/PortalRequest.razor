@@ -4,6 +4,7 @@
 @attribute [RequirePermission(Permissions.Portal.Access)]
 @inject IPortalTicketService Tickets
 @inject ToastService Toasts
+@inject IPortalSettingsService PortalSettings
 
 <PageTitle>@(_detail?.Number ?? "Request") · @Brand.ProductName</PageTitle>
 
@@ -27,8 +28,8 @@
         <div class="portal-page-head preq-head">
             <div style="min-width:0">
                 <div class="portal-crumbs">
-                    <a href="/portal">Portal</a> <Icon Name="chevron-right" Size="12" />
-                    <a href="/portal/my">My items</a> <Icon Name="chevron-right" Size="12" />
+                    <a href="/portal">Service portal</a> <Icon Name="chevron-right" Size="12" />
+                    <a href="/portal/my">My requests</a> <Icon Name="chevron-right" Size="12" />
                     <span class="mono">@_detail.Number</span>
                 </div>
                 <div class="flex items-center gap-2 flex-wrap mt-3">
@@ -58,7 +59,7 @@
                                 <span class="portal-icon-tile"><Icon Name="@item.Icon" Size="20" /></span>
                                 <div style="min-width:0">
                                     <div class="preq-item-name">@item.Name @(item.Quantity > 1 ? $"× {item.Quantity}" : string.Empty)</div>
-                                    <div class="tiny faint mono">@item.Number · @PortalFormat.Price(item.UnitPrice * item.Quantity)</div>
+                                    <div class="tiny faint mono">@item.Number · @PortalFormat.Period(item.UnitPrice * item.Quantity, item.IsMonthly, _currency)</div>
                                 </div>
                             </div>
                             <div class="flex items-center gap-2 flex-wrap">
@@ -116,7 +117,7 @@
                         {
                             <dt>Expected by</dt><dd>@PortalFormat.Date(_detail.DueAt)</dd>
                         }
-                        <dt>Total</dt><dd><b>@PortalFormat.Price(_detail.TotalPrice)</b></dd>
+                        <dt>Total</dt><dd><b>@PortalFormat.Period(_detail.TotalPrice, _detail.Items.Any(i => i.IsMonthly), _currency)</b></dd>
                     </dl>
                 </div>
                 <div class="card card-body">
@@ -148,6 +149,7 @@
 
 @code {
     private PortalRequestDetail? _detail;
+    private string? _currency;
     private PortalConversationPanel? _conversation;
     private bool _loading = true;
     private bool _busy;
@@ -161,6 +163,7 @@
     /// <inheritdoc />
     protected override async Task OnParametersSetAsync()
     {
+        _currency ??= (await PortalSettings.GetAsync()).Value?.Currency;
         _loading = true;
         await LoadAsync();
         _loading = false;

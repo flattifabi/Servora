@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Servora.Application.Approvals;
 using Servora.Application.Common;
+using Servora.Application.Configuration;
 using Servora.Application.Observability;
 using Servora.Application.Security;
 using Servora.Domain.Approvals;
@@ -14,8 +15,12 @@ namespace Servora.Application.Catalog;
 /// <param name="currentUser">The current actor.</param>
 /// <param name="clock">The clock.</param>
 /// <param name="audit">The audit service.</param>
-public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, ICurrentUser currentUser, IClock clock, IAuditService audit) : ICatalogAdminService
+/// <param name="images">The catalog image store.</param>
+public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, ICurrentUser currentUser, IClock clock, IAuditService audit, ICatalogImageStore images) : ICatalogAdminService
 {
+    /// <summary>The maximum number of order form sections of one item.</summary>
+    public const int MaxSectionsPerItem = 12;
+
     private const int MaxCategories = 200;
     private const int MaxFulfillmentTasks = 10;
 
@@ -225,6 +230,7 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
         }
 
         var variables = await LoadVariablesAsync(db, id, cancellationToken);
+        var sections = await LoadSectionsAsync(db, id, cancellationToken);
         return Result<CatalogItemModel>.Success(new CatalogItemModel
         {
             Id = item.Id,
@@ -245,6 +251,22 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
             IsActive = item.IsActive,
             Version = item.Version,
             Variables = variables.Select(CatalogVariableDefinition.From).ToList(),
+            Sections = sections.Select(s => new CatalogSectionModel { Id = s.Id, Title = s.Title, Description = s.Description, Order = s.Order }).ToList(),
+            BillingType = item.BillingType,
+            TermMonths = item.TermMonths,
+            OneTimePrice = item.OneTimePrice,
+            Subtitle = item.Subtitle,
+            BadgeText = item.BadgeText,
+            Code = item.Code,
+            ImageId = item.ImageId,
+            Teaser = item.Teaser,
+            TeaserText = item.TeaserText,
+            DeliveryText = item.DeliveryText,
+            Highlights = item.Highlights,
+            DetailsMarkdown = item.DetailsMarkdown,
+            DeliveryMarkdown = item.DeliveryMarkdown,
+            IsFeatured = item.IsFeatured,
+            FeaturedOrder = item.FeaturedOrder,
         });
     }
 
@@ -343,13 +365,48 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
             ApprovalMode = source.ApprovalMode,
             Order = source.Order,
             IsActive = false,
+            BillingType = source.BillingType,
+            TermMonths = source.TermMonths,
+            OneTimePrice = source.OneTimePrice,
+            Subtitle = source.Subtitle,
+            BadgeText = source.BadgeText,
+            Code = null,
+            Teaser = source.Teaser,
+            TeaserText = source.TeaserText,
+            DeliveryText = source.DeliveryText,
+            Highlights = source.Highlights,
+            DetailsMarkdown = source.DetailsMarkdown,
+            DeliveryMarkdown = source.DeliveryMarkdown,
+            IsFeatured = false,
+            FeaturedOrder = source.FeaturedOrder,
         };
+        if (source.ImageId is { } sourceImage && images.Open(sourceImage) is { } imageStream)
+        {
+            // The copy gets its own file so that deleting one item never removes the other item's image.
+            await using (imageStream)
+            {
+                using var buffer = new MemoryStream();
+                await imageStream.CopyToAsync(buffer, cancellationToken);
+                copy.ImageId = await images.SaveAsync(buffer.ToArray(), cancellationToken);
+            }
+        }
+
         db.Set<CatalogItem>().Add(copy);
+        var sectionMap = new Dictionary<Guid, Guid>();
+        foreach (var section in await LoadSectionsAsync(db, id, cancellationToken))
+        {
+            var sectionCopy = new CatalogSection { CatalogItemId = copy.Id, Title = section.Title, Description = section.Description, Order = section.Order };
+            sectionMap[section.Id] = sectionCopy.Id;
+            db.Set<CatalogSection>().Add(sectionCopy);
+        }
+
         foreach (var variable in await LoadVariablesAsync(db, id, cancellationToken))
         {
             db.Set<CatalogVariable>().Add(new CatalogVariable
             {
                 CatalogItemId = copy.Id,
+                SectionId = variable.SectionId is { } sectionId && sectionMap.TryGetValue(sectionId, out var mapped) ? mapped : null,
+                PriceDelta = variable.PriceDelta,
                 Name = variable.Name,
                 Label = variable.Label,
                 Type = variable.Type,
@@ -391,8 +448,14 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
 
         var variables = await LoadVariablesAsync(db, id, cancellationToken, tracked: true);
         db.Set<CatalogVariable>().RemoveRange(variables);
+        db.Set<CatalogSection>().RemoveRange(await db.Set<CatalogSection>().Where(s => s.CatalogItemId == id).Take(MaxSectionsPerItem * 4).ToListAsync(cancellationToken));
         db.Set<CatalogItem>().Remove(item);
         await db.SaveChangesAsync(cancellationToken);
+        if (item.ImageId is { } imageId)
+        {
+            images.Delete(imageId);
+        }
+
         await AuditAsync("item.deleted", CatalogTables.Item, id, item.Name, cancellationToken);
         return Result.Success();
     }
@@ -417,6 +480,11 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
         if (CatalogVariableValidator.ValidateDefinition(model, others) is { } error)
         {
             return Result<Guid>.Invalid(error);
+        }
+
+        if (model.SectionId is { } sectionId && !await db.Set<CatalogSection>().AnyAsync(s => s.Id == sectionId && s.CatalogItemId == itemId, cancellationToken))
+        {
+            return Result<Guid>.Invalid("The selected section does not belong to this item.");
         }
 
         CatalogVariable? variable;
@@ -445,7 +513,9 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
         variable.Type = definition.Type;
         variable.Mandatory = definition.Mandatory;
         variable.HelpText = definition.HelpText;
-        variable.Options = definition.Type == CatalogVariableType.Choice ? string.Join('\n', definition.Options) : null;
+        variable.Options = definition.Type == CatalogVariableType.Choice ? string.Join('\n', definition.Choices.Select(c => c.ToLine())) : null;
+        variable.SectionId = definition.SectionId;
+        variable.PriceDelta = definition.PriceDelta;
         variable.DefaultValue = definition.DefaultValue;
         variable.MaxLength = definition.Type is CatalogVariableType.Text or CatalogVariableType.MultilineText ? definition.MaxLength : null;
         variable.MinValue = definition.Type == CatalogVariableType.Number ? definition.MinValue : null;
@@ -473,6 +543,169 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
         db.Set<CatalogVariable>().Remove(variable);
         await db.SaveChangesAsync(cancellationToken);
         await AuditAsync("variable.deleted", CatalogTables.Variable, variableId, variable.Name, cancellationToken);
+        return Result.Success();
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<Guid>> SaveSectionAsync(Guid itemId, CatalogSectionModel model, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        if (!await CanManageAsync(cancellationToken))
+        {
+            return Result<Guid>.Forbidden();
+        }
+
+        var title = model.Title?.Trim() ?? string.Empty;
+        if (title.Length is 0 or > 120)
+        {
+            return Result<Guid>.Invalid("The section title is required (max. 120 characters).");
+        }
+
+        if (model.Description is { Length: > 300 })
+        {
+            return Result<Guid>.Invalid("The section description must not exceed 300 characters.");
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        if (!await db.Set<CatalogItem>().AnyAsync(i => i.Id == itemId, cancellationToken))
+        {
+            return Result<Guid>.NotFound("The catalog item was not found.");
+        }
+
+        CatalogSection? section;
+        if (model.Id is { } id && id != Guid.Empty)
+        {
+            section = await db.Set<CatalogSection>().FirstOrDefaultAsync(s => s.Id == id && s.CatalogItemId == itemId, cancellationToken);
+            if (section is null)
+            {
+                return Result<Guid>.NotFound("The section was not found.");
+            }
+        }
+        else
+        {
+            var count = await db.Set<CatalogSection>().CountAsync(s => s.CatalogItemId == itemId, cancellationToken);
+            if (count >= MaxSectionsPerItem)
+            {
+                return Result<Guid>.Invalid($"An item can have at most {MaxSectionsPerItem} sections.");
+            }
+
+            section = new CatalogSection { CatalogItemId = itemId };
+            db.Set<CatalogSection>().Add(section);
+        }
+
+        section.Title = title;
+        section.Description = Clean(model.Description);
+        section.Order = Math.Clamp(model.Order, 0, 100_000);
+        await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync(model.Id is null ? "section.created" : "section.updated", CatalogTables.Section, section.Id, section.Title, cancellationToken);
+        return Result<Guid>.Success(section.Id);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> DeleteSectionAsync(Guid sectionId, CancellationToken cancellationToken = default)
+    {
+        if (!await CanManageAsync(cancellationToken))
+        {
+            return Result.Forbidden();
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var section = await db.Set<CatalogSection>().FirstOrDefaultAsync(s => s.Id == sectionId, cancellationToken);
+        if (section is null)
+        {
+            return Result.NotFound("The section was not found.");
+        }
+
+        var members = await db.Set<CatalogVariable>().Where(v => v.SectionId == sectionId).Take(CatalogVariableValidator.MaxVariablesPerItem * 2).ToListAsync(cancellationToken);
+        foreach (var variable in members)
+        {
+            variable.SectionId = null;
+        }
+
+        db.Set<CatalogSection>().Remove(section);
+        await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("section.deleted", CatalogTables.Section, sectionId, section.Title, cancellationToken);
+        return Result.Success();
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> UploadItemImageAsync(Guid itemId, Stream content, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (!await CanManageAsync(cancellationToken))
+        {
+            return Result.Forbidden();
+        }
+
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        int read;
+        while ((read = await content.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + read > ICatalogImageStore.MaxImageBytes)
+            {
+                return Result.Invalid($"The image must not exceed {ICatalogImageStore.MaxImageBytes / (1024 * 1024)} MB.");
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        var bytes = buffer.ToArray();
+        var contentType = LogoImageValidator.DetectContentType(bytes.AsSpan(0, Math.Min(bytes.Length, LogoImageValidator.HeaderLength)));
+        if (contentType is null)
+        {
+            return Result.Invalid("Upload a PNG, JPEG, GIF or WebP image. SVG files are not accepted.");
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var item = await db.Set<CatalogItem>().FirstOrDefaultAsync(i => i.Id == itemId, cancellationToken);
+        if (item is null)
+        {
+            return Result.NotFound("The catalog item was not found.");
+        }
+
+        var previous = item.ImageId;
+        item.ImageId = await images.SaveAsync(bytes, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        if (previous is { } old)
+        {
+            images.Delete(old);
+        }
+
+        await audit.WriteAsync(new AuditEntry("catalog", "item.image.updated")
+        {
+            TargetType = CatalogTables.Item,
+            TargetId = item.Id.ToString(),
+            TargetName = item.Name,
+            Message = $"Product image replaced ({contentType}, {bytes.Length / 1024.0:0.#} KB).",
+        }, cancellationToken);
+        return Result.Success();
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> RemoveItemImageAsync(Guid itemId, CancellationToken cancellationToken = default)
+    {
+        if (!await CanManageAsync(cancellationToken))
+        {
+            return Result.Forbidden();
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var item = await db.Set<CatalogItem>().FirstOrDefaultAsync(i => i.Id == itemId, cancellationToken);
+        if (item is null)
+        {
+            return Result.NotFound("The catalog item was not found.");
+        }
+
+        if (item.ImageId is not { } imageId)
+        {
+            return Result.Success();
+        }
+
+        item.ImageId = null;
+        await db.SaveChangesAsync(cancellationToken);
+        images.Delete(imageId);
+        await AuditAsync("item.image.removed", CatalogTables.Item, item.Id, item.Name, cancellationToken);
         return Result.Success();
     }
 
@@ -534,6 +767,13 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
             .ToListAsync(cancellationToken);
     }
 
+    private static Task<List<CatalogSection>> LoadSectionsAsync(IAppDbContext db, Guid itemId, CancellationToken cancellationToken) =>
+        db.Set<CatalogSection>().AsNoTracking()
+            .Where(s => s.CatalogItemId == itemId)
+            .OrderBy(s => s.Order).ThenBy(s => s.Title)
+            .Take(MaxSectionsPerItem)
+            .ToListAsync(cancellationToken);
+
     private static string? ValidateItem(CatalogItemModel model)
     {
         var name = model.Name?.Trim() ?? string.Empty;
@@ -577,6 +817,37 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
             return "Select an approval group or require the manager's approval when approval is required.";
         }
 
+        if (!Enum.IsDefined(model.BillingType))
+        {
+            return "The billing type is invalid.";
+        }
+
+        if (model.TermMonths is < 1 or > 120)
+        {
+            return "The term must be between 1 and 120 months.";
+        }
+
+        if (model.OneTimePrice is < 0 or > 1_000_000)
+        {
+            return "The one-time costs must be between 0 and 1,000,000.";
+        }
+
+        if (model.Subtitle is { Length: > 200 } || model.BadgeText is { Length: > 60 } || model.Teaser is { Length: > 80 }
+            || model.TeaserText is { Length: > 160 } || model.DeliveryText is { Length: > 80 } || model.Highlights is { Length: > 1000 })
+        {
+            return "Subtitle (200), badge (60), teaser (80), teaser text (160), delivery text (80) or highlights (1000) are too long.";
+        }
+
+        if (model.DetailsMarkdown is { Length: > 8000 } || model.DeliveryMarkdown is { Length: > 8000 })
+        {
+            return "The details and delivery texts must not exceed 8000 characters each.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.Code) && !CodePattern().IsMatch(model.Code.Trim()))
+        {
+            return "The service ID may only contain letters, digits, dots and dashes (max. 40).";
+        }
+
         return null;
     }
 
@@ -598,6 +869,20 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
         item.ApprovalMode = model.ApprovalRequired ? model.ApprovalMode : ApprovalMode.AnyApprover;
         item.Order = Math.Clamp(model.Order, 0, 100_000);
         item.IsActive = model.IsActive;
+        item.BillingType = model.BillingType;
+        item.TermMonths = model.BillingType == CatalogBillingType.Monthly ? model.TermMonths : null;
+        item.OneTimePrice = model.BillingType == CatalogBillingType.Monthly ? decimal.Round(model.OneTimePrice, 2) : 0m;
+        item.Subtitle = Clean(model.Subtitle);
+        item.BadgeText = Clean(model.BadgeText);
+        item.Code = Clean(model.Code);
+        item.Teaser = Clean(model.Teaser);
+        item.TeaserText = Clean(model.TeaserText);
+        item.DeliveryText = Clean(model.DeliveryText);
+        item.Highlights = Clean(model.Highlights);
+        item.DetailsMarkdown = Clean(model.DetailsMarkdown);
+        item.DeliveryMarkdown = Clean(model.DeliveryMarkdown);
+        item.IsFeatured = model.IsFeatured;
+        item.FeaturedOrder = Math.Clamp(model.FeaturedOrder, 0, 100_000);
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -606,6 +891,9 @@ public sealed partial class CatalogAdminService(IAppDbContextFactory dbFactory, 
 
     [GeneratedRegex("^[a-z0-9-]{1,50}$")]
     private static partial Regex IconPattern();
+
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9.-]{0,39}$")]
+    private static partial Regex CodePattern();
 
     private Task<bool> CanManageAsync(CancellationToken cancellationToken) =>
         currentUser.HasPermissionAsync(Permissions.Requests.ManageCatalog, cancellationToken);

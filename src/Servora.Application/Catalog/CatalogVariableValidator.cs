@@ -26,6 +26,9 @@ public static partial class CatalogVariableValidator
     /// <summary>Maximum number of variables of one catalog item.</summary>
     public const int MaxVariablesPerItem = 50;
 
+    /// <summary>Maximum length of the stored option lines of one choice variable.</summary>
+    public const int MaxOptionsTextLength = 8000;
+
     private static readonly string[] s_trueValues = ["true", "yes", "on", "1"];
     private static readonly string[] s_falseValues = ["false", "no", "off", "0"];
 
@@ -138,6 +141,26 @@ public static partial class CatalogVariableValidator
             {
                 return $"A choice variable can have at most {MaxOptions} options of up to 200 characters.";
             }
+
+            if (definition.Choices.Any(c => c.Description is { Length: > 200 }))
+            {
+                return "Option descriptions must not exceed 200 characters.";
+            }
+
+            if (definition.Choices.Any(c => Math.Abs(c.PriceDelta) > CatalogChoiceOption.MaxPriceDelta))
+            {
+                return "The price impact of an option must be between -1,000,000 and 1,000,000.";
+            }
+
+            if (string.Join('\n', definition.Choices.Select(c => c.ToLine())).Length > MaxOptionsTextLength)
+            {
+                return $"The options must not exceed {MaxOptionsTextLength} characters in total.";
+            }
+        }
+
+        if (model.Type == CatalogVariableType.Boolean && model.PriceDelta is { } delta && Math.Abs(delta) > CatalogChoiceOption.MaxPriceDelta)
+        {
+            return "The price impact must be between -1,000,000 and 1,000,000.";
         }
 
         if (definition.DefaultValue is not null)

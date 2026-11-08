@@ -1,0 +1,52 @@
+.preq { overflow: hidden; min-width: 0; }
+
+.preq-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; }
+.preq-title { display: flex; align-items: center; gap: 10px; }
+.preq-title h2 { margin: 0; font-family: var(--p-display); font-size: 18px; font-weight: 750; letter-spacing: -.015em; }
+
+.preq-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 120px 150px 24px;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--p-border, #dfe7e2);
+    color: var(--p-text, #14211b);
+    text-decoration: none;
+}
+
+a.preq-row:hover { background: var(--p-tint, #eef5f0); color: var(--p-text, #14211b); }
+
+.preq-header {
+    padding-top: 8px;
+    padding-bottom: 8px;
+    background: var(--p-surface-2, #f6f8f7);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--p-muted, #5f6f67);
+}
+
+.preq-header .preq-col-main { padding-left: 50px; }
+.preq-col-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.preq-text { display: flex; flex-direction: column; min-width: 0; }
+.preq-name { font-weight: 650; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preq-number { font-size: 11.5px; color: var(--p-muted, #5f6f67); font-family: var(--font-mono, ui-monospace, monospace); }
+.preq-col-date { font-size: 12.5px; color: var(--p-muted, #5f6f67); }
+.preq-col-go { color: var(--p-muted, #5f6f67); display: grid; place-items: center; }
+
+.preq ::deep .picon-tile.sm { width: 34px; height: 34px; border-radius: 9px; }
+
+.preq-empty { display: flex; align-items: center; gap: 14px; padding: 18px 20px 22px; border-top: 1px solid var(--p-border, #dfe7e2); }
+.preq-empty div { display: flex; flex-direction: column; font-size: 13px; color: var(--p-muted, #5f6f67); }
+.preq-empty b { color: var(--p-text, #14211b); }
+
+@media (max-width: 720px) {
+    .preq-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+    .preq-header { display: none; }
+    .preq-col-date { grid-column: 1; padding-left: 46px; }
+    .preq-col-status { grid-column: 2; grid-row: 1; }
+    .preq-col-go { display: none; }
+    .preq-head { flex-wrap: wrap; }
+}

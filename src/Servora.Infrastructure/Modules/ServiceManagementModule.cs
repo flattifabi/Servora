@@ -33,6 +33,7 @@ public static class ServiceManagementModule
 
         // Service catalog and requests.
         services.AddScoped<CatalogFulfillmentEngine>();
+        services.AddSingleton<ICatalogImageStore, CatalogImageStore>();
         services.AddScoped<ICatalogAdminService, CatalogAdminService>();
         services.AddScoped<ICatalogOrderService, CatalogOrderService>();
         services.AddScoped<IRequestService, RequestService>();

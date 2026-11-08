@@ -29,7 +29,7 @@
 }
 
 .ptimeline-step:last-child::before { display: none; }
-.ptimeline-step.done::before { background: var(--gradient); }
+.ptimeline-step.done::before { background: var(--p-primary, #1b4535); }
 
 .ptimeline-dot {
     position: relative;
@@ -45,8 +45,8 @@
     color: #fff;
 }
 
-.ptimeline-step.done .ptimeline-dot { background: var(--gradient); border-color: transparent; box-shadow: 0 4px 14px -4px rgba(124, 108, 255, .7); }
-.ptimeline-step.current .ptimeline-dot { background: var(--surface); border-color: var(--primary); box-shadow: var(--ring); }
+.ptimeline-step.done .ptimeline-dot { background: var(--p-primary, #1b4535); border-color: transparent; box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--p-primary, #1b4535) 70%, transparent); }
+.ptimeline-step.current .ptimeline-dot { background: var(--surface); border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-primary, #1b4535) 16%, transparent); }
 .ptimeline-step.failed .ptimeline-dot { background: var(--danger); border-color: transparent; }
 
 .ptimeline-pulse {
@@ -73,6 +73,6 @@
     .ptimeline { grid-auto-flow: row; gap: 0; }
     .ptimeline-step { flex-direction: row; padding: 0 0 18px; gap: 14px; }
     .ptimeline-step::before { top: 30px; bottom: 2px; left: 13px; right: auto; width: 2px; height: auto; }
-    .ptimeline-step.done::before { background: linear-gradient(180deg, #7c6cff, #22d3ee); }
+    .ptimeline-step.done::before { background: var(--p-primary, #1b4535); }
     .ptimeline-desc { max-width: none; }
 }

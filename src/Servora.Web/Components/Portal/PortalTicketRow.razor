@@ -1,7 +1,7 @@
 @* One of the user's incidents or requests as a clickable list row (my items, home page, search). *@
 
 <a class="pticket @(Item.Status.NeedsAction ? "needs-action" : null)" href="@Item.Route">
-    <span class="pticket-icon @(Item.Kind == PortalTicketKind.Incident ? "incident" : "request")"><Icon Name="@Item.Icon" Size="18" /></span>
+    <span class="pticket-icon @(Item.Kind == PortalTicketKind.Incident ? "incident" : "request")"><PortalGlyph Name="@Item.Icon" Size="18" /></span>
     <span class="pticket-main">
         <span class="pticket-title">@Item.Title</span>
         <span class="pticket-meta">
@@ -17,8 +17,12 @@
             <span>updated <RelativeTime Value="Item.UpdatedAt" /></span>
         </span>
     </span>
+    @if (Item.Price is { } price && price > 0)
+    {
+        <span class="pticket-price">@PortalFormat.Period(price, Item.IsMonthly, Currency)</span>
+    }
     <span class="pticket-status">
-        <StatusPill Text="@Item.Status.Label" Tone="@Item.Status.Tone" />
+        <span class="ppill @PortalFormat.Tone(Item.Status.Tone)">@Item.Status.Label</span>
         <Icon Name="chevron-right" Size="16" Class="faint" />
     </span>
 </a>
@@ -26,4 +30,7 @@
 @code {
     /// <summary>Gets or sets the item.</summary>
     [Parameter, EditorRequired] public PortalTicketSummary Item { get; set; } = default!;
+
+    /// <summary>Gets or sets the currency code used for request prices.</summary>
+    [Parameter] public string? Currency { get; set; }
 }

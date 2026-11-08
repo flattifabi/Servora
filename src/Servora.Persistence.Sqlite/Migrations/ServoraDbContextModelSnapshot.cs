@@ -1263,6 +1263,31 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.ToTable("sc_category", (string)null);
                 });
 
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogFavorite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CatalogItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogItemId");
+
+                    b.HasIndex("UserId", "CatalogItemId")
+                        .IsUnique();
+
+                    b.ToTable("sc_favorite", (string)null);
+                });
+
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1278,7 +1303,18 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.Property<bool>("ApprovalRequired")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("BadgeText")
+                        .HasMaxLength(60)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("BillingType")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid?>("CategoryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
                     b.Property<long>("CreatedAt")
@@ -1291,9 +1327,24 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.Property<int>("DeliveryDays")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("DeliveryMarkdown")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeliveryText")
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .HasMaxLength(8000)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("DetailsMarkdown")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FeaturedOrder")
+                        .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("FulfillmentGroupId")
                         .HasColumnType("TEXT");
@@ -1302,12 +1353,22 @@ namespace Servora.Persistence.Sqlite.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Highlights")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Icon")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ImageId")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsFeatured")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("ManagerApproval")
@@ -1316,6 +1377,10 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("OneTimePrice")
+                        .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Order")
@@ -1328,6 +1393,21 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.Property<string>("ShortDescription")
                         .HasMaxLength(300)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("Subtitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Teaser")
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TeaserText")
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TermMonths")
+                        .HasColumnType("INTEGER");
 
                     b.Property<long>("UpdatedAt")
                         .HasColumnType("INTEGER");
@@ -1346,9 +1426,57 @@ namespace Servora.Persistence.Sqlite.Migrations
 
                     b.HasIndex("IsActive");
 
+                    b.HasIndex("IsFeatured");
+
                     b.HasIndex("Name");
 
                     b.ToTable("sc_cat_item", (string)null);
+                });
+
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogSection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CatalogItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogItemId", "Order");
+
+                    b.ToTable("sc_item_section", (string)null);
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogTask", b =>
@@ -1528,6 +1656,13 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
 
+                    b.Property<decimal?>("PriceDelta")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SectionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Type")
                         .HasColumnType("INTEGER");
 
@@ -1543,6 +1678,8 @@ namespace Servora.Persistence.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SectionId");
 
                     b.HasIndex("CatalogItemId", "Name")
                         .IsUnique();
@@ -1682,6 +1819,9 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.Property<Guid?>("AssignmentGroupId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("BillingType")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("CatalogItemId")
                         .HasColumnType("TEXT");
 
@@ -1720,6 +1860,10 @@ namespace Servora.Persistence.Sqlite.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("OneTimePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("OpenedAt")
                         .HasColumnType("INTEGER");
 
@@ -1749,6 +1893,9 @@ namespace Servora.Persistence.Sqlite.Migrations
                     b.Property<string>("Tags")
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("TermMonths")
+                        .HasColumnType("INTEGER");
 
                     b.Property<decimal>("UnitPrice")
                         .HasPrecision(18, 2)
@@ -5000,12 +5147,36 @@ namespace Servora.Persistence.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogFavorite", b =>
+                {
+                    b.HasOne("Servora.Domain.Catalog.CatalogItem", null)
+                        .WithMany()
+                        .HasForeignKey("CatalogItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Servora.Domain.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogItem", b =>
                 {
                     b.HasOne("Servora.Domain.Catalog.CatalogCategory", null)
                         .WithMany()
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Servora.Domain.Catalog.CatalogSection", b =>
+                {
+                    b.HasOne("Servora.Domain.Catalog.CatalogItem", null)
+                        .WithMany()
+                        .HasForeignKey("CatalogItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.CatalogTask", b =>
@@ -5024,6 +5195,10 @@ namespace Servora.Persistence.Sqlite.Migrations
                         .HasForeignKey("CatalogItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Servora.Domain.Catalog.CatalogSection", null)
+                        .WithMany()
+                        .HasForeignKey("SectionId");
                 });
 
             modelBuilder.Entity("Servora.Domain.Catalog.RequestItem", b =>

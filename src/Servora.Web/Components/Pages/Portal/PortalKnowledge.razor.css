@@ -24,7 +24,7 @@
 
 .pkb-cat:hover {
     color: var(--text);
-    border-color: rgba(124, 108, 255, .45);
+    border-color: color-mix(in srgb, var(--p-primary, #1b4535) 40%, transparent);
     box-shadow: var(--shadow);
     transform: translateY(-2px);
 }

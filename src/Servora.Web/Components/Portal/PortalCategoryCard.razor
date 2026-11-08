@@ -1,0 +1,18 @@
+@* Category card of the portal home page: icon tile, name, description, real number of services and a chevron. *@
+<a class="pcat" href="/portal/catalog?category=@Category.Id">
+    <span class="picon-tile"><PortalGlyph Name="@Category.Icon" Size="19" /></span>
+    <span class="pcat-text">
+        <span class="pcat-name">@Category.Name</span>
+        @if (!string.IsNullOrWhiteSpace(Category.Description))
+        {
+            <span class="pcat-desc">@Category.Description</span>
+        }
+        <span class="pcat-count">@Category.ItemCount @(Category.ItemCount == 1 ? "service" : "services")</span>
+    </span>
+    <Icon Name="chevron-right" Size="16" Class="pcat-chevron" />
+</a>
+
+@code {
+    /// <summary>Gets or sets the category.</summary>
+    [Parameter, EditorRequired] public CatalogCategoryModel Category { get; set; } = default!;
+}

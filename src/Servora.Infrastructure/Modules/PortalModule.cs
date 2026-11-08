@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Servora.Application.Common;
+using Servora.Application.Configuration;
 using Servora.Application.Portal;
 using Servora.Infrastructure.Portal;
 
@@ -20,6 +21,8 @@ public static class PortalModule
         services.AddScoped<IPortalApprovalService, PortalApprovalService>();
         services.AddScoped<IPortalAnnouncementService, PortalAnnouncementService>();
         services.AddScoped<IPortalHomeService, PortalHomeService>();
+        services.AddScoped<IPortalSettingsService, PortalSettingsService>();
+        services.AddSingleton<ISettingDefinitionProvider, PortalSettingDefinitionProvider>();
         services.AddScoped<IDataSeeder, PortalSeeder>();
         return services;
     }

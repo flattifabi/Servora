@@ -1,0 +1,24 @@
+.hero-illu { display: block; width: 100%; height: 100%; }
+.hi-wall { fill: color-mix(in srgb, var(--primary, #1b4535) 8%, #f4f1ea); }
+.hi-wall-shade { fill: color-mix(in srgb, var(--primary, #1b4535) 14%, #ece8de); }
+.hi-frame { fill: #fbfaf7; stroke: color-mix(in srgb, var(--primary, #1b4535) 20%, #d9d4c8); stroke-width: 2; }
+.hi-sky { fill: color-mix(in srgb, var(--primary, #1b4535) 6%, #eef4f1); }
+.hi-tree { fill: color-mix(in srgb, var(--primary, #1b4535) 55%, #9fc59a); }
+.hi-tree-2 { fill: color-mix(in srgb, var(--primary, #1b4535) 40%, #b9d6a8); }
+.hi-wood { fill: #c9a57a; }
+.hi-book { fill: color-mix(in srgb, var(--primary, #1b4535) 70%, #567); }
+.hi-book-2 { fill: #e2c08d; }
+.hi-pot { fill: #e8e2d6; stroke: #cfc6b4; stroke-width: 1.5; }
+.hi-leaf { fill: color-mix(in srgb, var(--primary, #1b4535) 70%, #4f8a55); }
+.hi-desk { fill: #c49a6c; }
+.hi-desk-shade { fill: #a87f55; }
+.hi-leg { fill: #3a3a38; }
+.hi-screen { fill: #2c302e; }
+.hi-display { fill: color-mix(in srgb, var(--primary, #1b4535) 30%, #c9d8cf); }
+.hi-glow { fill: color-mix(in srgb, var(--primary, #1b4535) 55%, #7fa897); opacity: .75; }
+.hi-base { fill: #9aa09c; }
+.hi-metal { fill: #3a3a38; }
+.hi-metal-line { fill: none; stroke: #3a3a38; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.hi-shade { fill: #f1ece2; stroke: #3a3a38; stroke-width: 2; }
+.hi-mug { fill: #fbfaf7; stroke: #cfc6b4; stroke-width: 1.5; }
+.hi-chair { fill: color-mix(in srgb, var(--primary, #1b4535) 60%, #34433c); opacity: .9; }

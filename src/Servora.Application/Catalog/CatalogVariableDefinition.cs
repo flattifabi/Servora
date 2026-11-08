@@ -26,8 +26,17 @@ public sealed record CatalogVariableDefinition
     /// <summary>Gets the help text.</summary>
     public string? HelpText { get; init; }
 
-    /// <summary>Gets the options of choice variables.</summary>
+    /// <summary>Gets the option labels of choice variables (the values an answer may take).</summary>
     public IReadOnlyList<string> Options { get; init; } = [];
+
+    /// <summary>Gets the options of choice variables including their price impacts and descriptions.</summary>
+    public IReadOnlyList<CatalogChoiceOption> Choices { get; init; } = [];
+
+    /// <summary>Gets the order form section (<see langword="null"/> = general section).</summary>
+    public Guid? SectionId { get; init; }
+
+    /// <summary>Gets the price impact of a yes / no variable when it is checked.</summary>
+    public decimal? PriceDelta { get; init; }
 
     /// <summary>Gets the default value.</summary>
     public string? DefaultValue { get; init; }
@@ -47,6 +56,7 @@ public sealed record CatalogVariableDefinition
     public static CatalogVariableDefinition From(CatalogVariable variable)
     {
         ArgumentNullException.ThrowIfNull(variable);
+        var choices = CatalogChoiceOption.ParseMany(variable.Options);
         return new CatalogVariableDefinition
         {
             Id = variable.Id,
@@ -56,7 +66,10 @@ public sealed record CatalogVariableDefinition
             Mandatory = variable.Mandatory,
             Order = variable.Order,
             HelpText = variable.HelpText,
-            Options = ParseOptions(variable.Options),
+            Options = choices.Select(c => c.Label).ToList(),
+            Choices = choices,
+            SectionId = variable.SectionId,
+            PriceDelta = variable.PriceDelta,
             DefaultValue = variable.DefaultValue,
             MaxLength = variable.MaxLength,
             MinValue = variable.MinValue,
@@ -64,14 +77,12 @@ public sealed record CatalogVariableDefinition
         };
     }
 
-    /// <summary>Splits newline separated options into a distinct, trimmed list.</summary>
+    /// <summary>
+    /// Splits newline separated option lines into a distinct, trimmed list of labels. Price impacts and descriptions
+    /// (<c>Label | +8.00 | text</c>) are not part of the label.
+    /// </summary>
     /// <param name="options">The options text.</param>
-    /// <returns>The options.</returns>
+    /// <returns>The option labels.</returns>
     public static IReadOnlyList<string> ParseOptions(string? options) =>
-        string.IsNullOrWhiteSpace(options)
-            ? []
-            : options.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(o => o.Length > 0)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        CatalogChoiceOption.ParseMany(options).Select(o => o.Label).ToList();
 }

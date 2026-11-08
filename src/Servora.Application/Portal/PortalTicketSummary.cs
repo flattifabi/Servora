@@ -30,6 +30,12 @@ public sealed record PortalTicketSummary
     /// <summary>Gets the UTC time of the last update.</summary>
     public DateTimeOffset UpdatedAt { get; init; }
 
+    /// <summary>Gets the total price of a request's items (<see langword="null"/> for incidents).</summary>
+    public decimal? Price { get; init; }
+
+    /// <summary>Gets a value indicating whether the request's price is billed monthly.</summary>
+    public bool IsMonthly { get; init; }
+
     /// <summary>Gets the relative portal route of the item.</summary>
     public string Route => Kind == PortalTicketKind.Incident ? $"/portal/incidents/{Id}" : $"/portal/requests/{Id}";
 }

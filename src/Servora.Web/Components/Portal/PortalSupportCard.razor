@@ -1,0 +1,32 @@
+@* "Questions?" support card: eyebrow, title, text, outlined contact button and the hours line (all configurable in the
+   portal settings; links are re-validated before rendering). *@
+<section class="psup" aria-labelledby="psup-title">
+    @if (!string.IsNullOrWhiteSpace(Settings.SupportEyebrow))
+    {
+        <div class="psup-eyebrow">
+            <span class="picon-tile sm"><Icon Name="message-circle" Size="16" /></span>
+            <span class="peyebrow">@Settings.SupportEyebrow</span>
+        </div>
+    }
+    <h2 id="psup-title">@Settings.SupportTitle</h2>
+    @if (!string.IsNullOrWhiteSpace(Settings.SupportText))
+    {
+        <p>@Settings.SupportText</p>
+    }
+    @if (PortalSettingsModel.SafeLink(Settings.SupportUrl) is { } link)
+    {
+        <a class="pbtn pbtn-outline pbtn-block" href="@link" rel="noopener">
+            @(string.IsNullOrWhiteSpace(Settings.SupportLinkText) ? "Contact IT support" : Settings.SupportLinkText)
+            <Icon Name="arrow-up-right" Size="15" />
+        </a>
+    }
+    @if (!string.IsNullOrWhiteSpace(Settings.SupportHours))
+    {
+        <div class="psup-hours">@Settings.SupportHours</div>
+    }
+</section>
+
+@code {
+    /// <summary>Gets or sets the portal settings.</summary>
+    [Parameter, EditorRequired] public PortalSettingsModel Settings { get; set; } = default!;
+}

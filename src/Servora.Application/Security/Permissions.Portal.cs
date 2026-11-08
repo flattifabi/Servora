@@ -12,8 +12,8 @@ public static partial class Permissions
         [Description("Use the self-service portal (submit requests and issues, read knowledge).")]
         public const string Access = "portal.access";
 
-        /// <summary>Manage the portal announcements shown on the portal home page.</summary>
-        [Description("Manage the portal announcements shown on the portal home page.")]
+        /// <summary>Manage the portal announcements and the portal settings (texts, links, hero image).</summary>
+        [Description("Manage the portal announcements and the portal settings (texts, links, hero image).")]
         public const string Manage = "portal.manage";
     }
 }

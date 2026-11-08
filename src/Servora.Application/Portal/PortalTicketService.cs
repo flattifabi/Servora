@@ -138,6 +138,7 @@ public sealed class PortalTicketService(
                 Icon = i.Icon,
                 Quantity = i.Quantity,
                 UnitPrice = i.UnitPrice,
+                IsMonthly = i.BillingType == Servora.Domain.Catalog.CatalogBillingType.Monthly,
                 Status = PortalStatusMapper.ForRequestItem(i.State),
                 ApprovalLabel = PortalStatusMapper.ApprovalLabel(i.Approval),
                 Answers = i.Answers,

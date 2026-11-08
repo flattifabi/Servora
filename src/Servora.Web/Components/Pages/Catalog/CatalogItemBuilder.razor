@@ -1,6 +1,8 @@
 @page "/catalog-admin/new"
 @page "/catalog-admin/{Id:guid}"
-@* Catalog item builder: item settings, fulfilment and approval, variable designer and a live portal preview. *@
+@* Catalog item builder: item settings, pricing (one-time / monthly, option price impacts), portal presentation (image,
+   badge, highlights, teaser, featured), details and delivery tabs, fulfilment and approval, order form sections, the
+   variable designer and a live portal preview. *@
 @attribute [RequirePermission(Permissions.Requests.ManageCatalog)]
 @inject ICatalogAdminService Catalog
 @inject NavigationManager Nav
@@ -72,15 +74,111 @@ else
                             <FormField Label="Description" Class="span-all" Help="Shown on the order form (plain text).">
                                 <textarea class="textarea" rows="4" @bind="_model.Description" @bind:event="oninput" maxlength="8000"></textarea>
                             </FormField>
-                            <FormField Label="Price" Help="One-time price per unit, 0 for free.">
-                                <input class="input" type="number" min="0" step="0.01" @bind="_model.Price" />
-                            </FormField>
                             <FormField Label="Delivery time (days)">
                                 <input class="input" type="number" min="0" max="365" @bind="_model.DeliveryDays" />
+                            </FormField>
+                            <FormField Label="Delivery text" Help="Replaces the computed text, e.g. 3–5 working days or Available immediately.">
+                                <input class="input" @bind="_model.DeliveryText" maxlength="80" />
                             </FormField>
                             <FormField Label="Sort order"><input class="input" type="number" @bind="_model.Order" /></FormField>
                             <FormField Label="Availability"><Switch @bind-Value="_model.IsActive" Label="Active – can be ordered" /></FormField>
                             <FormField Label="Icon" Class="span-all"><IconChooser @bind-Value="_model.Icon" /></FormField>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="tag" Size="16" /> Pricing</div>
+                        <div class="form-grid">
+                            <FormField Label="Billing">
+                                <select class="select" @bind="_model.BillingType">
+                                    <option value="@CatalogBillingType.OneTime">One-time price</option>
+                                    <option value="@CatalogBillingType.Monthly">Monthly price</option>
+                                </select>
+                            </FormField>
+                            <FormField Label="@(_model.BillingType == CatalogBillingType.Monthly ? "Price per month" : "Price")" Help="Base price per unit, 0 = no additional cost. Options can add price impacts.">
+                                <input class="input" type="number" min="0" step="0.01" @bind="_model.Price" />
+                            </FormField>
+                            @if (_model.BillingType == CatalogBillingType.Monthly)
+                            {
+                                <FormField Label="Term (months)" Help="Shown in the summary, e.g. 36.">
+                                    <input class="input" type="number" min="1" max="120" @bind="_model.TermMonths" />
+                                </FormField>
+                                <FormField Label="One-time costs" Help="Setup fee per unit in addition to the monthly price.">
+                                    <input class="input" type="number" min="0" step="0.01" @bind="_model.OneTimePrice" />
+                                </FormField>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="sparkles" Size="16" /> Portal presentation</div>
+                        <div class="form-grid">
+                            <FormField Label="Subtitle" Help="For example the model: Lenovo ThinkPad T14 Gen 5."><input class="input" @bind="_model.Subtitle" maxlength="200" /></FormField>
+                            <FormField Label="Service ID" Help="Shown on the order page, e.g. HW-001."><input class="input mono" @bind="_model.Code" maxlength="40" /></FormField>
+                            <FormField Label="Badge" Help="Short label on the image, e.g. Our standard for you."><input class="input" @bind="_model.BadgeText" maxlength="60" /></FormField>
+                            <FormField Label="Featured on the portal home">
+                                <div class="flex items-center gap-3">
+                                    <Switch @bind-Value="_model.IsFeatured" Label="@(_model.IsFeatured ? "Featured" : "Not featured")" />
+                                    @if (_model.IsFeatured)
+                                    {
+                                        <input class="input" style="max-width:110px" type="number" min="0" @bind="_model.FeaturedOrder" title="Order among featured items" />
+                                    }
+                                </div>
+                            </FormField>
+                            <FormField Label="Teaser headline" Help="Card panel headline when there is no image, e.g. Better together."><input class="input" @bind="_model.Teaser" maxlength="80" /></FormField>
+                            <FormField Label="Teaser text" Help="Line below the teaser headline."><input class="input" @bind="_model.TeaserText" maxlength="160" /></FormField>
+                            <FormField Label="Highlights" Class="span-all" Help="One fact per line, optionally with an icon: package | 3–5 working days (max. 6).">
+                                <textarea class="textarea mono" rows="3" @bind="_model.Highlights" maxlength="1000"></textarea>
+                            </FormField>
+                            <FormField Label="Product image" Class="span-all" Help="@($"PNG, JPEG, GIF or WebP up to {ICatalogImageStore.MaxImageBytes / (1024 * 1024)} MB. SVG is not accepted.")">
+                                @if (IsNew)
+                                {
+                                    <div class="small faint">Save the item first to upload an image.</div>
+                                }
+                                else
+                                {
+                                    <div class="flex items-center gap-3 flex-wrap">
+                                        <div class="builder-image">
+                                            @if (_model.ImageUrl is { } imageUrl)
+                                            {
+                                                <img src="@imageUrl" alt="Product image" />
+                                            }
+                                            else
+                                            {
+                                                <Icon Name="@_model.Icon" Size="26" />
+                                            }
+                                        </div>
+                                        <label class="btn btn-secondary btn-sm @(_uploading ? "disabled" : null)">
+                                            @if (_uploading)
+                                            {
+                                                <span class="spinner"></span>
+                                            }
+                                            else
+                                            {
+                                                <Icon Name="upload" Size="14" />
+                                            }
+                                            Upload image
+                                            <InputFile class="hidden" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp" OnChange="UploadImageAsync" disabled="@_uploading" />
+                                        </label>
+                                        @if (_model.ImageId is not null)
+                                        {
+                                            <button class="btn btn-outline-danger btn-sm" @onclick="RemoveImageAsync"><Icon Name="trash" Size="14" /> Remove</button>
+                                        }
+                                    </div>
+                                }
+                            </FormField>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><Icon Name="file-text" Size="16" /> Order page tabs</div>
+                        <div class="form-grid">
+                            <FormField Label="Details &amp; equipment" Class="span-all" Help="Markdown (headings, lists, links) – rendered safely.">
+                                <textarea class="textarea mono" rows="6" @bind="_model.DetailsMarkdown" maxlength="8000"></textarea>
+                            </FormField>
+                            <FormField Label="Delivery &amp; support" Class="span-all" Help="Markdown – rendered safely.">
+                                <textarea class="textarea mono" rows="5" @bind="_model.DeliveryMarkdown" maxlength="8000"></textarea>
+                            </FormField>
                         </div>
                     </div>
 
@@ -117,6 +215,46 @@ else
                     </div>
                 </div>
             </div>
+
+            @if (!IsNew)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3><Icon Name="layers" Size="16" /> Form sections <span class="badge">@_model.Sections.Count</span></h3>
+                            <div class="card-subtitle">Numbered cards of the portal order page. Questions without a section are shown in a general card.</div>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" @onclick="NewSection"><Icon Name="plus" Size="14" /> Add section</button>
+                    </div>
+                    <div class="card-body">
+                        @if (_model.Sections.Count == 0)
+                        {
+                            <div class="small faint">No sections – all questions appear in one card ("Your request").</div>
+                        }
+                        else
+                        {
+                            <div class="variable-list">
+                                @for (var s = 0; s < _model.Sections.Count; s++)
+                                {
+                                    var section = _model.Sections[s];
+                                    var number = s + 1;
+                                    <div class="variable-row" @key="section.Id">
+                                        <div class="variable-type"><b>@number</b></div>
+                                        <div class="flex-1" style="min-width:0">
+                                            <b>@section.Title</b>
+                                            <div class="tiny faint mt-1">@(section.Description ?? "No description") · @_model.Variables.Count(v => v.SectionId == section.Id) question(s) · order @section.Order</div>
+                                        </div>
+                                        <div class="flex gap-1">
+                                            <button class="icon-btn" title="Edit" @onclick="() => EditSection(section)"><Icon Name="edit" Size="15" /></button>
+                                            <button class="icon-btn" title="Delete" @onclick="() => DeleteSectionAsync(section)"><Icon Name="trash" Size="15" /></button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
 
             <div class="card">
                 <div class="card-header">
@@ -162,6 +300,14 @@ else
                                             @if (variable.Options.Count > 0)
                                             {
                                                 <span> · @variable.Options.Count option(s)</span>
+                                            }
+                                            @if (variable.Choices.Any(c => c.PriceDelta != 0) || variable.PriceDelta is not null)
+                                            {
+                                                <span> · price impact</span>
+                                            }
+                                            @if (_model.Sections.FirstOrDefault(x => x.Id == variable.SectionId) is { } owner)
+                                            {
+                                                <span> · section “@owner.Title”</span>
                                             }
                                             @if (variable.DefaultValue is not null)
                                             {
@@ -220,10 +366,25 @@ else
                     <input class="input mono" @bind="_variable.Name" @bind:after="() => _nameTouched = true" maxlength="64" />
                 </FormField>
                 <FormField Label="Mandatory"><Switch @bind-Value="_variable.Mandatory" Label="@(_variable.Mandatory ? "Answer required" : "Optional")" /></FormField>
+                <FormField Label="Section">
+                    <select class="select" @bind="_variable.SectionId">
+                        <option value="">— General section —</option>
+                        @foreach (var section in _model.Sections)
+                        {
+                            <option value="@section.Id">@section.Title</option>
+                        }
+                    </select>
+                </FormField>
                 @if (_variable.Type == CatalogVariableType.Choice)
                 {
-                    <FormField Label="Options" Required="true" Help="One option per line (max. 100)." Class="span-all">
-                        <textarea class="textarea" rows="5" @bind="_variable.OptionsText" @bind:event="oninput"></textarea>
+                    <FormField Label="Options" Required="true" Help="One option per line (max. 100). Optional price impact and description: 32 GB RAM | +8.00 | For demanding workloads" Class="span-all">
+                        <textarea class="textarea mono" rows="5" @bind="_variable.OptionsText" @bind:event="oninput"></textarea>
+                    </FormField>
+                }
+                @if (_variable.Type == CatalogVariableType.Boolean)
+                {
+                    <FormField Label="Price impact when checked" Help="For optional accessories, billed like the item (one-time or per month). Leave empty for none.">
+                        <input class="input" type="number" step="0.01" @bind="_variable.PriceDelta" />
                     </FormField>
                 }
                 @if (_variable.Type is CatalogVariableType.Text or CatalogVariableType.MultilineText)
@@ -254,6 +415,20 @@ else
         </Footer>
     </Drawer>
 
+    <Drawer @bind-Open="_sectionOpen" Title="@(_section.Id is null ? "New section" : "Edit section")" Subtitle="A numbered card of the portal order page.">
+        <ChildContent>
+            <div class="form-grid">
+                <FormField Label="Title" Required="true" Class="span-all"><input class="input" @bind="_section.Title" maxlength="120" placeholder="e.g. Who is it for?" /></FormField>
+                <FormField Label="Description" Class="span-all" Help="Optional line below the title."><input class="input" @bind="_section.Description" maxlength="300" /></FormField>
+                <FormField Label="Order" Help="Sections are numbered in this order."><input class="input" type="number" min="0" @bind="_section.Order" /></FormField>
+            </div>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-secondary" @onclick="() => _sectionOpen = false">Cancel</button>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveSectionAsync"><Icon Name="save" Size="14" /> Save section</button>
+        </Footer>
+    </Drawer>
+
     <ConfirmDialog @bind-Open="_deleteOpen" Title="Delete catalog item?" Danger="true" ConfirmText="Delete"
                    Message="@($"\"{_model.Name}\" and its questions will be deleted permanently. Items that were already ordered cannot be deleted – deactivate them instead.")"
                    OnConfirm="DeleteAsync" />
@@ -267,6 +442,9 @@ else
     private IReadOnlyList<CatalogCategoryModel> _categories = [];
     private CatalogVariableModel _variable = new();
     private CatalogVariableDefinition? _deletingVariable;
+    private CatalogSectionModel _section = new();
+    private bool _sectionOpen;
+    private bool _uploading;
     private bool _loading = true;
     private bool _notFound;
     private bool _busy;
@@ -443,6 +621,92 @@ else
         if (Toasts.FromResult(result, "Question deleted"))
         {
             await ReloadAsync(Id!.Value);
+        }
+    }
+
+    private void NewSection()
+    {
+        _section = new CatalogSectionModel { Order = (_model.Sections.Count == 0 ? 0 : _model.Sections.Max(s => s.Order)) + 10 };
+        _sectionOpen = true;
+    }
+
+    private void EditSection(CatalogSectionModel section)
+    {
+        _section = new CatalogSectionModel { Id = section.Id, Title = section.Title, Description = section.Description, Order = section.Order };
+        _sectionOpen = true;
+    }
+
+    private async Task SaveSectionAsync()
+    {
+        _busy = true;
+        var result = await Catalog.SaveSectionAsync(Id!.Value, _section);
+        _busy = false;
+        if (Toasts.FromResult(result, "Section saved"))
+        {
+            _sectionOpen = false;
+            await ReloadAsync(Id.Value);
+        }
+    }
+
+    private async Task DeleteSectionAsync(CatalogSectionModel section)
+    {
+        if (section.Id is not { } sectionId)
+        {
+            return;
+        }
+
+        var result = await Catalog.DeleteSectionAsync(sectionId);
+        if (Toasts.FromResult(result, "Section deleted – its questions moved to the general section"))
+        {
+            await ReloadAsync(Id!.Value);
+        }
+    }
+
+    private async Task UploadImageAsync(InputFileChangeEventArgs e)
+    {
+        if (e.File.Size > ICatalogImageStore.MaxImageBytes)
+        {
+            Toasts.Error("Image too large", $"The image must not exceed {ICatalogImageStore.MaxImageBytes / (1024 * 1024)} MB.");
+            return;
+        }
+
+        _uploading = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(ICatalogImageStore.MaxImageBytes);
+            var result = await Catalog.UploadItemImageAsync(Id!.Value, stream);
+            if (Toasts.FromResult(result, "Product image updated"))
+            {
+                await ReloadImageAsync();
+            }
+        }
+        catch (IOException)
+        {
+            Toasts.Error("Upload failed", "The file could not be read.");
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task RemoveImageAsync()
+    {
+        var result = await Catalog.RemoveItemImageAsync(Id!.Value);
+        if (Toasts.FromResult(result, "Product image removed"))
+        {
+            await ReloadImageAsync();
+        }
+    }
+
+    private async Task ReloadImageAsync()
+    {
+        // Keep unsaved edits: only take the new image and concurrency version from the stored item.
+        var stored = await Catalog.GetItemAsync(Id!.Value);
+        if (stored.Value is { } item)
+        {
+            _model.ImageId = item.ImageId;
+            _model.Version = item.Version;
         }
     }
 

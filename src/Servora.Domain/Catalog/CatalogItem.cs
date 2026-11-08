@@ -23,8 +23,56 @@ public class CatalogItem : AuditableEntity
     [Reference(CatalogTables.Category)]
     public Guid? CategoryId { get; set; }
 
-    /// <summary>Gets or sets the one-time price per unit (0 = free).</summary>
+    /// <summary>Gets or sets the base price per unit (0 = no additional cost), billed according to <see cref="BillingType"/>.</summary>
     public decimal Price { get; set; }
+
+    /// <summary>Gets or sets how the price is billed (one-time or monthly).</summary>
+    public CatalogBillingType BillingType { get; set; } = CatalogBillingType.OneTime;
+
+    /// <summary>Gets or sets the contract term in months of monthly billed items (<see langword="null"/> = no fixed term).</summary>
+    public int? TermMonths { get; set; }
+
+    /// <summary>Gets or sets the one-time costs per unit charged in addition to the monthly price (setup fee).</summary>
+    public decimal OneTimePrice { get; set; }
+
+    /// <summary>Gets or sets the subtitle shown below the name, for example the model ("Lenovo ThinkPad T14 Gen 5").</summary>
+    public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets a short badge text, for example "Our standard for you".</summary>
+    public string? BadgeText { get; set; }
+
+    /// <summary>Gets or sets the public service identifier shown on the order page, for example <c>HW-001</c>.</summary>
+    public string? Code { get; set; }
+
+    /// <summary>Gets or sets the identifier of the uploaded product image (a file in the data directory).</summary>
+    public Guid? ImageId { get; set; }
+
+    /// <summary>Gets or sets the headline of the card panel shown when the item has no image ("Better together.").</summary>
+    public string? Teaser { get; set; }
+
+    /// <summary>Gets or sets the line below the teaser headline ("Your digital toolkit").</summary>
+    public string? TeaserText { get; set; }
+
+    /// <summary>Gets or sets a delivery text that replaces the computed one, for example "Available immediately".</summary>
+    public string? DeliveryText { get; set; }
+
+    /// <summary>
+    /// Gets or sets the highlight facts of the order page, one per line, optionally prefixed with an icon name
+    /// (<c>truck | 3–5 working days</c>).
+    /// </summary>
+    public string? Highlights { get; set; }
+
+    /// <summary>Gets or sets the "Details &amp; equipment" tab content (Markdown, rendered safely).</summary>
+    public string? DetailsMarkdown { get; set; }
+
+    /// <summary>Gets or sets the "Delivery &amp; support" tab content (Markdown, rendered safely).</summary>
+    public string? DeliveryMarkdown { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the item is featured on the portal home page.</summary>
+    public bool IsFeatured { get; set; }
+
+    /// <summary>Gets or sets the order among the featured items.</summary>
+    public int FeaturedOrder { get; set; }
 
     /// <summary>Gets or sets the expected delivery time in days.</summary>
     public int DeliveryDays { get; set; } = 3;

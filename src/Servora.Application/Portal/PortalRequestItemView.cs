@@ -23,6 +23,9 @@ public sealed record PortalRequestItemView
     /// <summary>Gets the unit price.</summary>
     public decimal UnitPrice { get; init; }
 
+    /// <summary>Gets a value indicating whether the unit price is billed monthly.</summary>
+    public bool IsMonthly { get; init; }
+
     /// <summary>Gets the consumer-friendly status.</summary>
     public PortalStatus Status { get; init; } = new("Submitted", "info", true);
 

@@ -1,0 +1,17 @@
+.psup {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 22px;
+    border-radius: var(--p-r, 12px);
+    background: var(--p-tint, #eef5f0);
+    border: 1px solid color-mix(in srgb, var(--p-primary, #1b4535) 12%, transparent);
+    min-width: 0;
+}
+
+.psup-eyebrow { display: flex; align-items: center; gap: 10px; }
+.psup ::deep .picon-tile.sm { width: 32px; height: 32px; border-radius: 9px; background: var(--p-surface, #fff); }
+.psup h2 { margin: 4px 0 0; font-family: var(--p-display); font-size: 20px; font-weight: 750; letter-spacing: -.02em; }
+.psup p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--p-muted, #5f6f67); }
+.psup ::deep .pbtn { margin-top: 6px; }
+.psup-hours { font-size: 12px; color: var(--p-muted, #5f6f67); }

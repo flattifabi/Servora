@@ -12,6 +12,12 @@ public static class CatalogTables
     /// <summary>Catalog item variables (questions of the order form).</summary>
     public const string Variable = "item_option_new";
 
+    /// <summary>Sections that group the variables of an order form.</summary>
+    public const string Section = "sc_item_section";
+
+    /// <summary>Catalog items users saved as favourites.</summary>
+    public const string Favorite = "sc_favorite";
+
     /// <summary>Number prefix of requests.</summary>
     public const string RequestPrefix = "REQ";
 

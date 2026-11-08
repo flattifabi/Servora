@@ -49,7 +49,7 @@
 
 .pconv-msg.mine .pconv-bubble {
     border-radius: 16px 16px 4px 16px;
-    background: linear-gradient(135deg, rgba(124, 108, 255, .9), rgba(168, 85, 247, .85));
+    background: var(--p-primary, #1b4535);
     border-color: transparent;
     color: #fff;
 }

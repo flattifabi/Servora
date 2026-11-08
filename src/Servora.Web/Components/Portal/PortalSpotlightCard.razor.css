@@ -1,0 +1,113 @@
+.pspot {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: var(--p-r, 12px);
+    border: 1px solid var(--p-border, #dfe7e2);
+    background: var(--p-surface, #fff);
+    box-shadow: var(--p-shadow);
+    transition: box-shadow .15s, border-color .15s, transform .15s;
+}
+
+.pspot:hover {
+    border-color: color-mix(in srgb, var(--p-primary, #1b4535) 35%, transparent);
+    box-shadow: 0 14px 30px -18px rgba(20, 33, 27, .4);
+    transform: translateY(-1px);
+}
+
+.pspot-media {
+    position: relative;
+    height: 150px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 20px 24px;
+    background: var(--p-tint-strong, #e4eee8);
+    color: var(--p-text, #14211b);
+    text-decoration: none;
+    border-bottom: 1px solid var(--p-border, #dfe7e2);
+}
+
+.pspot-media.image { padding: 0; background: var(--p-tint, #eef5f0); }
+.pspot-media img { width: 100%; height: 100%; object-fit: cover; }
+
+.pspot-panel-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: var(--p-primary, #1b4535);
+    background: var(--p-surface, #fff);
+    box-shadow: 0 6px 18px -10px rgba(20, 33, 27, .35);
+}
+
+.pspot-panel-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pspot-teaser { font-family: var(--p-display); font-size: 19px; font-weight: 750; letter-spacing: -.02em; line-height: 1.2; color: var(--p-text, #14211b); }
+.pspot-teaser-sub { font-size: 12.5px; color: var(--p-muted, #5f6f67); }
+
+.pspot-badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--p-ink, #173f30);
+    background: color-mix(in srgb, var(--p-primary, #1b4535) 18%, #fff);
+}
+
+.pspot-heart {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--p-border, #dfe7e2);
+    background: var(--p-surface, #fff);
+    color: var(--p-muted, #5f6f67);
+    cursor: pointer;
+    transition: color .15s, transform .15s;
+}
+
+.pspot-heart:hover { color: var(--p-danger, #c2413b); transform: scale(1.06); }
+.pspot-heart.on { color: var(--p-danger, #c2413b); }
+
+.pspot-body { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px 16px; flex: 1; }
+.pspot-title { margin: 2px 0 0; font-family: var(--p-display); font-size: 18px; font-weight: 750; letter-spacing: -.015em; }
+.pspot-title a { color: var(--p-text, #14211b); text-decoration: none; }
+.pspot-title a:hover { color: var(--p-primary, #1b4535); }
+.pspot-desc { margin: 0; font-size: 13px; line-height: 1.5; color: var(--p-muted, #5f6f67); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pspot-delivery { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12.5px; color: var(--p-muted, #5f6f67); }
+
+.pspot-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--p-border, #dfe7e2);
+}
+
+.pspot-delivery + .pspot-foot { margin-top: 10px; }
+.pspot-price { font-weight: 700; font-size: 13.5px; color: var(--p-text, #14211b); }
+.pspot-action { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; color: var(--p-primary, #1b4535); text-decoration: none; }
+.pspot-action:hover { color: var(--p-primary-strong, #12382a); }
+.pspot:hover .pspot-action ::deep .icon { transform: translateX(2px); transition: transform .15s; }
+
+.pspot.compact .pspot-media { height: 116px; }
+.pspot.compact .pspot-panel-icon { width: 52px; height: 52px; }
+.pspot.compact .pspot-teaser { font-size: 16px; }
+.pspot.compact .pspot-title { font-size: 16px; }

@@ -23,8 +23,14 @@ public sealed class CatalogVariableModel
     /// <summary>Gets or sets the help text.</summary>
     public string? HelpText { get; set; }
 
-    /// <summary>Gets or sets the choice options, one per line.</summary>
+    /// <summary>Gets or sets the choice options, one per line (<c>Label</c> or <c>Label | +8.00 | description</c>).</summary>
     public string? OptionsText { get; set; }
+
+    /// <summary>Gets or sets the order form section (<see langword="null"/> = general section).</summary>
+    public Guid? SectionId { get; set; }
+
+    /// <summary>Gets or sets the price impact of a yes / no variable when it is checked.</summary>
+    public decimal? PriceDelta { get; set; }
 
     /// <summary>Gets or sets the default value.</summary>
     public string? DefaultValue { get; set; }
@@ -40,20 +46,27 @@ public sealed class CatalogVariableModel
 
     /// <summary>Converts the model to a definition (for validation and previews).</summary>
     /// <returns>The definition.</returns>
-    public CatalogVariableDefinition ToDefinition() => new()
+    public CatalogVariableDefinition ToDefinition()
     {
-        Id = Id ?? Guid.Empty,
-        Name = Name.Trim(),
-        Label = Label.Trim(),
-        Type = Type,
-        Mandatory = Mandatory,
-        HelpText = string.IsNullOrWhiteSpace(HelpText) ? null : HelpText.Trim(),
-        Options = CatalogVariableDefinition.ParseOptions(OptionsText),
-        DefaultValue = string.IsNullOrWhiteSpace(DefaultValue) ? null : DefaultValue.Trim(),
-        MaxLength = MaxLength,
-        MinValue = MinValue,
-        MaxValue = MaxValue,
-    };
+        var choices = CatalogChoiceOption.ParseMany(OptionsText);
+        return new CatalogVariableDefinition
+        {
+            Id = Id ?? Guid.Empty,
+            Name = Name.Trim(),
+            Label = Label.Trim(),
+            Type = Type,
+            Mandatory = Mandatory,
+            HelpText = string.IsNullOrWhiteSpace(HelpText) ? null : HelpText.Trim(),
+            Options = choices.Select(c => c.Label).ToList(),
+            Choices = choices,
+            SectionId = SectionId,
+            PriceDelta = Type == CatalogVariableType.Boolean && PriceDelta is { } delta && delta != 0m ? decimal.Round(delta, 2) : null,
+            DefaultValue = string.IsNullOrWhiteSpace(DefaultValue) ? null : DefaultValue.Trim(),
+            MaxLength = MaxLength,
+            MinValue = MinValue,
+            MaxValue = MaxValue,
+        };
+    }
 
     /// <summary>Creates a model from a definition.</summary>
     /// <param name="definition">The definition.</param>
@@ -69,7 +82,9 @@ public sealed class CatalogVariableModel
             Type = definition.Type,
             Mandatory = definition.Mandatory,
             HelpText = definition.HelpText,
-            OptionsText = string.Join('\n', definition.Options),
+            OptionsText = string.Join('\n', definition.Choices.Count > 0 ? definition.Choices.Select(c => c.ToLine()) : definition.Options),
+            SectionId = definition.SectionId,
+            PriceDelta = definition.PriceDelta,
             DefaultValue = definition.DefaultValue,
             MaxLength = definition.MaxLength,
             MinValue = definition.MinValue,

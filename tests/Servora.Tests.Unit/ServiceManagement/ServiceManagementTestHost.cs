@@ -31,6 +31,7 @@ public sealed class ServiceManagementTestHost : IDisposable
         services.AddSingleton<IClock>(Clock);
         services.AddSingleton<IEmailSender>(Email);
         services.AddSingleton<IAuditService>(Audit);
+        services.AddSingleton<IAppPaths>(Paths);
         services.AddSingleton<ITableRegistry, ReflectionTableRegistry>();
         services.AddScoped<INumberSequenceService, NumberSequenceService>();
         services.AddScoped<IActivityService, ActivityService>();
@@ -58,6 +59,9 @@ public sealed class ServiceManagementTestHost : IDisposable
     /// <typeparam name="T">The service type.</typeparam>
     /// <returns>The service.</returns>
     public T Get<T>() where T : notnull => _scope.ServiceProvider.GetRequiredService<T>();
+
+    /// <summary>Gets the temporary application paths (catalog images are stored below them).</summary>
+    public Servora.Tests.Unit.Portal.PortalTestPaths Paths { get; } = new();
 
     /// <summary>Creates an active user.</summary>
     /// <param name="name">The display name.</param>
@@ -106,5 +110,6 @@ public sealed class ServiceManagementTestHost : IDisposable
         _scope.Dispose();
         _provider.Dispose();
         Database.Dispose();
+        Paths.Dispose();
     }
 }

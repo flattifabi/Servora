@@ -18,7 +18,10 @@ internal sealed class CatalogVariableConfiguration : IEntityTypeConfiguration<Ca
         builder.Property(v => v.DefaultValue).HasMaxLength(1000);
         builder.Property(v => v.MinValue).HasPrecision(18, 4);
         builder.Property(v => v.MaxValue).HasPrecision(18, 4);
+        builder.Property(v => v.PriceDelta).HasPrecision(18, 2);
         builder.HasIndex(v => new { v.CatalogItemId, v.Name }).IsUnique();
+        builder.HasIndex(v => v.SectionId);
+        builder.HasOne<CatalogSection>().WithMany().HasForeignKey(v => v.SectionId).OnDelete(DeleteBehavior.ClientSetNull);
         builder.HasOne<CatalogItem>().WithMany().HasForeignKey(v => v.CatalogItemId).OnDelete(DeleteBehavior.Cascade);
     }
 }
