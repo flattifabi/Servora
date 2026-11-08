@@ -18,6 +18,9 @@ public static class ApiKeyAuthenticationDefaults
     /// <summary>The <c>HttpContext.Items</c> key holding the authentication failure reason.</summary>
     public const string FailureItemKey = "servora:apikey-failure";
 
-    /// <summary>The cookie name of the interactive authentication (see Program.cs).</summary>
+    /// <summary>
+    /// The fallback cookie name of the interactive authentication. The host uses the instance-specific name of
+    /// <see cref="Security.InstanceCookieNames.Authentication"/> (this prefix plus a data-directory suffix).
+    /// </summary>
     public const string AuthCookieName = "servora.auth";
 }

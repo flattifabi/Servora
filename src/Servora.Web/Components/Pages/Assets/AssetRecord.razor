@@ -9,8 +9,7 @@
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>@(IsNew ? "New asset" : _detail?.Number ?? "Asset") · Assets · Servora</PageTitle>
-<ModuleStyles />
+<PageTitle>@(IsNew ? "New asset" : _detail?.Number ?? "Asset") · Assets · @Brand.ProductName</PageTitle>
 
 @if (_notFound)
 {

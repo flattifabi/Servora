@@ -68,6 +68,12 @@ restored automatically.
 5. The UI loads but shows "Attempting to reconnect" repeatedly: the reverse proxy does not forward WebSockets or closes
    idle connections too early – see [configuration.md](configuration.md#reverse-proxy).
 
+## Several instances on one machine
+
+Cookie names carry an instance suffix derived from the data directory (`servora.auth.<hash>`, `servora.af.<hash>`),
+so instances on different ports of the same host no longer sign each other out or fail form posts with HTTP 400.
+After upgrading to a version with this change every user signs in once more.
+
 ## Setup wizard
 
 | Symptom | Cause / fix |

@@ -1,19 +1,29 @@
 @* Sidebar navigation filtered by the effective permissions of the current user. *@
 @using Servora.Web.Navigation
+@using Servora.Application.Configuration
 @implements IDisposable
 @inject ICurrentUser CurrentUser
 @inject IPermissionService PermissionService
 @inject UiStateService Ui
 @inject IJSRuntime JS
+@inject IBrandingService BrandingService
+@inject BrandingState Branding
 
 <aside class="sidebar">
-    <div class="sidebar-brand">
-        <div class="brand-mark"><Icon Name="sparkles" Size="18" /></div>
+    <a class="sidebar-brand" href="/" title="@_branding.ProductName">
+        @if (_branding.LogoUrl is { } logo)
+        {
+            <img class="brand-logo" src="@logo" alt="" />
+        }
+        else
+        {
+            <div class="brand-mark"><Icon Name="sparkles" Size="18" /></div>
+        }
         <div class="brand-text">
-            <div class="brand-name">Servora</div>
-            <div class="brand-sub">Service Platform</div>
+            <div class="brand-name">@_branding.ProductName</div>
+            <div class="brand-sub">@(string.IsNullOrWhiteSpace(_branding.CompanyName) ? "Service Platform" : _branding.CompanyName)</div>
         </div>
-    </div>
+    </a>
 
     <div class="sidebar-search" @onclick="() => Ui.SetPaletteOpen(true)" title="Search (Ctrl+K)">
         <Icon Name="search" Size="16" />
@@ -33,7 +43,7 @@
                 <div class="nav-items">
                     @foreach (var entry in section.Entries)
                     {
-                        <NavLink class="nav-link" href="@entry.Route" Match="@(entry.Route == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)" title="@entry.Title">
+                        <NavLink class="nav-link" href="@entry.Route" Match="@(s_exactRoutes.Contains(entry.Route) ? NavLinkMatch.All : NavLinkMatch.Prefix)" title="@entry.Title">
                             <Icon Name="@entry.Icon" Size="18" />
                             <span>@entry.Title</span>
                         </NavLink>
@@ -56,13 +66,23 @@
 </aside>
 
 @code {
+    // Routes that are a prefix of another entry ("/", "/knowledge" vs "/knowledge/articles") only match exactly, so a
+    // single entry is highlighted.
+    private static readonly HashSet<string> s_exactRoutes = NavigationCatalog.AllEntries
+        .Select(e => e.Route)
+        .Where(route => route == "/" || NavigationCatalog.AllEntries.Any(other => other.Route.StartsWith(route + "/", StringComparison.OrdinalIgnoreCase)))
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     private readonly HashSet<string> _closedSections = [];
     private IReadOnlyList<NavSection> _sections = [];
+    private BrandingInfo _branding = BrandingInfo.Default;
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
         Ui.Changed += OnUiChanged;
+        _branding = Branding.Current;
+        _branding = await Branding.RefreshAsync(BrandingService);
         var granted = CurrentUser.UserId is { } userId
             ? await PermissionService.GetUserPermissionsAsync(userId)
             : new HashSet<string>();

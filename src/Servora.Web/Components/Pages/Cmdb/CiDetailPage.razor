@@ -9,8 +9,7 @@
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>@(IsNew ? "New configuration item" : _detail?.Values.Name ?? "Configuration item") · CMDB · Servora</PageTitle>
-<ModuleStyles />
+<PageTitle>@(IsNew ? "New configuration item" : _detail?.Values.Name ?? "Configuration item") · CMDB · @Brand.ProductName</PageTitle>
 
 @if (_notFound)
 {

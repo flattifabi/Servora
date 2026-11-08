@@ -9,7 +9,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 
-<PageTitle>@(IsNew ? "New problem" : _details?.Number ?? "Problem") · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New problem" : _details?.Number ?? "Problem") · @Brand.ProductName</PageTitle>
 
 @if (_notFound)
 {
@@ -232,6 +232,7 @@ else
                                 </FormField>
                             </div>
                         </div>
+                        <RecordCustomFields @ref="_customFields" Table="@TableNames.Problem" RecordId="Id" ReadOnly="ReadOnly" Changed="StateHasChanged" />
                     </fieldset>
 
                     @if (!IsNew && _details!.IsActive && _canWrite && IsDirty)
@@ -306,6 +307,7 @@ else
                 else
                 {
                     var d = _details!;
+                    <SlaTimersCard Table="@TableNames.Problem" RecordId="d.Id" />
                     <div class="card">
                         <div class="card-header"><h3><Icon Name="activity" Size="16" /> Impact</h3></div>
                         <div class="card-body">
@@ -434,7 +436,11 @@ else
 
     private bool ReadOnly => IsNew ? !_canCreate : !_canWrite || _details is null || !_details.IsActive;
 
-    private bool IsDirty => _input is not null && JsonSerializer.Serialize(_input) != _originalJson;
+    private bool IsDirty => IsInputDirty || _customFields?.IsDirty == true;
+
+    private bool IsInputDirty => _input is not null && JsonSerializer.Serialize(_input) != _originalJson;
+
+    private RecordCustomFields? _customFields;
 
     private Priority CalculatedPriority => _input is null ? Priority.Planning : PriorityMatrix.Calculate(_input.Impact, _input.Urgency);
 
@@ -499,6 +505,10 @@ else
         _details = result.Value!;
         _input = _details.Fields;
         _originalJson = JsonSerializer.Serialize(_input);
+        if (_customFields is not null)
+        {
+            await _customFields.ReloadAsync();
+        }
         _shortDescriptionError = null;
         _incidents = null;
         if (_tab == TabIncidents)
@@ -532,6 +542,7 @@ else
     {
         _input = JsonSerializer.Deserialize<ProblemInput>(_originalJson);
         _shortDescriptionError = null;
+        _customFields?.Discard();
     }
 
     private async Task SaveAsync()
@@ -547,6 +558,12 @@ else
             return;
         }
 
+        if (_customFields?.Validate() is { } customError)
+        {
+            Toasts.Error("Check the additional information", customError);
+            return;
+        }
+
         _saving = true;
         try
         {
@@ -555,12 +572,18 @@ else
                 var created = await ProblemService.CreateAsync(_input);
                 if (Toasts.FromResult(created, "Problem created"))
                 {
+                    await SaveCustomFieldsAsync(created.Value);
                     Nav.NavigateTo($"/problems/{created.Value}");
                 }
             }
             else
             {
-                var updated = await ProblemService.UpdateAsync(Id!.Value, _details!.Version, _input);
+                var updated = IsInputDirty ? await ProblemService.UpdateAsync(Id!.Value, _details!.Version, _input) : Result.Success();
+                if (updated.Succeeded)
+                {
+                    await SaveCustomFieldsAsync(Id!.Value);
+                }
+
                 if (Toasts.FromResult(updated, "Problem saved"))
                 {
                     await ReloadAsync();
@@ -570,6 +593,18 @@ else
         finally
         {
             _saving = false;
+        }
+    }
+
+    private async Task SaveCustomFieldsAsync(Guid id)
+    {
+        if (_customFields is not null)
+        {
+            var result = await _customFields.SaveAsync(id);
+            if (!result.Succeeded)
+            {
+                Toasts.Error("Additional information not saved", result.Error);
+            }
         }
     }
 

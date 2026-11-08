@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\Servora.Persistence.SqlServer\Servora.Persistence.SqlServer.csproj" />
     <ProjectReference Include="..\..\src\Servora.Persistence.PostgreSql\Servora.Persistence.PostgreSql.csproj" />
     <ProjectReference Include="..\..\src\Servora.Installer\Servora.Installer.csproj" />
+    <ProjectReference Include="..\..\src\Servora.Web\Servora.Web.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

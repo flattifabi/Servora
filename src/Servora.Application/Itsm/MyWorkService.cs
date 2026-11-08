@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Servora.Application.Approvals;
 using Servora.Application.Common;
 using Servora.Application.Directory;
 using Servora.Application.Security;
@@ -16,14 +17,15 @@ namespace Servora.Application.Itsm;
 /// filled when the user holds <c>incident.read</c> / <c>problem.read</c>.
 /// </summary>
 /// <remarks>
-/// The approvals contract (<c>IApprovalService</c>) does not expose a per-user pending count yet, so
-/// <see cref="MyWorkDashboard.PendingApprovals"/> is reported as <see langword="null"/> until it does.
+/// <see cref="MyWorkDashboard.PendingApprovals"/> comes from <see cref="IApprovalService.CountPendingForUserAsync"/>
+/// (direct and group approvals of the current user); it is <see langword="null"/> when no approvals engine is installed.
 /// </remarks>
 /// <param name="dbFactory">The database context factory.</param>
 /// <param name="currentUser">The current actor.</param>
 /// <param name="lookup">The directory lookup service.</param>
 /// <param name="clock">The clock.</param>
-public sealed class MyWorkService(IAppDbContextFactory dbFactory, ICurrentUser currentUser, IDirectoryLookupService lookup, IClock clock) : IMyWorkService
+/// <param name="approvals">The approvals service (pending approvals count).</param>
+public sealed class MyWorkService(IAppDbContextFactory dbFactory, ICurrentUser currentUser, IDirectoryLookupService lookup, IClock clock, IApprovalService approvals) : IMyWorkService
 {
     private const int TrendDays = 14;
     private const int MaxItems = 15;
@@ -105,6 +107,7 @@ public sealed class MyWorkService(IAppDbContextFactory dbFactory, ICurrentUser c
             p.AssignmentGroupId is { } g ? groupNames.GetValueOrDefault(g)?.Display : null, p.OpenedAt, p.UpdatedAt, $"/problems/{p.Id}")));
 
         var activity = await LoadActivityAsync(db, me, canIncidents, canProblems, cancellationToken);
+        var pendingApprovals = await approvals.CountPendingForUserAsync(me, cancellationToken);
         var labels = Enumerable.Range(0, TrendDays).Select(d => start.AddDays(d).ToString("dd MMM", CultureInfo.InvariantCulture)).ToList();
 
         return Result<MyWorkDashboard>.Success(new MyWorkDashboard
@@ -117,7 +120,7 @@ public sealed class MyWorkService(IAppDbContextFactory dbFactory, ICurrentUser c
             GroupCount = groupIds.Count,
             CriticalOpen = critical,
             MajorOpen = major,
-            PendingApprovals = null,
+            PendingApprovals = pendingApprovals,
             ResolvedByMeThisWeek = resolvedByMe,
             Items = items.OrderBy(i => i.Priority).ThenByDescending(i => i.UpdatedAt).Take(MaxItems).ToList(),
             RecentActivity = activity,

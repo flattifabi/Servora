@@ -120,7 +120,7 @@ subject and body with `${Field}` placeholders plus `${table}`, `${link}`, `${act
 
 Rendering (`NotificationRenderer` / `TemplateRenderer`) prefers display values, HTML-encodes every value, strips line
 breaks from subjects and wraps the body in a branded HTML layout (`EmailLayout`) with a link to the record
-(`Servora:Platform:PublicUrl` makes links absolute). Only exposed fields can be used. The studio offers a live
+(the "Public URL" system setting `general.base_url` – System settings › General – makes links absolute; `Servora:Platform:PublicUrl` is the fallback when the setting is empty). Only exposed fields can be used. The studio offers a live
 preview against the most recent record. A default template *Record notification* is seeded.
 
 **In-app inbox.** `INotificationInbox` exposes the current user's messages only. The `NotificationBell` component
@@ -170,7 +170,7 @@ Content-Type: application/json
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `PublicUrl` | – | Base URL for links in e-mails (`https://servora.example.com`). |
+| `PublicUrl` | – | Fallback base URL for links in e-mails (`https://servora.example.com`); the "Public URL" system setting (`general.base_url`) takes precedence. |
 | `SlaEvaluationIntervalSeconds` | 30 | Breach evaluation interval (minimum 5). |
 | `SlaBatchSize` | 200 | Timers per evaluation batch (at most 10 batches per run). |
 

@@ -9,7 +9,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Nav
 
-<PageTitle>@(IsNew ? "New incident" : _details?.Number ?? "Incident") · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New incident" : _details?.Number ?? "Incident") · @Brand.ProductName</PageTitle>
 
 @if (_notFound)
 {
@@ -246,6 +246,7 @@ else
                                 </FormField>
                             </div>
                         </div>
+                        <RecordCustomFields @ref="_customFields" Table="@TableNames.Incident" RecordId="Id" ReadOnly="ReadOnly" Changed="StateHasChanged" />
                     </fieldset>
 
                     @if (_details is { ResolutionCode: { } code })
@@ -496,7 +497,11 @@ else
 
     private bool ReadOnly => IsNew ? !_canCreate : !_canWrite || _details is null || !_details.IsActive;
 
-    private bool IsDirty => _input is not null && JsonSerializer.Serialize(_input) != _originalJson;
+    private bool IsDirty => IsInputDirty || _customFields?.IsDirty == true;
+
+    private bool IsInputDirty => _input is not null && JsonSerializer.Serialize(_input) != _originalJson;
+
+    private RecordCustomFields? _customFields;
 
     private Priority CalculatedPriority => _input is null ? Priority.Planning : PriorityMatrix.Calculate(_input.Impact, _input.Urgency);
 
@@ -568,6 +573,10 @@ else
         _details = result.Value!;
         _input = _details.Fields;
         _originalJson = JsonSerializer.Serialize(_input);
+        if (_customFields is not null)
+        {
+            await _customFields.ReloadAsync();
+        }
         _shortDescriptionError = null;
         _children = null;
         if (_tab == TabRelated)
@@ -599,6 +608,7 @@ else
     {
         _input = JsonSerializer.Deserialize<IncidentInput>(_originalJson);
         _shortDescriptionError = null;
+        _customFields?.Discard();
     }
 
     private async Task SaveAsync()
@@ -614,6 +624,12 @@ else
             return;
         }
 
+        if (_customFields?.Validate() is { } customError)
+        {
+            Toasts.Error("Check the additional information", customError);
+            return;
+        }
+
         _saving = true;
         try
         {
@@ -622,12 +638,18 @@ else
                 var created = await IncidentService.CreateAsync(_input);
                 if (Toasts.FromResult(created, "Incident created"))
                 {
+                    await SaveCustomFieldsAsync(created.Value);
                     Nav.NavigateTo($"/incidents/{created.Value}");
                 }
             }
             else
             {
-                var updated = await IncidentService.UpdateAsync(Id!.Value, _details!.Version, _input);
+                var updated = IsInputDirty ? await IncidentService.UpdateAsync(Id!.Value, _details!.Version, _input) : Result.Success();
+                if (updated.Succeeded)
+                {
+                    await SaveCustomFieldsAsync(Id!.Value);
+                }
+
                 if (Toasts.FromResult(updated, "Incident saved"))
                 {
                     await ReloadAsync();
@@ -637,6 +659,18 @@ else
         finally
         {
             _saving = false;
+        }
+    }
+
+    private async Task SaveCustomFieldsAsync(Guid id)
+    {
+        if (_customFields is not null)
+        {
+            var result = await _customFields.SaveAsync(id);
+            if (!result.Succeeded)
+            {
+                Toasts.Error("Additional information not saved", result.Error);
+            }
         }
     }
 

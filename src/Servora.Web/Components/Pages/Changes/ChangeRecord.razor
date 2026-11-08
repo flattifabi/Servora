@@ -7,7 +7,7 @@
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>@(IsNew ? "New change" : _detail?.Number ?? "Change") · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New change" : _detail?.Number ?? "Change") · @Brand.ProductName</PageTitle>
 
 @if (!IsNew && _detail is null)
 {
@@ -213,6 +213,8 @@ else
                         </div>
                     </div>
 
+                    <RecordCustomFields @ref="_customFields" Table="@TableNames.ChangeRequest" RecordId="Id" ReadOnly="!CanEditForm" />
+
                     @if (_detail is { CloseCode: { } closedWith } closedChange)
                     {
                         <div class="form-section">
@@ -271,6 +273,7 @@ else
         <div class="stack sticky-top" style="gap:16px">
             @if (_detail is { } facts)
             {
+                <SlaTimersCard Table="@TableNames.ChangeRequest" RecordId="facts.Id" />
                 <div class="card">
                     <div class="card-header"><h3><Icon Name="info" Size="16" /> Key facts</h3></div>
                     <div class="card-body">
@@ -440,6 +443,8 @@ else
 
     private bool IsNew => Id is null;
 
+    private RecordCustomFields? _customFields;
+
     private bool CanEditForm => IsNew ? _canCreate : _canWrite && _detail is { IsEditable: true };
 
     private IReadOnlyList<ChangeState> Progression => ChangeStateMachine.GetProgression(_detail?.Type ?? _model.Type);
@@ -480,6 +485,10 @@ else
 
         _detail = result.Value!;
         _model = ChangeEditModel.From(_detail);
+        if (_customFields is not null)
+        {
+            await _customFields.ReloadAsync();
+        }
         _previewConflicts = null;
         if (_approvals is not null && _tab == "approvals")
         {
@@ -489,6 +498,12 @@ else
 
     private async Task SaveAsync()
     {
+        if (_customFields?.Validate() is { } customError)
+        {
+            Toasts.Error("Check the additional information", customError);
+            return;
+        }
+
         _busy = true;
         try
         {
@@ -497,6 +512,7 @@ else
                 var created = await Changes.CreateAsync(_model);
                 if (Toasts.FromResult(created, "Change created"))
                 {
+                    await SaveCustomFieldsAsync(created.Value);
                     Nav.NavigateTo($"/changes/{created.Value}");
                 }
 
@@ -504,6 +520,11 @@ else
             }
 
             var result = await Changes.UpdateAsync(_detail!.Id, _model, _detail.Version);
+            if (result.Succeeded)
+            {
+                await SaveCustomFieldsAsync(_detail.Id);
+            }
+
             if (Toasts.FromResult(result, "Change saved"))
             {
                 await ReloadAsync();
@@ -512,6 +533,18 @@ else
         finally
         {
             _busy = false;
+        }
+    }
+
+    private async Task SaveCustomFieldsAsync(Guid id)
+    {
+        if (_customFields is not null)
+        {
+            var result = await _customFields.SaveAsync(id);
+            if (!result.Succeeded)
+            {
+                Toasts.Error("Additional information not saved", result.Error);
+            }
         }
     }
 

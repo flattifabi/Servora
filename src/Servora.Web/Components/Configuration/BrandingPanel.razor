@@ -1,6 +1,7 @@
 @* Branding editor: product name, company name, accent color and logo upload with live preview. *@
 @inject IBrandingService Branding
 @inject ToastService Toasts
+@inject Servora.Web.Services.BrandingState BrandingState
 
 <div class="grid grid-sidebar">
     <div class="card">
@@ -148,7 +149,8 @@
 
     private async Task LoadAsync()
     {
-        _branding = await Branding.GetAsync();
+        // Also refreshes the process-wide snapshot used for page titles, the navigation and the accent color.
+        _branding = await BrandingState.RefreshAsync(Branding);
         _productName = _branding.ProductName;
         _companyName = _branding.CompanyName;
         _accent = _branding.AccentColor;

@@ -1,5 +1,7 @@
+@inject InstanceCookieNames CookieNames
+@inject BrandingState Branding
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-theme-handover="@CookieNames.Theme">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,7 +9,19 @@
     <base href="/" />
     <script>
         (function () {
-            var p = localStorage.getItem("servora.theme") || "dark";
+            // After sign-in the server hands over the theme saved in the user's profile once (see UserThemeCookie).
+            var handover = document.documentElement.getAttribute("data-theme-handover");
+            if (handover) {
+                var match = document.cookie.split("; ").filter(function (c) { return c.indexOf(handover + "=") === 0; })[0];
+                var saved = match ? match.substring(handover.length + 1) : null;
+                if (saved === "dark" || saved === "light" || saved === "system") {
+                    try { localStorage.setItem("servora.theme", saved); } catch (e) { }
+                }
+                if (match) { document.cookie = handover + "=; Max-Age=0; path=/; SameSite=Lax"; }
+            }
+            var p = null;
+            try { p = localStorage.getItem("servora.theme"); } catch (e) { }
+            p = p || "dark";
             if (p === "system") { p = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; }
             document.documentElement.setAttribute("data-theme", p);
         })();
@@ -15,6 +29,11 @@
     <link rel="stylesheet" href="@Assets["css/servora.css"]" />
     <link rel="stylesheet" href="@Assets["Servora.styles.css"]" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    @if (Branding.CustomAccentColor is { } accent)
+    {
+        @* The accent is validated as #rrggbb by BrandingState before it is embedded. *@
+        <style>:root, [data-theme] { --primary: @accent; --primary-strong: @accent; --primary-soft: color-mix(in srgb, @accent 16%, transparent); }</style>
+    }
     <ImportMap />
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>

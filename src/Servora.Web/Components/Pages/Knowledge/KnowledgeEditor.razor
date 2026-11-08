@@ -8,8 +8,7 @@
 @inject ToastService Toasts
 @inject IJSRuntime JS
 
-<PageTitle>@(IsNew ? "New article" : $"Edit {_number}") · Knowledge · Servora</PageTitle>
-<ModuleStyles />
+<PageTitle>@(IsNew ? "New article" : $"Edit {_number}") · Knowledge · @Brand.ProductName</PageTitle>
 
 <PageHeader Title="@(IsNew ? "New knowledge article" : $"Edit {_number}")" Subtitle="Write in Markdown – the preview shows exactly what readers will see." Icon="edit">
     <Breadcrumbs>

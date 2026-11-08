@@ -1,13 +1,24 @@
 @* Layout for sign-in, password change and setup pages: aurora hero on the left, form panel on the right. *@
 @inherits LayoutComponentBase
+@using Servora.Application.Configuration
+@inject IBrandingService BrandingService
+@inject BrandingState Branding
+@inject IJSRuntime JS
 
 <div class="auth-shell">
     <section class="auth-hero">
         <div class="flex items-center gap-3">
-            <div class="brand-mark"><Icon Name="sparkles" Size="18" /></div>
+            @if (_branding.LogoUrl is { } logo)
+            {
+                <img class="brand-logo" src="@logo" alt="" />
+            }
+            else
+            {
+                <div class="brand-mark"><Icon Name="sparkles" Size="18" /></div>
+            }
             <div>
-                <div class="brand-name" style="color:#fff">Servora</div>
-                <div class="brand-sub" style="color:rgba(255,255,255,.55)">Service Platform</div>
+                <div class="brand-name" style="color:#fff">@_branding.ProductName</div>
+                <div class="brand-sub" style="color:rgba(255,255,255,.55)">@(string.IsNullOrWhiteSpace(_branding.CompanyName) ? "Service Platform" : _branding.CompanyName)</div>
             </div>
         </div>
         <div>
@@ -25,3 +36,32 @@
         @Body
     </section>
 </div>
+
+@code {
+    private BrandingInfo _branding = BrandingInfo.Default;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        // Works for static (sign-in) and interactive (setup) rendering; defaults are returned while no database exists.
+        _branding = Branding.Current;
+        _branding = await Branding.RefreshAsync(BrandingService);
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Only interactive pages (setup wizard) show the splash screen; static pages never run this method.
+        if (firstRender)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("servora.hideSplash");
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit closed before the first render completed.
+            }
+        }
+    }
+}

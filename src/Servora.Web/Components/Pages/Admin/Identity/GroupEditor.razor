@@ -8,7 +8,7 @@
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>@(IsNew ? "New group" : _detail?.Name ?? "Group") · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New group" : _detail?.Name ?? "Group") · @Brand.ProductName</PageTitle>
 
 @if (_loading)
 {

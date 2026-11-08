@@ -7,7 +7,7 @@
 @inject NavigationManager Nav
 @inject ToastService Toasts
 
-<PageTitle>New request · Servora</PageTitle>
+<PageTitle>New request · @Brand.ProductName</PageTitle>
 
 <PageHeader Title="@(_form is null ? "New request" : _form.Item.Name)" Subtitle="@(_form is null ? "Order a catalog item on behalf of an employee." : _form.Item.ShortDescription)" Icon="@(_form?.Item.Icon ?? "shopping-cart")">
     <Breadcrumbs>

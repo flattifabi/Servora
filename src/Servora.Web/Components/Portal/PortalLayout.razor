@@ -7,13 +7,14 @@
 @inject IApprovalInboxService ApprovalInbox
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject Servora.Web.Services.BrandingState Brand
 
 <div class="portal-shell">
     <header class="portal-header">
         <div class="portal-header-inner">
             <a class="portal-brand" href="/portal" aria-label="Self-Service Portal home">
                 <span class="portal-mark"><Icon Name="life-buoy" Size="18" /></span>
-                <span class="portal-brand-text">Servora <span class="portal-brand-sub">Self-Service</span></span>
+                <span class="portal-brand-text">@Brand.ProductName <span class="portal-brand-sub">Self-Service</span></span>
             </a>
 
             <nav class="portal-nav @(_menuOpen ? "open" : null)" aria-label="Portal navigation">
@@ -98,7 +99,7 @@
 
     <footer class="portal-footer">
         <div class="portal-footer-inner">
-            <span class="faint small">Servora Self-Service · Help when you need it</span>
+            <span class="faint small">@Brand.ProductName Self-Service · Help when you need it</span>
             <div class="flex gap-4 small">
                 <a href="/portal/knowledge">Knowledge</a>
                 <a href="/portal/catalog">Catalog</a>

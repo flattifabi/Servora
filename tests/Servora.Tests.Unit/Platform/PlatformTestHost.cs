@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Servora.Application.Activity;
 using Servora.Application.Automation;
 using Servora.Application.Common;
+using Servora.Application.Configuration;
 using Servora.Application.Directory;
 using Servora.Application.Events;
 using Servora.Application.Notifications;
@@ -68,6 +69,9 @@ public sealed class PlatformTestHost : IAsyncDisposable
         services.AddScoped<INumberSequenceService, NumberSequenceService>();
         services.AddScoped<IDirectoryLookupService, DirectoryLookupService>();
         services.AddScoped<IFlowExecutionService, UnavailableFlowExecutionService>();
+        services.AddMemoryCache();
+        services.AddSingleton<ISettingDefinitionProvider, CoreSettingDefinitionProvider>();
+        services.AddScoped<ISystemSettingsService, SystemSettingsService>();
         services.AddPlatformModule();
         services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<TestEmailSender>());
 

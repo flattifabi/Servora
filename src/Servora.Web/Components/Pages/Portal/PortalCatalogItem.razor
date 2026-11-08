@@ -5,7 +5,7 @@
 @inject ICatalogOrderService Catalog
 @inject ToastService Toasts
 
-<PageTitle>@(_form?.Item.Name ?? "Order") · Servora</PageTitle>
+<PageTitle>@(_form?.Item.Name ?? "Order") · @Brand.ProductName</PageTitle>
 
 <div class="portal-container">
     @if (_loading)

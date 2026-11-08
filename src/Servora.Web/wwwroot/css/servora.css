@@ -140,6 +140,8 @@ kbd { display: inline-flex; align-items: center; min-width: 20px; height: 20px; 
 
 .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--border); z-index: 40; }
 .sidebar-brand { display: flex; align-items: center; gap: 12px; height: var(--topbar-h); padding: 0 18px; border-bottom: 1px solid var(--border); }
+a.sidebar-brand { color: inherit; }
+.brand-logo { width: 34px; height: 34px; border-radius: 10px; object-fit: contain; flex-shrink: 0; background: var(--surface-2, transparent); }
 .brand-mark { width: 34px; height: 34px; border-radius: 10px; background: var(--gradient); display: grid; place-items: center; box-shadow: var(--glow); color: #fff; flex-shrink: 0; }
 .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
 .brand-sub { font-size: 11px; color: var(--text-faint); letter-spacing: .06em; text-transform: uppercase; }

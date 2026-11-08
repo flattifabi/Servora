@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using Servora.Application.Conditions;
+using Servora.Application.Configuration;
 using Servora.Application.Platform;
 using Servora.Application.Tables;
 
@@ -11,8 +12,9 @@ namespace Servora.Application.Notifications;
 /// built-in placeholders (<c>${table}</c>, <c>${link}</c>, <c>${actor}</c>, <c>${event}</c>) and HTML-encodes every value.
 /// </summary>
 /// <param name="lookup">The record look-up service (display values).</param>
-/// <param name="options">The platform options (public URL).</param>
-public sealed class NotificationRenderer(IRecordLookupService lookup, IOptions<PlatformOptions> options)
+/// <param name="options">The platform options (configured public URL, fallback).</param>
+/// <param name="settings">The system settings (the "Public URL" setting <c>general.base_url</c> takes precedence).</param>
+public sealed class NotificationRenderer(IRecordLookupService lookup, IOptions<PlatformOptions> options, ISystemSettingsService settings)
 {
     private const int MaxReferenceLookups = 30;
 
@@ -55,11 +57,23 @@ public sealed class NotificationRenderer(IRecordLookupService lookup, IOptions<P
 
         var relative = RecordUrls.For(table, recordId);
         result["table"] = table.Label;
-        result["link"] = RecordUrls.Absolute(options.Value.PublicUrl, relative);
+        result["link"] = RecordUrls.Absolute(await ResolvePublicUrlAsync(cancellationToken), relative);
         result["actor"] = actorName;
         result["event"] = eventName;
         result["sys_id"] = recordId.ToString();
         return result;
+    }
+
+    /// <summary>
+    /// Resolves the public base URL for absolute links: the "Public URL" system setting (<c>general.base_url</c>, edited
+    /// under System settings › General) when set, otherwise <c>Servora:Platform:PublicUrl</c> from the configuration.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The base URL or <see langword="null"/> when none is configured (links stay relative).</returns>
+    public async Task<string?> ResolvePublicUrlAsync(CancellationToken cancellationToken)
+    {
+        var configured = await settings.GetStringAsync(SystemSettingKeys.BaseUrl, cancellationToken);
+        return string.IsNullOrWhiteSpace(configured) ? options.Value.PublicUrl : configured.Trim();
     }
 
     /// <summary>Renders a notification.</summary>

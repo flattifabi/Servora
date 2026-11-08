@@ -10,7 +10,7 @@
 @inject ToastService Toasts
 @inject IJSRuntime JS
 
-<PageTitle>@(IsNew ? "New user" : _detail?.DisplayName ?? "User") · Servora</PageTitle>
+<PageTitle>@(IsNew ? "New user" : _detail?.DisplayName ?? "User") · @Brand.ProductName</PageTitle>
 
 @if (_loading)
 {

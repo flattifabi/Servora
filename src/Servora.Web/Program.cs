@@ -15,6 +15,7 @@ using Servora.Persistence.PostgreSql;
 using Servora.Persistence.Sqlite;
 using Servora.Persistence.SqlServer;
 using Servora.Web.Components;
+using Servora.Web.Api;
 using Servora.Web.Endpoints;
 using Servora.Web.Modules;
 using Servora.Web.Security;
@@ -84,13 +85,19 @@ builder.Services.AddScoped<AuthenticationStateProvider, RevalidatingAuthenticati
 builder.Services.AddScoped<CircuitHandler, UserCircuitHandler>();
 builder.Services.AddScoped<ToastService>();
 builder.Services.AddScoped<UiStateService>();
+builder.Services.AddSingleton<BrandingState>();
+
+// Cookie names carry an instance suffix so several instances on one host (different ports) do not clash.
+var cookieNames = new InstanceCookieNames(paths.DataDirectory);
+builder.Services.AddSingleton(cookieNames);
+builder.Services.AddAntiforgery(options => options.Cookie.Name = cookieNames.Antiforgery);
 
 // Authentication & authorization.
 builder.Services.AddScoped<SecurityStampValidator>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.Cookie.Name = "servora.auth";
+        options.Cookie.Name = cookieNames.Authentication;
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
@@ -114,28 +121,11 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
                 await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             }
         };
-        options.Events.OnRedirectToLogin = context =>
-        {
-            if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/mcp"))
-            {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                return Task.CompletedTask;
-            }
+        options.Events.OnSignedIn = UserThemeCookie.OnSignedInAsync;
 
-            context.Response.Redirect(context.RedirectUri);
-            return Task.CompletedTask;
-        };
-        options.Events.OnRedirectToAccessDenied = context =>
-        {
-            if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/mcp"))
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return Task.CompletedTask;
-            }
-
-            context.Response.Redirect(context.RedirectUri);
-            return Task.CompletedTask;
-        };
+        // API callers (also browser calls carrying the cookie) get problem details instead of HTML sign-in redirects.
+        options.Events.OnRedirectToLogin = ApiAwareCookieRedirects.RedirectToLoginAsync;
+        options.Events.OnRedirectToAccessDenied = ApiAwareCookieRedirects.RedirectToAccessDeniedAsync;
     });
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
@@ -155,7 +145,6 @@ builder.Services.AddHealthChecks();
 
 // Module host registrations (authentication schemes, logging providers, OpenAPI, ...).
 builder.AddServoraWebModules();
-builder.AddBackupWeb();
 
 var app = builder.Build();
 
@@ -172,13 +161,17 @@ if (backupCommand is not null)
     }
 }
 
+// API paths (/api, /mcp, /openapi) never get HTML: unhandled exceptions become problem details in
+// ApiCorrelationMiddleware and empty error responses get a problem body. Only UI paths re-execute the error / not-found
+// pages (re-executing a POST against a Razor component page also failed with "400 invalid content type").
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/error", createScopeForErrors: true);
+    app.UseWhen(context => !ApiProblemWriter.IsApiRequest(context), ui => ui.UseExceptionHandler("/error", createScopeForErrors: true));
 }
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseWhen(ApiProblemWriter.IsApiRequest, api => api.UseStatusCodePages(ApiProblemWriter.WriteStatusCodeAsync));
+app.UseWhen(context => !ApiProblemWriter.IsApiRequest(context), ui => ui.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 app.UseMiddleware<SetupGuardMiddleware>();
 app.UseRateLimiter();
 app.UseAuthentication();
@@ -197,6 +190,7 @@ if (databaseSettings.IsConfigured)
     // A restore requested in the UI or on the command line runs first, before migrations (ADR-015).
     await app.Services.GetRequiredService<PendingRestoreProcessor>().RunAsync();
     await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync();
+    await app.Services.GetRequiredService<BrandingState>().WarmUpAsync(app.Services);
 }
 else
 {

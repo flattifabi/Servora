@@ -60,6 +60,15 @@ uses the cookie. Challenges / forbids are answered with RFC 7807 problem details
 - **API Explorer** `/admin/api-docs` (`api.access`): reads the OpenAPI document, lists operations by tag with search,
   parameters, responses, curl snippets and a "try it" panel that calls the API with the user's own session.
 
+### Error responses of the API surface (T-13)
+
+`/api/**`, `/mcp` and `/openapi/**` never answer with HTML: cookie challenges (expired session), forbids, the forced
+password change (`403`, title *Password change required*), empty error statuses (404, 405, 503 during setup, …) and
+unhandled exceptions are returned as `application/problem+json` with the correlation id, independent of the `Accept`
+header (`ApiProblemWriter`, `ApiAwareCookieRedirects`). The UI keeps the HTML not-found / error pages. Previously an
+unauthenticated cookie `POST` was re-executed against the Razor "not found" page, which failed with *400 invalid
+content type*.
+
 ## MCP server (`POST /mcp`)
 
 - Transport: **Streamable HTTP**, JSON-RPC 2.0, single messages and batches (max 20), request body max 1 MB, JSON
@@ -144,6 +153,8 @@ atomically (a pending action can be executed at most once). Every step (delegati
 in `ai_tool_call` with agent, identity, status, duration and bounded arguments / results.
 
 ## AI Assistant (`/assistant`, permission `ai.assistant.use`)
+
+Default role grants for `api.access`, `mcp.access` and `ai.assistant.use` are documented in [identity.md](identity.md#built-in-roles-and-default-grants-t-13).
 
 Chat UI with conversation history (search, delete), suggestions, progressive rendering of answers, safe Markdown
 subset (bold, inline code, code blocks, lists, quotes, headings – everything HTML-encoded), tool-call cards showing

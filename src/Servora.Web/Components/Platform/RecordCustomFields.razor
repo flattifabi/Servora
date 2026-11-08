@@ -1,0 +1,133 @@
+@* Custom fields of a typed record form (incident, problem, change, ...): loads the administrator-defined field values
+   through the record service, edits them with CustomFieldsSection and saves only changed values through the record
+   service (table permissions, field validation, record events and the field index apply). Renders nothing when the
+   table has no custom fields. Usage: <RecordCustomFields @ref="_custom" Table="incident" RecordId="Id" Changed="StateHasChanged" />
+   then call Validate() before saving and SaveAsync(id) after the record itself was saved. *@
+@inject IRecordService Records
+@inject ITableRegistry Registry
+
+@if (_table is not null && _customFields.Count > 0)
+{
+    <CustomFieldsSection @ref="_section" TableName="@Table" Json="@_json" JsonChanged="OnJsonChangedAsync" ReadOnly="ReadOnly" Title="@Title" />
+}
+
+@code {
+    private TableDefinition? _table;
+    private List<FieldDefinition> _customFields = [];
+    private CustomFieldsSection? _section;
+    private string? _json;
+    private string? _originalJson;
+    private string? _loadedKey;
+
+    /// <summary>Gets or sets the technical name of the typed table.</summary>
+    [Parameter, EditorRequired] public string Table { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the record identifier (<see langword="null"/> for a new record).</summary>
+    [Parameter] public Guid? RecordId { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the fields are read only.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Gets or sets the section title.</summary>
+    [Parameter] public string Title { get; set; } = "Additional information";
+
+    /// <summary>Raised after a value changed (the parent re-evaluates its dirty state).</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    /// <summary>Gets a value indicating whether custom field values were changed since loading.</summary>
+    public bool IsDirty => _customFields.Count > 0 && !string.Equals(_json ?? string.Empty, _originalJson ?? string.Empty, StringComparison.Ordinal);
+
+    /// <summary>Validates mandatory fields and entered values.</summary>
+    /// <returns>A user-safe error message or <see langword="null"/> when valid.</returns>
+    public string? Validate() => _section is null || ReadOnly ? null : _section.Validate();
+
+    /// <summary>Reverts unsaved changes.</summary>
+    public void Discard()
+    {
+        _json = _originalJson;
+        StateHasChanged();
+    }
+
+    /// <summary>Saves the changed custom field values of a record (no-op when nothing changed).</summary>
+    /// <param name="recordId">The identifier of the saved record (the new identifier after a create).</param>
+    /// <returns>The result.</returns>
+    public async Task<Result> SaveAsync(Guid recordId)
+    {
+        if (_table is null || !IsDirty || ReadOnly)
+        {
+            return Result.Success();
+        }
+
+        var current = RecordEntityAccessor.ParseObject(_json);
+        var original = RecordEntityAccessor.ParseObject(_originalJson);
+        var changes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in _customFields)
+        {
+            var value = RecordEntityAccessor.ToCanonical(field, current.GetValueOrDefault(field.Name));
+            var before = RecordEntityAccessor.ToCanonical(field, original.GetValueOrDefault(field.Name));
+            if (!Equals(value, before))
+            {
+                changes[field.Name] = value;
+            }
+        }
+
+        if (changes.Count == 0)
+        {
+            return Result.Success();
+        }
+
+        var result = await Records.UpdateAsync(_table.Name, recordId, changes);
+        if (result.Succeeded)
+        {
+            _originalJson = _json;
+        }
+
+        return result;
+    }
+
+    /// <summary>Reloads the stored values (for example after the record was saved or reloaded).</summary>
+    /// <returns>A task that completes when the values are loaded.</returns>
+    public async Task ReloadAsync()
+    {
+        _loadedKey = null;
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    /// <inheritdoc />
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var key = $"{Table}|{RecordId}";
+        if (key == _loadedKey)
+        {
+            return;
+        }
+
+        _loadedKey = key;
+        _table = await Registry.GetTableAsync(Table);
+        _customFields = _table?.Fields.Where(f => f.IsCustom).ToList() ?? [];
+        string? json = null;
+        if (_customFields.Count > 0 && RecordId is { } id)
+        {
+            var record = await Records.GetAsync(Table, id);
+            if (record.Succeeded)
+            {
+                foreach (var field in _customFields)
+                {
+                    json = RecordEntityAccessor.SetJsonValue(json, field.Name, RecordEntityAccessor.ToCanonical(field, record.Value!.GetValueOrDefault(field.Name)));
+                }
+            }
+        }
+
+        _json = json;
+        _originalJson = json;
+    }
+
+    private async Task OnJsonChangedAsync(string? json)
+    {
+        _json = json;
+        await Changed.InvokeAsync();
+    }
+}
