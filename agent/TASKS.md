@@ -42,6 +42,8 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ✅ Done |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏸ Paused |
+| D-1 | Design system redesign (light forest-green look from product owner references, brand-derived tokens, shell, sign-in) | UI Agent | T-13 | 🔨 In Progress |
+| P-1 | Self-service portal + catalog redesign (home, item configuration with live price summary, portal settings, catalog model + migration) | UI Agent | T-13 | 🔨 In Progress |
 | T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | ✅ Done |
 
 Dependency graph:
@@ -670,3 +672,4 @@ build green, tests pass.
 | 2026-11-08 | T-13 started: T-13a migrations and T-13b cross-module integration in parallel. |
 | 2026-11-08 | T-13 validated and merged (✅); PostgreSQL real-server verification open. |
 | 2026-11-08 | T-14 started (4 read-only reviews) and paused on product owner request; no findings recorded yet. |
+| 2026-11-08 | D-1 and P-1 started in parallel (product owner: redesign to match reference images; colour, logo etc. stay configurable in the admin centre). |
