@@ -42,8 +42,8 @@ Status legend: ⏳ Planned · 🔨 In Progress · 📨 Submitted · 🔍 In Revi
 | T-12 | Windows service installer, GitHub release workflow, operations docs | DevOps Agent | T-01 | ✅ Done |
 | T-13 | Integration: merge, provider migrations, cross-module wiring, end-to-end verification | Orchestrator | T-02 … T-12 | ✅ Done |
 | T-14 | Security & architecture review (spec §14.2 gates) and fixes | Review Agent | T-13 | ⏸ Paused |
-| D-1 | Design system redesign (light forest-green look from product owner references, brand-derived tokens, shell, sign-in) | UI Agent | T-13 | 🔨 In Progress |
-| P-1 | Self-service portal + catalog redesign (home, item configuration with live price summary, portal settings, catalog model + migration) | UI Agent | T-13 | 🔨 In Progress |
+| D-1 | Design system redesign (light forest-green look from product owner references, brand-derived tokens, shell, sign-in) | UI Agent | T-13 | ✅ Done |
+| P-1 | Self-service portal + catalog redesign (home, item configuration with live price summary, portal settings, catalog model + migration) | UI Agent | T-13 | ✅ Done |
 | T-15 | Backup & restore (scheduled, retention, roll back), automatic migrations hardening | Backup Agent | T-01 | ✅ Done |
 
 Dependency graph:
@@ -595,6 +595,22 @@ the running app.
 - Existing development databases created with `EnsureCreated` no longer start (delete or baseline, see `upgrade.md`).
 - Every user signs in once after the upgrade (new cookie names).
 
+## D-1 Design system redesign ✅ / P-1 Portal & catalog redesign ✅
+
+**Result (validated by orchestrator; merges `d3418a9` D-1, `61f86e6` P-1):** light forest-green design from the product
+owner's reference images; all colours derive from the configurable brand colour (`--primary`, `color-mix`/`oklch`),
+legacy default accent `#7c6cff` maps to the new default `#1b4535`, dark theme optional. Portal shell, home and catalog
+item configuration page rebuilt to the references (live price summary, server-side price calculation on order),
+portal settings page (`/portal/admin/settings`, `portal.manage`), catalog model extensions + sections + favourites +
+item images with migration `AddCatalogPortalExperience` (all providers), showcase catalog seed.
+**Evidence:** merged main build 0/0, 1450 tests passed; screenshots of sign-in, My Work, incident list (D-1 build) and
+portal home + business laptop page (merged build) match the references; the product owner's dev instance was upgraded
+automatically (pre-migration backup, then `AddCatalogPortalExperience` applied).
+**Open follow-ups:** no stock photos (SVG/icon placeholders until images are uploaded); UI copy in English (German
+localization would be a separate task); no separate header-colour setting; "save as draft" not available; header
+open-items badge refreshes on navigation; portal settings use a narrow elevation to `admin.settings.manage` (review in
+T-14); `Pages/Catalog/*` agent-side builder pages still use `#fff` on primary (weak contrast in dark theme).
+
 ## T-14 Security & Architecture Review ⏸
 
 Review against spec §14.2 gates and ORCHESTRATION.md §4; fix critical findings; record residual risks.
@@ -673,3 +689,4 @@ build green, tests pass.
 | 2026-11-08 | T-13 validated and merged (✅); PostgreSQL real-server verification open. |
 | 2026-11-08 | T-14 started (4 read-only reviews) and paused on product owner request; no findings recorded yet. |
 | 2026-11-08 | D-1 and P-1 started in parallel (product owner: redesign to match reference images; colour, logo etc. stay configurable in the admin centre). |
+| 2026-11-08 | D-1 and P-1 validated and merged (✅). |
