@@ -9,7 +9,7 @@
     --p-on-primary: var(--primary-contrast, #fff);
     --p-ink: var(--brand-ink, color-mix(in srgb, var(--primary, #1b4535) 86%, #000));
     --p-tint: var(--surface-tint, color-mix(in srgb, var(--primary, #1b4535) 7%, var(--surface, #fff)));
-    --p-tint-strong: color-mix(in srgb, var(--primary, #1b4535) 13%, var(--surface, #fff));
+    --p-tint-strong: color-mix(in srgb, var(--primary, #1b4535) 4%, #eef0ee);
     --p-soft: var(--primary-soft, color-mix(in srgb, var(--primary, #1b4535) 10%, var(--surface, #fff)));
     --p-surface: var(--surface, #fff);
     --p-surface-2: var(--surface-2, #f6f8f7);
